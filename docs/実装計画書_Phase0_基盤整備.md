@@ -46,15 +46,15 @@ Phase 1 以降（IMAPコア / 検索 / GUI / 切断対応 / PSTアーカイブ�
 | F-2 | ドメイン例外階層が定義され、`infrastructure` 層の生の例外（`OSError` / `sqlite3.Error`）が上位へ漏れないこと | 2.3 / 5.7.1-2a |
 | F-3 | アプリ全般ログを `{config_dir}/logs/app.log` に `RotatingFileHandler`（5MB × 5世代）で出力し、**本文を出力せず**、件名は先頭20文字、メールアドレスはマスクすること | 5.5 |
 | F-4 | ログ出力先を `{storage_root}/logs/` から `{config_dir}/logs/` へ切り替えるAPIが存在すること（切断時に内蔵ディスクへ退避するため） | 5.7.1-3-5 |
-| F-5 | 設定を `platformdirs` 配下のJSONで原子的に読み書きし、未知キーを保持し、`schema_version` の前方非互換を検出できること | 5.11 / D-7 |
+| F-5 | 設定を `platformdirs` 配下のJSONで原子的に読み書きし、未知キーを設定オブジェクト内で保持し、値の型・範囲・列挙値を検証し、`schema_version` の前方非互換を検出できること | 5.11 / D-7 |
 | F-6 | ストレージルートの同定を **`.maildock_root` のUUID照合**で行い、`OK` / `MISSING` / `FOREIGN` の3値を返すこと。パスの存在のみを同定根拠にしないこと | 2.4-3 / 2.4-10 |
 | F-7 | 設定の候補パスリストを順に照合し、**ドライブレター変更に自動追従**できること | 2.4-3 |
 | F-8 | ルート配下に `eml/` `manifests/imap/` `manifests/pst/` `tmp/` `logs/` を作成できること（`tmp/` は必ずルート配下＝EMLと同一ボリューム） | 2.4-9 |
 | F-9 | 空き容量を確認し、残20GB未満で警告、5GB未満で `InsufficientSpaceError` を送出すること | 2.4-5 |
 | F-10 | ネットワークドライブを判定し、その場合 `journal_mode` を `DELETE` へフォールバックできること | 2.4-4 / 3.6 |
 | F-11 | `.lock` による多重起動防止と、**ハートビート鮮度によるスタールロック回収**が動作すること | 3.6 |
-| F-12 | DB接続時に開発計画書3.6のPRAGMAをすべて適用し、接続をスレッド間で共有せず（`threading.local()`）、全接続を一括クローズできること | 3.6 / 5.7.1-1 |
-| F-13 | `PRAGMA user_version` によるマイグレーションが動作し、適用前に自動バックアップを取り、DBが新しすぎる場合は拒否すること | 3.6 |
+| F-12 | DB接続時に開発計画書3.6のPRAGMAを適用し、接続をスレッド間で共有せず（`threading.local()`）、所有スレッドで協調的に全接続をクローズできること | 3.6 / 5.7.1-1 |
+| F-13 | `PRAGMA user_version` による原子的なマイグレーションが動作し、未適用がある既存DB（非空v0を含む）の適用前に自動バックアップを取り、DBが新しすぎる場合は拒否すること | 3.6 |
 | F-14 | `001_init.sql` により開発計画書3.1〜3.5（PST以外）＋ `app_state` のスキーマが構築され、FTS5の3トリガーが機能すること | 3.1〜3.5 / 5.7.1-4-4 |
 | F-15 | `ruff` / `mypy strict` / `pytest` がローカルとCIの両方で実行でき、Docker必須テストがマーカーで分離されていること | 5.9 / 5.10 / D-3 |
 
@@ -200,9 +200,11 @@ MailDockError
 
 - [ ] `load() -> AppConfig` を実装する（ファイル不在時は既定値を返す）
 - [ ] `save(config: AppConfig) -> None` を**原子的に**実装する（同一ディレクトリの一時ファイルへ書き込み → `flush` + `os.fsync` → `os.replace`）
-- [ ] **未知キーを保持して書き戻す**仕組みを実装する（将来版が書いた設定を破壊しないため）
+- [ ] `AppConfig` に未知キーを保持する `extra` フィールドを持たせ、モジュールグローバルへ退避せずに**未知キーを保持して書き戻す**仕組みを実装する（将来版が書いた設定を破壊しないため）
 - [ ] `schema_version` が現行より新しい場合 `ConfigVersionTooNewError` を送出する
 - [ ] `schema_version` が古い場合のアップグレード関数チェーンの枠を用意する（Phase 0 は v1 のみ）
+- [ ] JSONの構文・ルート型・既知キーの型・負数・許可されないモード値を検証し、`ConfigError` として報告する（不正な設定を既定値へ黙ってフォールバックしない）
+- [ ] `heartbeat_interval_sec` は `0` 以下を拒否し、正本の既定値である5秒に統一する
 - [ ] モジュール docstring に「**設定の読み書きのみを担当し、オブジェクト生成（DI）は行わない**」（開発計画書2.2）と明記する
 
 #### **B-4. `infrastructure/storage/detach.py` — I/O例外の分類（開発計画書5.7.1-2a）**
@@ -224,7 +226,9 @@ MailDockError
 - [ ] `class RootProbe(StrEnum)` に `OK` / `MISSING` / `FOREIGN` を定義する
 - [ ] `initialize_root(path: Path) -> RootMarker` を実装する（既存マーカーがあれば読み込み、無ければ生成して fsync する）
 - [ ] `probe(path: Path, expected_uuid: str | None) -> RootProbe` を実装する
-- [ ] `resolve_root(candidates: Sequence[Path], expected_uuid: str | None) -> Path | None` を実装する（候補を順に照合し、**ドライブレター変更に自動追従**する）
+- [ ] `RootResolution(path: Path | None, probe: RootProbe)` の結果型を定義し、`resolve_root(candidates: Sequence[Path], expected_uuid: str | None) -> RootResolution` を実装する（候補を順に照合し、**ドライブレター変更に自動追従**する）
+- [ ] `resolve_root()` はプローブ専用として書き込みを行わず、指定パスにマーカーがない初回だけコンポジションルートから明示的に `initialize_root()` を呼ぶ
+- [ ] 候補の正規化・重複排除・成功候補の先頭移動を定義し、一致候補がない場合に `FOREIGN` を `MISSING` より優先して返す
 - [ ] `FOREIGN` を `MISSING` より危険として扱う旨をコメントで明記する（別デバイスへの書き込み事故防止：開発計画書2.4-10）
 
 **レイアウトと空き容量**
@@ -241,7 +245,7 @@ MailDockError
   - [ ] **ロック用ファイルと情報ファイルを分離する**: `.lock`（0バイト・排他ロック専用）と `.lock.meta.json`（`{pid, instance_uuid, machine_id, heartbeat_at}`）
         ※ `msvcrt.locking` は現在位置から N バイトをロックするため、同一ファイルへJSONを書くとロック範囲と衝突する
   - [ ] Windows は `msvcrt.locking(fd, LK_NBLCK, 1)`、POSIX は `fcntl.flock(LOCK_EX | LOCK_NB)` を用いる（WSLテスト用）
-  - [ ] `touch_heartbeat() -> None` を実装する（10秒周期での駆動は Phase 3 のUI側。Phase 0 はAPIのみ）
+  - [ ] `touch_heartbeat() -> None` を実装する（駆動はPhase 3のUI側。Phase 0はAPIのみ）。ロックメタ情報の間隔は `heartbeat_interval_sec=5` と統一する
   - [ ] スタール判定を実装する（開発計画書3.6の表）
         ロック取得不可 → `StorageLockedError` /
         取得可かつ `heartbeat_at` が新しい → 短時間リトライ後に中止 /
@@ -257,12 +261,14 @@ MailDockError
 - [ ] `connect(db_path: Path, *, readonly: bool = False, network_drive: bool = False) -> sqlite3.Connection` を実装する
   - [ ] 開発計画書3.6のPRAGMAをすべて適用する（`journal_mode=WAL` / `synchronous=NORMAL` / `foreign_keys=ON` / `busy_timeout=10000` / `temp_store=MEMORY` / `cache_size=-64000`）
   - [ ] `network_drive=True` のとき `journal_mode` を **`DELETE` へフォールバック**する
+  - [ ] `readonly=True` のときSQLite URIの `mode=ro` と `PRAGMA query_only=ON` を使い、`journal_mode` の変更・マイグレーション・チェックポイントを実行しない（DBファイルを新規作成しない）
   - [ ] `foreign_keys=ON` は**接続ごとに必須**である旨をコメントで明記する
 - [ ] `class ConnectionManager` を実装する
   - [ ] `threading.local()` でスレッドローカル接続を保持する
-  - [ ] 生成した全接続を追跡し、`close_all()` で漏れなく閉じられるようにする（「安全な取り外し」の前提：開発計画書5.7.1-1）
+  - [ ] 生成した接続の所有スレッドを追跡し、各所有スレッドが `close_current_thread()` を呼ぶ協調停止プロトコルを実装する
+  - [ ] `request_close_all()` で新規接続を停止し、ワーカーの終了とjoin後に `assert_all_closed()` で漏れを検出する。別スレッドの接続を直接 `close()` してはならない
 - [ ] すべての `sqlite3.Error` を `detach.classify_sqlite_error` 経由で送出する
-- [ ] `checkpoint_truncate(conn)` を実装する（`PRAGMA wal_checkpoint(TRUNCATE)`。定期実行は Phase 1、終了時実行は Phase 4）
+- [ ] `checkpoint_truncate(conn)` を実装する（書き込み接続のみで `PRAGMA wal_checkpoint(TRUNCATE)`。定期実行は Phase 1、終了時実行は Phase 4）
 - [ ] モジュール docstring に「**接続をスレッド間で共有しない / `check_same_thread=False` を使わない / 書き込みは単一ライターに集約する**」方針を明記する
 
 #### **C-2. `infrastructure/database/migrator.py`**
@@ -271,10 +277,12 @@ MailDockError
 - [ ] `current_version(conn) -> int` を実装する（`PRAGMA user_version`）
 - [ ] `migrate(conn, db_path) -> int` を実装する
   - [ ] `user_version` が最新マイグレーション番号より大きい場合 `SchemaVersionTooNewError` を送出する
-  - [ ] 未適用があり、かつ既存DB（`user_version > 0`）の場合、`Connection.backup()` で `metadata.db.bak.{current_version}` を作成する
-  - [ ] マイグレーション中は `PRAGMA foreign_keys=OFF` とする
-  - [ ] 各SQLを `BEGIN IMMEDIATE` 内で `executescript` し、`PRAGMA user_version = N` を設定して `COMMIT` する
-  - [ ] 完了後に `PRAGMA foreign_keys=ON` と `PRAGMA foreign_key_check` を実行する
+  - [ ] 未適用があり、かつ既存DBが非空の場合、`Connection.backup()` で `metadata.db.bak.{current_version}` を作成する。`user_version=0` の非空v0 DBも対象とし、新規作成直後の空DBは対象外とする
+  - [ ] バックアップ先を黙って上書きせず、同名がある場合はUTC時刻または連番で退避する。バックアップ後に `PRAGMA integrity_check` を実行して成功を確認する
+  - [ ] マイグレーション中はトランザクション開始前に `PRAGMA foreign_keys=OFF` とする
+  - [ ] 各SQLを1ファイル1トランザクションで適用する。`BEGIN IMMEDIATE;`、SQL本文、`PRAGMA user_version = N;`、`COMMIT;` を1つのスクリプトとして `executescript()` に渡し、失敗時は `ROLLBACK` する
+  - [ ] SQLファイル内の `BEGIN` / `COMMIT` / `ROLLBACK` / `PRAGMA user_version` を禁止し、採番とトランザクション境界をmigratorへ一元化する
+  - [ ] 成功・失敗を問わず `PRAGMA foreign_keys=ON` へ戻し、完了後に `PRAGMA foreign_key_check` を実行する。違反行があれば `MigrationError` とする
 - [ ] **`user_version` はSQLファイルに書かず、ファイル名の番号から migrator が設定する**（採番の一元管理）
 - [ ] Phase 5 で `messages.folder_id` を `message_folders` 中間テーブルへ移行する想定をコメントで残す（開発計画書3.6）
 
@@ -307,15 +315,17 @@ DDLは開発計画書の記述をそのまま使用する。
 - [ ] 起動シーケンスを実装する
   1. [ ] `config.load()`
   2. [ ] `setup_logging(config_dir, debug=...)`
-  3. [ ] `resolve_root(candidates, expected_uuid)`（`--storage-root` 指定時は初期化を含む）
-  4. [ ] `probe` 結果が `FOREIGN` の場合、**書き込みを一切行わずに** `StorageForeignRootError` で中止する
+  3. [ ] `--storage-root` 指定時はプローブ後、マーカーがない場合だけ `initialize_root()` を明示的に実行し、再読込したUUIDを期待値と照合する。候補探索時は `resolve_root()` の結果型を利用する
+  4. [ ] `FOREIGN` の場合、**対象ルートへ一切書き込みを行わずに** `StorageForeignRootError` で中止する
   5. [ ] `StorageLock` の取得
   6. [ ] `ensure_layout(root)` と `check_free_space(root)`
   7. [ ] `set_storage_log_target(root / "logs")`
   8. [ ] `connect(root / "metadata.db", network_drive=...)` → `migrate()`
-  9. [ ] 終了処理（`close_all()` → ログハンドラ解放 → ロック解放）
+  9. [ ] 起動成功後に `storage_root_uuid` と正規化した候補パスを設定へ原子的に保存する
+  10. [ ] 終了処理（新規接続停止 → ワーカーへキャンセル通知 → 各所有スレッドで接続close → join → `assert_all_closed()` → ストレージログ解除 → ロック解放）
 - [ ] **DI組み立てをこのファイルに集約**し、他モジュールでオブジェクト生成をしないことを確認する（開発計画書2.2）
 - [ ] 例外を捕捉して終了コードを分ける（正常:0 / 設定・ルート異常:2 / ロック競合:3 / DB異常:4）
+- [ ] `verify` は書き込みを伴うマイグレーションを行わず、読み取り専用接続で `quick_check` / `foreign_key_check` を実行する。`migrate` は書き込み接続を使用する
 
 ---
 
@@ -329,21 +339,25 @@ DDLは開発計画書の記述をそのまま使用する。
   - [ ] `docker` マーカーの自動skip: 環境変数 `MAILDOCK_DOCKER=1` が無ければ skip する
 - [ ] 単体テスト（`tests/unit/`）を作成する
   - [ ] `test_config.py`: 往復・未知キー保持・原子的書き込み（書き込み途中で落ちても旧ファイルが壊れない）・`ConfigVersionTooNewError`
+  - [ ] `test_config.py`: JSON構文・型・範囲・列挙値の検証、`heartbeat_interval_sec=0` の拒否
   - [ ] `test_logging.py`: メールアドレス／パスワードのマスキング、`mask_subject` の20文字打ち切り、`set_storage_log_target(None)` でハンドラが確実に外れること
   - [ ] `test_detach.py`: 各 winerror / POSIX errno / SQLite errorname が `StorageDetachedError` へ分類されること、無関係な `OSError` が素通しされること
   - [ ] `test_storage_root.py`: `OK` / `MISSING` / `FOREIGN` の3値、候補リストによるドライブレター追従、`ensure_layout`、空き容量閾値
-  - [ ] `test_lock.py`: 2重取得で `StorageLockedError`、stale heartbeat の回収、`.lock` が残存していても起動できること
+  - [ ] `test_lock.py`: 2重取得で `StorageLockedError`、stale heartbeat の回収、正常解放後のファイル削除、`.lock` が残存していてもOSロック取得可なら起動できること
+  - [ ] `test_connection.py`: readonly接続がDBを新規作成せず、journal modeを変更せず、ワーカースレッドが自身の接続を閉じた後に `assert_all_closed()` が成功すること
 - [ ] 結合テスト（`tests/integration/`）を作成する
-  - [ ] `test_migrator.py`: 空DB→`user_version=1`、`PRAGMA integrity_check`、冪等な再実行、`.bak.{version}` 生成、version too new の拒否
+  - [ ] `test_migrator.py`: 空v0 DB→`user_version=1`、非空v0 DB→`.bak.0` 生成、`PRAGMA integrity_check`、冪等な再実行、テスト用v2適用前のバックアップ、version too new の拒否
+  - [ ] `test_migrator.py`: 途中失敗時にDDLと `user_version` が更新されず、`foreign_keys` がONへ復帰すること
   - [ ] `test_fts_triggers.py`: `message_contents` への insert→FTS検索ヒット→update→delete→ヒットしないこと（3.4の3トリガー検証）
 - [ ] `tests/fixtures/eml/` と `tests/support/` に **README のみ**を置く（EMLコーパスとimaplibモックの作り込みは Phase 1。`BaseMailFetcher` の設計に引きずられないため）
 
 #### **D-2. Dockerテスト環境（WSL/Linux 専用）**
 
-- [ ] `tests/docker/compose.yaml` を作成する（GreenMail standalone、IMAP 3143 / IMAPS 3993、`GREENMAIL_OPTS` でテストユーザーを作成）
+- [ ] `tests/docker/compose.yaml` を作成する（GreenMail standalone、IMAP 3143 / IMAPS 3993、`GREENMAIL_OPTS` でテストユーザーを作成）。healthcheckでIMAPポートの受付を確認する
 - [ ] `tests/integration/test_imap_smoke.py` を作成する（`@pytest.mark.docker`）
-  - [ ] `imaplib.IMAP4_SSL` で LOGIN できること
+  - [ ] `imaplib.IMAP4_SSL` で、総待機時間に上限を設けた接続リトライ後にLOGINできること
   - [ ] `LIST` が応答すること
+  - [ ] テスト用自己署名証明書を使う場合は専用SSLコンテキストで検証し、本番コードの証明書検証無効化設定と共有しないこと
   - [ ] ※ UIDVALIDITY変化・フォルダ移動・接続切断の検証は Phase 1
 - [ ] `README.md` にWSL手順を記載する（`docker compose -f tests/docker/compose.yaml up -d` → `MAILDOCK_DOCKER=1 uv run pytest -m docker`）
 - [ ] Windowsでの既定実行が `uv run pytest -m "not docker"` であることをREADMEに明記する
@@ -354,7 +368,7 @@ DDLは開発計画書の記述をそのまま使用する。
 - [ ] 共通ステップを定義する（`astral-sh/setup-uv`（キャッシュ有効）→ `uv sync --frozen`）
 - [ ] ジョブ `lint`（windows-latest）: `uv run ruff format --check .` / `uv run ruff check .` / `uv run mypy`
 - [ ] ジョブ `test-windows`（windows-latest）: `uv run pytest -m "not docker" --cov=mail_dock`
-- [ ] ジョブ `test-linux`（ubuntu-latest）: GreenMail を `services:` で起動し `MAILDOCK_DOCKER=1 uv run pytest -m docker`
+- [ ] ジョブ `test-linux`（ubuntu-latest）: GreenMail をhealthcheck付きの `services:` で起動し `MAILDOCK_DOCKER=1 uv run pytest -m docker`
 - [ ] `concurrency` を設定して同一ブランチの重複実行をキャンセルする
 - [ ] トリガーを `push`（main）と `pull_request` に設定する
 - [ ] ※ Phase 0 時点では PySide6 依存のテストが無いため、Linux側の Xvfb 設定は不要
@@ -409,11 +423,11 @@ DDLは開発計画書の記述をそのまま使用する。
 
 - [ ] V-1. `uv sync` → `uv run ruff format --check .` → `uv run ruff check .` → `uv run mypy` がすべて成功する
 - [ ] V-2. `uv run pytest -m "not docker"` が Windows で全緑になる（基盤モジュールのカバレッジ80%目安）
-- [ ] V-3. `uv run mail-dock --storage-root <一時ディレクトリ>` を実行し、`.maildock_root` / `.lock` / `eml,manifests,tmp,logs` が生成され、`metadata.db` の `user_version` が 1 になる
+- [ ] V-3. `uv run mail-dock --storage-root <一時ディレクトリ>` を実行し、`.maildock_root` / `eml,manifests,tmp,logs` が生成され、設定へUUIDと候補パスが保存され、`metadata.db` の `user_version` が 1 になる。正常終了後に `.lock` / `.lock.meta.json` が残っていないことも確認する
 - [ ] V-4. 生成された `metadata.db` に対し `PRAGMA integrity_check` と `PRAGMA foreign_key_check` が OK を返し、`PRAGMA journal_mode` が `wal` である
 - [ ] V-5. FTSトリガー往復テスト: `message_contents` に日本語本文を挿入し、`messages_fts MATCH` で3文字語がヒットし、削除後にヒットしなくなる
-- [ ] V-6. 多重起動検証: `mail-dock` を2つ同時に起動し、2つ目が `StorageLockedError` 相当で停止する
-- [ ] V-7. スタールロック検証: `.lock.meta.json` の `heartbeat_at` を過去日時に書き換えると、次回起動でロックが回収されて正常に起動する
+- [ ] V-6. 多重起動検証: ロック取得後にイベント待機するテストヘルパーを起動し、その間に2つ目を起動して `StorageLockedError` 相当で停止する
+- [ ] V-7. スタールロック検証: ロック保持プロセスを強制終了して古い `.lock.meta.json` を残し、`heartbeat_at` を過去日時に書き換えると、次回起動でOSロック取得可否を確認したうえでロックが回収され、正常に起動する
 - [ ] V-8. `FOREIGN` 検証: `.maildock_root` の `root_uuid` を書き換えると起動が拒否され、**その際にルートへ一切書き込みが発生していない**
 - [ ] V-9. 再実行検証: 2回目以降の起動でマイグレーションが冪等にスキップされる
 - [ ] V-10. WSL: `docker compose -f tests/docker/compose.yaml up -d` → `MAILDOCK_DOCKER=1 uv run pytest -m docker` で GreenMail への LOGIN / LIST が成功する
@@ -427,4 +441,4 @@ DDLは開発計画書の記述をそのまま使用する。
 * `tests/fixtures/eml/` のコーパス（壊れたMIME、ISO-2022-JP / CP932 / EUC-JP、RFC2231分割ファイル名、Outlook非標準形式、Message-ID欠損、巨大添付、インライン画像）を Phase 1 で蓄積する。
 * `manifests/` への追記実装（JSONL + 行末CRC32、fsync、末尾torn行の切り離し）を Phase 1 で行う。
 * `AppConfig.db_backup_to_local_disk` の実処理（C:のBitLocker有効時のみのオプトイン）を Phase 4 で実装する。
-* `set_storage_log_target(None)` / `ConnectionManager.close_all()` / `checkpoint_truncate()` は、Phase 4 の「安全な取り外し」および `DETACHED` 遷移から呼び出す。
+* `set_storage_log_target(None)` / `ConnectionManager.request_close_all()` / `ConnectionManager.assert_all_closed()` / `checkpoint_truncate()` は、Phase 4 の「安全な取り外し」および `DETACHED` 遷移から呼び出す。
