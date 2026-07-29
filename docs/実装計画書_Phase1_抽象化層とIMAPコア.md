@@ -206,29 +206,29 @@ FetchError
 
 #### **C-1. `infrastructure/parsing/charset.py`**
 
-- [ ] `normalize_charset_label(label: str) -> str` を実装する（`x-sjis` / `shift_jis` / `sjis` → `cp932`、`iso-2022-jp-ms` → `iso2022_jp_ext`、別名の小文字化・空白除去）
-- [ ] `decode_text(raw: bytes, declared: str | None) -> tuple[str, str]`（戻り値: テキストと採用エンコーディング）を実装する
-- [ ] フォールバック順序を厳守する: 宣言charset正規化 → `iso-2022-jp` → **`cp932`** → `euc_jp` → `utf-8` → `charset-normalizer` 推定 → `errors="replace"`
-- [ ] 最終手段に到達した場合は **例外を投げず** 警告ログを出す
-- [ ] `shift_jis` ではなく `cp932` を使う理由をコメントで1行残す
+- [x] `normalize_charset_label(label: str) -> str` を実装する（`x-sjis` / `shift_jis` / `sjis` → `cp932`、`iso-2022-jp-ms` → `iso2022_jp_ext`、別名の小文字化・空白除去）
+- [x] `decode_text(raw: bytes, declared: str | None) -> tuple[str, str]`（戻り値: テキストと採用エンコーディング）を実装する
+- [x] フォールバック順序を厳守する: 宣言charset正規化 → `iso-2022-jp` → **`cp932`** → `euc_jp` → `utf-8` → `charset-normalizer` 推定 → `errors="replace"`
+- [x] 最終手段に到達した場合は **例外を投げず** 警告ログを出す
+- [x] `shift_jis` ではなく `cp932` を使う理由をコメントで1行残す
 
 #### **C-2. `infrastructure/parsing/headers.py`**
 
-- [ ] `decode_header_value(value: str | None) -> str`（RFC 2047、`decode_header` + `make_header`、不正エンコード語は原文フォールバック）
-- [ ] `parse_content_disposition_filename(part) -> str | None` を実装する
-  - [ ] **RFC 2231 分割形式（`filename*0*=` / `filename*1*=` …）を自前でパースする**（標準ライブラリの `get_filename()` に依存しない）
-  - [ ] Outlook 非標準形式（`filename=` に RFC 2047 を直接埋める）に対応する
-  - [ ] `filename` が無ければ `name` パラメータへフォールバックする
-- [ ] `parse_date_header(value, internal_date) -> datetime | None` を実装する（try/except 必須、未来日時＝現在+1日超は `INTERNALDATE` へフォールバック、tz-aware UTC へ正規化）
-- [ ] `to_utc_iso8601(dt) -> str`（`YYYY-MM-DDTHH:MM:SSZ`）
-- [ ] `derive_thread_key(message_id, in_reply_to, references_ids) -> str | None`（`References` の先頭 → `In-Reply-To` → 自身の `Message-ID` の優先順）
-- [ ] `derive_content_key(message_id, eml_sha256) -> str`（`Message-ID` があればそれ、無ければ `sha256:{先頭32桁}`）
+- [x] `decode_header_value(value: str | None) -> str`（RFC 2047、`decode_header` + `make_header`、不正エンコード語は原文フォールバック）
+- [x] `parse_content_disposition_filename(part) -> str | None` を実装する
+  - [x] **RFC 2231 分割形式（`filename*0*=` / `filename*1*=` …）を自前でパースする**（標準ライブラリの `get_filename()` に依存しない）
+  - [x] Outlook 非標準形式（`filename=` に RFC 2047 を直接埋める）に対応する
+  - [x] `filename` が無ければ `name` パラメータへフォールバックする
+- [x] `parse_date_header(value, internal_date) -> datetime | None` を実装する（try/except 必須、未来日時＝現在+1日超は `INTERNALDATE` へフォールバック、tz-aware UTC へ正規化）
+- [x] `to_utc_iso8601(dt) -> str`（`YYYY-MM-DDTHH:MM:SSZ`）
+- [x] `derive_thread_key(message_id, in_reply_to, references_ids) -> str | None`（`References` の先頭 → `In-Reply-To` → 自身の `Message-ID` の優先順）
+- [x] `derive_content_key(message_id, eml_sha256) -> str`（`Message-ID` があればそれ、無ければ `sha256:{先頭32桁}`）
 
 #### **C-3. `infrastructure/parsing/html_to_text.py`**
 
-- [ ] `html_to_text(html: str) -> str` を実装する（BeautifulSoup で `script` / `style` / コメントを除去 → `get_text("\n")` → 連続空白・空行を圧縮）
-- [ ] 巨大HTMLでも実用速度で動くことを確認する（数MBのHTMLで計測）
-- [ ] **表示用のHTMLサンドボックスは Phase 3。ここは検索・全文用のテキスト化のみ**である旨をコメントで残す
+- [x] `html_to_text(html: str) -> str` を実装する（BeautifulSoup で `script` / `style` / コメントを除去 → `get_text("\n")` → 連続空白・空行を圧縮）
+- [x] 巨大HTMLでも実用速度で動くことを確認する（数MBのHTMLで計測）
+- [x] **表示用のHTMLサンドボックスは Phase 3。ここは検索・全文用のテキスト化のみ**である旨をコメントで残す
 
 #### **C-4. `infrastructure/parsing/normalize.py`**
 
@@ -454,8 +454,8 @@ FetchError
 
 #### **H-1. 単体テスト（Docker不要）**
 
-- [ ] `test_charset.py`: フォールバック順序、ラベル正規化、CP932機種依存文字、最終手段で例外を投げないこと
-- [ ] `test_headers.py`: RFC2047、**RFC2231分割**、Outlook非標準、`Date` 不正・欠損・未来日時のフォールバック、`thread_key` / `content_key` 算出
+- [x] `test_charset.py`: フォールバック順序、ラベル正規化、CP932機種依存文字、最終手段で例外を投げないこと
+- [x] `test_headers.py`: RFC2047、**RFC2231分割**、Outlook非標準、`Date` 不正・欠損・未来日時のフォールバック、`thread_key` / `content_key` 算出
 - [ ] `test_eml_parser.py`: **コーパス全件が例外なく解析される**こと、本文優先順、`related` 追跡、インライン画像の除外、`has_attachment`、壊れたMIMEで `parse_error` が立つこと
 - [ ] `test_html_to_text.py`: script/style除去、空白圧縮
 - [ ] `test_normalize.py`: 全角英数の半角化、大文字小文字、連続空白、かな・カナを同一視しないこと
