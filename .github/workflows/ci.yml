@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Check formatting
+        run: uv run ruff format --check .
+      - name: Run ruff
+        run: uv run ruff check .
+      - name: Run mypy
+        run: uv run mypy
+
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Run tests
+        run: uv run pytest -m "not docker" --cov=mail_dock
+
+  test-linux:
+    runs-on: ubuntu-latest
+    services:
+      greenmail:
+        image: greenmail/standalone:2.1.6
+        env:
+          GREENMAIL_OPTS: >-
+            -Dgreenmail.setup.test.imap
+            -Dgreenmail.setup.test.imaps
+            -Dgreenmail.hostname=0.0.0.0
+            -Dgreenmail.users=testuser:password@localhost
+        ports:
+          - 3143:3143
+          - 3993:3993
+        options: >-
+          --health-cmd "bash -c 'echo > /dev/tcp/127.0.0.1/3143 && echo > /dev/tcp/127.0.0.1/3993'"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+          --health-start-period 5s
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Run Docker integration tests
+        env:
+          MAILDOCK_DOCKER: "1"
+        run: uv run pytest -m docker

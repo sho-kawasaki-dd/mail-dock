@@ -365,12 +365,12 @@ DDLは開発計画書の記述をそのまま使用する。
 
 #### **D-3. `.github/workflows/ci.yml`**
 
-- [ ] 共通ステップを定義する（`astral-sh/setup-uv`（キャッシュ有効）→ `uv sync --frozen`）
-- [ ] ジョブ `lint`（windows-latest）: `uv run ruff format --check .` / `uv run ruff check .` / `uv run mypy`
-- [ ] ジョブ `test-windows`（windows-latest）: `uv run pytest -m "not docker" --cov=mail_dock`
-- [ ] ジョブ `test-linux`（ubuntu-latest）: GreenMail をhealthcheck付きの `services:` で起動し `MAILDOCK_DOCKER=1 uv run pytest -m docker`
-- [ ] `concurrency` を設定して同一ブランチの重複実行をキャンセルする
-- [ ] トリガーを `push`（main）と `pull_request` に設定する
+- [x] 共通ステップを定義する（`astral-sh/setup-uv`（キャッシュ有効）→ `uv sync --frozen`）
+- [x] ジョブ `lint`（`windows-latest`）: `uv run ruff format --check .` / `uv run ruff check .` / `uv run mypy`
+- [x] ジョブ `test-windows`（`windows-latest`）: `uv run pytest -m "not docker" --cov=mail_dock`
+- [x] ジョブ `test-linux`（`ubuntu-latest`）: GreenMail をhealthcheck付きの `services:` で起動し `MAILDOCK_DOCKER=1 uv run pytest -m docker`
+- [x] `concurrency` を設定して同一ブランチの重複実行をキャンセルする
+- [x] トリガーを `push`（main）と `pull_request` に設定する
 - [ ] ※ Phase 0 時点では PySide6 依存のテストが無いため、Linux側の Xvfb 設定は不要
 
 ---
