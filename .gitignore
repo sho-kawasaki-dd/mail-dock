@@ -30,6 +30,15 @@ pip-wheel-metadata/
 .coverage.*
 htmlcov/
 
+# Local archive databases and temporary SQLite files
+*.db
+*.db-wal
+*.db-shm
+*.db.bak*
+
+# Bundled readpst binaries (Phase 4.5)
+vendor/readpst/
+
 # IDE and editor files
 .vscode/
 .idea/

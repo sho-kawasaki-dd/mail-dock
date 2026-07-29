@@ -116,16 +116,16 @@ tests/unit/ tests/integration/ tests/support/ tests/fixtures/eml/ tests/docker/
 
 #### **A-3. ライセンス・ドキュメント（*A-1と並行可*）**
 
-- [ ] `LICENSE` に GPL-3.0 の全文を配置する
-- [ ] `THIRD-PARTY-LICENSES.md` を作成し、PySide6(Qt) / keyring / beautifulsoup4 / charset-normalizer / platformdirs の欄を用意する（readpst欄は Phase 4.5 で追記する旨をコメントで明記）
-- [ ] `README.md` に以下を記載する
-  - [ ] プロジェクトの目的と概要
-  - [ ] **前提条件: ストレージルートの BitLocker To Go による暗号化（5.3）**
-  - [ ] **バックアップ方針: 3-2-1ルールの推奨とドライブ丸ごとコピーで完結する構造（5.7）**
-  - [ ] 開発セットアップ手順（`uv sync` / `uv run ruff check .` / `uv run mypy` / `uv run pytest -m "not docker"`）
-  - [ ] WSL上でのDockerテスト手順
-- [ ] `.gitignore` に追記する（`vendor/readpst/` のバイナリ、`*.db` / `*.db-wal` / `*.db-shm` / `*.db.bak*`、`htmlcov/`）
-- [ ] `uv.lock` が `.gitignore` に含まれて**いない**ことを確認する
+- [x] `LICENSE` に GPL-3.0 の全文を配置する
+- [x] `THIRD-PARTY-LICENSES.md` を作成し、PySide6(Qt) / keyring / beautifulsoup4 / charset-normalizer / platformdirs の欄を用意する（readpst欄は Phase 4.5 で追記する旨をコメントで明記）
+- [x] `README.md` に以下を記載する
+  - [x] プロジェクトの目的と概要
+  - [x] **前提条件: ストレージルートの BitLocker To Go による暗号化（5.3）**
+  - [x] **バックアップ方針: 3-2-1ルールの推奨とドライブ丸ごとコピーで完結する構造（5.7）**
+  - [x] 開発セットアップ手順（`uv sync` / `uv run ruff check .` / `uv run mypy` / `uv run pytest -m "not docker"`）
+  - [x] WSL上でのDockerテスト手順
+- [x] `.gitignore` に追記する（`vendor/readpst/` のバイナリ、`*.db` / `*.db-wal` / `*.db-shm` / `*.db.bak*`、`htmlcov/`）
+- [x] `uv.lock` が `.gitignore` に含まれて**いない**ことを確認する
 
 ---
 
