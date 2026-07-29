@@ -173,7 +173,8 @@ mail-dock/
 │   │
 │   └── migrations/
 │       ├── 001_init.sql
-│       └── 002_pst_import.sql
+│       ├── 002_sync_cursor.sql
+│       └── 003_pst_import.sql
 │
 └── tests/
     ├── unit/                 # ドメイン・ユースケース・パーサの単体テスト
@@ -249,6 +250,7 @@ UI層・DB保管層と通信層を独立させるため、アダプターパタ�
 7. **永続マニフェスト:** PSTでは `import.json` に原本情報と変換条件、`folders.json` に元フォルダ対応、`items.jsonl` に `source_item_key`・元相対パス・最終EMLパス・完全ハッシュ・状態イベントを保存する。purge時も行を削除せずイベントを追記する。IMAPも再構築に必要な取得元情報を同様に記録する。
    * **マニフェストの各JSONL行末にペイロードのCRC32を付与する。** 「JSONとしては読めるが内容が途中で切れている」torn write を検出可能にするため。復旧時は末尾の不正行だけを切り離す（4.8「マニフェスト検証」）。
 8. **共有EMLの削除:** 同一内容を指す複数レコードが同じ `relative_path` を共有し得る。purgeでは非purgedの参照が残っていないことを確認し、最後の参照が消える場合だけ実ファイルを削除する。
+    * 物理共有は同一アカウント内に限定し、DBの完全な `file_hash` で候補を検索した後、既存EMLをその場で再ハッシュして一致した場合だけ行う。ファイル名に使うSHA-256先頭32桁だけでは同一性を判定しない。
 9. **`tmp/` は必ずストレージルート配下（＝EMLと同一ボリューム）に置く。** `os.replace` の原子性は同一ボリューム内でのみ成立し、`%TEMP%`（C:）を経由させると「コピー＋削除」に退化して、切断時に中途半端なEMLが本番ディレクトリへ残る。**この配置を「ただの慣習」として動かしてはならない。**
 10. **ルートの同定は常に `.maildock_root` のUUIDで行う。** 外付けドライブでは、再接続時に**別のデバイスが同じドライブレターを取得し得る**。「パスが存在する＝自分のルート」という判定は成立しない。プローブ結果は `OK` / `MISSING` / `FOREIGN`（UUID不一致）の3値とし、**`FOREIGN` は `MISSING` より危険**（他人のドライブへの書き込み事故）として即座に全書き込みを禁止する。
 
@@ -292,7 +294,8 @@ CREATE TABLE IF NOT EXISTS folders (
 ```
 
 * 新規フォルダをサーバー上に検出した場合、`is_sync_target = 0` で登録し、UIに「新しいフォルダが見つかりました」と通知する（**勝手に同期を開始しない**）。
-* `last_seen_uid` はバッチコミットのたびに更新するため、同期を中断しても次回は続きから再開される。
+* `last_seen_uid` は新着取得済みの最大UID（高水位）として使う。Phase 1の `002_sync_cursor.sql` で `backfill_next_uid` と `initial_sync_completed` を追加し、初回履歴同期の下向きカーソルを分離する。
+* 初回／UIDVALIDITY変更時はサーバー最大UIDを `last_seen_uid` と `backfill_next_uid` の両方へ設定する。新着・履歴とも最新優先で降順処理する。新着の `last_seen_uid` は同期開始時に固定した最大UIDまで全件処理した後だけ更新し、中断時は同じ範囲を冪等に再走査する。履歴の `backfill_next_uid` はバッチごとに更新する。
 * **PSTアーカイブでの使い方:** `raw_name` にはreadpst出力ルートからの**相対ディレクトリパス**を登録する。`display_name` はlspst結果と一意に対応づけられた場合だけ元のPST表示名を使い、対応が曖昧な場合はreadpst出力名を使ってマニフェストに `original_name_unresolved=true` を記録する。`uidvalidity = NULL` / `last_seen_uid = 0` / `is_sync_target = 0` のまま固定とし、**同期対象として拾われないことを保証**する。
 
 ### **3.3 メッセージメタデータテーブル (messages)**
@@ -473,6 +476,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 ```
 
+* Phase 1の `002_sync_cursor.sql` で `sync_failures.uidvalidity` を追加し、一意性を `(account_id, folder_id, uidvalidity, uid)` へ変更する。UIDVALIDITY変更後は現在世代の失敗だけを再試行し、旧世代の失敗履歴は保持する。
+
 ### **3.5.1 PSTインポート履歴テーブル (pst\_imports)**
 
 原本 `.pst` はアプリ管理外に置くため、DBと永続マニフェストの双方に「どのPSTからいつ・どの条件で取り込んだか」を記録する。同一PSTの二重取り込み検出、中断したStage Bの再開、再変換時の世代交代に使う。
@@ -566,7 +571,7 @@ conn.execute("PRAGMA cache_size=-64000")  # 64MB
 
 * `PRAGMA user_version` を採用し、`migrations/001_init.sql` から順次適用する。
 * **マイグレーション実行前に `metadata.db.bak.{version}` へ自動バックアップ**を取る。
-* `source_item_key` とプロバイダー別一意インデックスは `001_init.sql` から導入する。`002_pst_import.sql`（Phase 4.5）では `pst_imports` / `pst_import_items` を追加し、`remote_state='no_remote'` はCHECK制約を置かずアプリ側で検証する。
+* `source_item_key` とプロバイダー別一意インデックスは `001_init.sql` から導入する。Phase 1の `002_sync_cursor.sql` で二カーソルとUIDVALIDITY別失敗管理を追加し、`003_pst_import.sql`（Phase 4.5）で `pst_imports` / `pst_import_items` を追加する。`remote_state='no_remote'` はCHECK制約を置かずアプリ側で検証する。
 * Phase 5（Gmail対応）では「1通が複数ラベルに属する」ため、`messages.folder_id` を `message_folders` 中間テーブルへ移行する想定。この移行計画を最初からマイグレーション履歴に織り込んでおく。
 
 **多重起動防止とスタールロックの検出**
@@ -701,25 +706,43 @@ MailDockError
 ```
 for folder in 同期対象フォルダ:
     uidvalidity = select_folder(folder.raw_name)
-    if uidvalidity != folder.uidvalidity:
-        → UIDキャッシュを破棄し当該フォルダをフル再同期（既存EMLは content_key で再利用）
-    for ref in iter_message_refs(folder.raw_name, since_uid=folder.last_seen_uid):
+    if 初回 or uidvalidity != folder.uidvalidity:
+        max_uid = get_max_uid(folder.raw_name)
+        → last_seen_uid=max_uid, backfill_next_uid=max_uid で二カーソルを初期化
+
+    # 初回同期中に到着した新着。開始時の範囲を固定して最新から降順。
+    new_max_uid = get_max_uid(folder.raw_name)
+    for ref in iter_message_refs(
+        folder.raw_name,
+        min_uid=folder.last_seen_uid + 1,
+        max_uid=new_max_uid,
+        descending=True,
+    ):
+        → EMLを保存（4.7の順序を厳守）→ 解析 → messages / message_contents へ登録
+    → 固定した新着範囲を全件処理した場合だけ last_seen_uid=new_max_uid
+
+    # 初回履歴。最新から利用可能にするため下向きカーソルから降順。
+    for ref in iter_message_refs(
+        folder.raw_name, max_uid=folder.backfill_next_uid, descending=True
+    ):
         if ref.size_bytes > 上限:  → sync_failures に 'oversize' で記録しスキップ
         raw = download_eml_bytes(folder.raw_name, ref.uid)
         → EMLを保存（4.7の順序を厳守）→ 解析 → messages / message_contents へ登録
-    100通ごと（または50MBごと）に folder.last_seen_uid を更新してコミット
+    100通ごと（または50MBごと）に、メッセージと該当カーソルを同一トランザクションでコミット
 ```
 
 * **`Message-ID` の全件取得による差分検出は行わない。** 5万通規模で毎回全ヘッダをFETCHするのは非現実的であり、UIDの範囲指定で取得する。
 * 進捗表示は**転送バイト数を主指標**とする（平均2MB/通のため通数では実感と乖離する）。
-* バッチコミットのたびに `last_seen_uid` を更新するため、**中断しても次回は続きから自動的に再開**される。
+* 新着同期は固定範囲を完了したときだけ `last_seen_uid` を更新する。途中で中断した場合は同じ範囲を再走査し、確定済み行をupsert・dedupeして欠損を防ぐ。履歴同期は `backfill_next_uid` をバッチごとに更新し、途中から再開する。
 
 **5. 消去・移動の検知**
 
 * `list_existing_uids()` でサーバー上のUID集合を取得し、ローカルに存在してサーバーに無いUIDを抽出する。
-* 抽出された各メールについて、**同一アカウント内の他フォルダに同じ `content_key` が存在するか照合**する。
-  * 存在する → `remote_state = 'moved'`、`moved_to_folder_id` を設定
-  * 存在しない → `remote_state = 'deleted'`
+* 抽出された各メールについて、同一アカウント内の他フォルダにある `remote_state='present'` の候補を照合する。
+    * `content_key` と完全な `file_hash` が一致する候補が1件だけ → `remote_state = 'moved'`、`moved_to_folder_id` を設定
+    * 候補が存在しない → `remote_state = 'deleted'`
+    * 候補が複数、または完全な `file_hash` が得られず一意に確定できない → `remote_state = 'unknown'`、`moved_to_folder_id = NULL`
+* `content_key` は非一意であるため、単独一致だけで移動と確定しない。
 * いずれの場合も **EMLファイルは絶対に削除しない**。
 
 ### **4.3 サーバーメール手動削除機能**
@@ -1406,7 +1429,7 @@ mail-dock本体は **GPL-3.0-or-later** で公開する。同梱する `readpst`
 | # | タスク | 依存 |
 | :---- | :---- | :---- |
 | 1 | **readpst PoC（最優先・方式のブロッカー判定）**。日本語・文字コード・添付・階層・性能・必要DLL・破損時挙動に加え、Windows禁止文字、予約名、末尾ドット/空白、同名・正規化後衝突、長パス、lspst出力の限界を実測。致命的問題があれば方式を再検討する | ― |
-| 2 | マイグレーション `002_pst_import.sql`、`pst_imports` / `pst_import_items`、永続マニフェスト、`remote_state='no_remote'` 対応 | ―（1と並行可） |
+| 2 | マイグレーション `003_pst_import.sql`、`pst_imports` / `pst_import_items`、永続マニフェスト、`remote_state='no_remote'` 対応 | ―（1と並行可） |
 | 3 | `BaseArchiveImporter` / `readpst_locator` / `readpst_runner` | 1 |
 | 4 | `usecases/import_pst.py`（Stage A→項目確定→Stage B、同一ジョブ再開、世代交代、監査記録） | 2, 3 |
 | 5 | インポートウィザード UI | 4 |

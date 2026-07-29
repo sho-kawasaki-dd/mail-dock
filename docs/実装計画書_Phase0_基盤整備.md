@@ -28,7 +28,7 @@ Phase 1 以降（IMAPコア / 検索 / GUI / 切断対応 / PSTアーカイブ�
 | # | 項目 | 決定内容 |
 | :--- | :---- | :---- |
 | D-1 | パッケージ管理 | **uv に統一**。`uv.lock` をコミットし、CIは `uv sync --frozen` を使う |
-| D-2 | `001_init.sql` の範囲 | **開発計画書3章の全テーブル（PST関連を除く）を一括作成**。`002_pst_import.sql` は Phase 4.5 |
+| D-2 | `001_init.sql` の範囲 | **開発計画書3章の全テーブル（PST関連を除く）を一括作成**。Phase 1で `002_sync_cursor.sql`、Phase 4.5で `003_pst_import.sql` を追加する（後続フェーズで確定した採番） |
 | D-3 | テスト用IMAP環境 | **Windows は imaplib モックのみ / WSL(Linux) 上で Docker を用いた結合テスト**。pytestマーカーで分離 |
 | D-4 | Dockerイメージ | Phase 0 は **GreenMail のみ**。Dovecot は Phase 1 冒頭で必要に応じ追加 |
 | D-5 | CI | **GitHub Actions を Phase 0 で作成**（Windows: lint/型/単体、Linux: Docker結合） |
@@ -303,7 +303,7 @@ DDLは開発計画書の記述をそのまま使用する。
 - [x] `sync_failures` と `audit_log` を作成する（3.5）
 - [x] `app_state(key TEXT PRIMARY KEY, value TEXT)` を作成する（`clean_shutdown` フラグ用：5.7.1-4-4）
 - [x] **CHECK制約を置かない**ことを確認する（`remote_state='no_remote'` 等はアプリ側で検証：開発計画書3.6）
-- [x] `pst_imports` / `pst_import_items` を**含めない**ことを確認する（002 / Phase 4.5）
+- [x] `pst_imports` / `pst_import_items` を**含めない**ことを確認する（003 / Phase 4.5）
 
 #### **C-4. `__main__.py` — コンポジションルート**
 
@@ -412,7 +412,7 @@ DDLは開発計画書の記述をそのまま使用する。
 | PySide6 の画面 / ViewModel / QThreadワーカー / HTMLサンドボックス | Phase 3 |
 | 切断の状態機械・`WM_DEVICECHANGE` 監視・ハートビートタイマー駆動・範囲限定検証・フォールト注入試験 | Phase 4 |
 | サーバー削除の安全装置・ゴミ箱・purge・整合性チェック | Phase 4 |
-| PST関連一式・`vendor/readpst`・`002_pst_import.sql` | Phase 4.5 |
+| PST関連一式・`vendor/readpst`・`003_pst_import.sql` | Phase 4.5 |
 | PyInstaller / Inno Setup / リリースCIのGPL遵守チェック | リリース時（5.9） |
 
 ---
