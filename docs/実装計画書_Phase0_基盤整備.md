@@ -290,20 +290,20 @@ MailDockError
 
 DDLは開発計画書の記述をそのまま使用する。
 
-- [ ] `accounts` を作成する（3.1）
-- [ ] `folders` を作成する（3.2）
-- [ ] `messages` を作成する（3.3）
-  - [ ] `source_item_key` 列を**初期から**含める
-  - [ ] スレッド情報（`in_reply_to` / `references_ids` / `thread_key`）を**初期から**含める
-  - [ ] IMAPフラグ（`imap_flags` / `flags_seen_at`）を**初期から**含める
-  - [ ] `idx_msg_key` / `idx_msg_list` / `idx_msg_thread` / `idx_msg_trash` を作成する
-  - [ ] `uq_imap_message`（`uid IS NOT NULL`）と `uq_archive_message`（`uid IS NULL`）の部分一意インデックスを作成する
-- [ ] `message_contents` と `messages_fts`（`tokenize='trigram'`、external content）を作成する（3.4）
-- [ ] FTS同期トリガー `mc_ai` / `mc_ad` / `mc_au` の3本を作成する（3.4）
-- [ ] `sync_failures` と `audit_log` を作成する（3.5）
-- [ ] `app_state(key TEXT PRIMARY KEY, value TEXT)` を作成する（`clean_shutdown` フラグ用：5.7.1-4-4）
-- [ ] **CHECK制約を置かない**ことを確認する（`remote_state='no_remote'` 等はアプリ側で検証：開発計画書3.6）
-- [ ] `pst_imports` / `pst_import_items` を**含めない**ことを確認する（002 / Phase 4.5）
+- [x] `accounts` を作成する（3.1）
+- [x] `folders` を作成する（3.2）
+- [x] `messages` を作成する（3.3）
+  - [x] `source_item_key` 列を**初期から**含める
+  - [x] スレッド情報（`in_reply_to` / `references_ids` / `thread_key`）を**初期から**含める
+  - [x] IMAPフラグ（`imap_flags` / `flags_seen_at`）を**初期から**含める
+  - [x] `idx_msg_key` / `idx_msg_list` / `idx_msg_thread` / `idx_msg_trash` を作成する
+  - [x] `uq_imap_message`（`uid IS NOT NULL`）と `uq_archive_message`（`uid IS NULL`）の部分一意インデックスを作成する
+- [x] `message_contents` と `messages_fts`（`tokenize='trigram'`、external content）を作成する（3.4）
+- [x] FTS同期トリガー `mc_ai` / `mc_ad` / `mc_au` の3本を作成する（3.4）
+- [x] `sync_failures` と `audit_log` を作成する（3.5）
+- [x] `app_state(key TEXT PRIMARY KEY, value TEXT)` を作成する（`clean_shutdown` フラグ用：5.7.1-4-4）
+- [x] **CHECK制約を置かない**ことを確認する（`remote_state='no_remote'` 等はアプリ側で検証：開発計画書3.6）
+- [x] `pst_imports` / `pst_import_items` を**含めない**ことを確認する（002 / Phase 4.5）
 
 #### **C-4. `__main__.py` — コンポジションルート**
 

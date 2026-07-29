@@ -20,6 +20,10 @@ _SQL_COMMENT_OR_LITERAL: Final[re.Pattern[str]] = re.compile(
     r"--[^\n]*|/\*.*?\*/|'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"",
     re.DOTALL,
 )
+_TRIGGER_BLOCK: Final[re.Pattern[str]] = re.compile(
+    r"\bCREATE\s+(?:TEMP\s+)?TRIGGER\b.*?\bBEGIN\b.*?\bEND\s*;",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def _migration_files() -> list[tuple[int, resources.abc.Traversable]]:
@@ -58,7 +62,8 @@ def _read_migration(path: resources.abc.Traversable) -> str:
         raise MigrationError(f"Could not read migration {path.name}") from error
 
     without_comments_or_literals = _SQL_COMMENT_OR_LITERAL.sub(" ", sql)
-    if _FORBIDDEN_SQL.search(without_comments_or_literals):
+    without_trigger_bodies = _TRIGGER_BLOCK.sub(" ", without_comments_or_literals)
+    if _FORBIDDEN_SQL.search(without_trigger_bodies):
         raise MigrationError(
             f"Migration {path.name} must not contain transaction statements or user_version"
         )
