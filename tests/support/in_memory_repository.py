@@ -72,9 +72,7 @@ class InMemoryMessageRepository(BaseMessageRepository):
 
     def list_sync_targets(self, account_id: str) -> Sequence[MessageRecord]:
         return [
-            item
-            for item in self.list_folders(account_id)
-            if bool(item.get("is_sync_target", 0))
+            item for item in self.list_folders(account_id) if bool(item.get("is_sync_target", 0))
         ]
 
     def set_sync_target(self, account_id: str, raw_name: str, enabled: bool) -> None:

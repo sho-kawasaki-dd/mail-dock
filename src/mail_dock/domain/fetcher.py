@@ -37,7 +37,7 @@ class CancelToken:
     """A small cancellation boundary shared by synchronous and future UI workers."""
 
     def __init__(self, event: Event | None = None) -> None:
-        self._event = event or Event()
+        self._event = event if event is not None else Event()
 
     @property
     def event(self) -> Event:

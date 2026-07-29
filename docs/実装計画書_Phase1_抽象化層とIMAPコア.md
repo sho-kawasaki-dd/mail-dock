@@ -153,19 +153,19 @@ FetchError
 
 #### **B-2. `domain/fetcher.py` — プロトコル抽象化**
 
-- [ ] `RemoteFolder`（frozen dataclass）を定義する: `raw_name` / `display_name` / `uidvalidity: int | None` / `special_use: frozenset[str]` / `delimiter: str | None`
-- [ ] `RemoteMessageRef`（frozen dataclass）を定義する: `uid: int` / `message_id: str | None` / `internal_date: datetime | None` / `size_bytes: int | None` / `flags: tuple[str, ...]`
-- [ ] `CancelToken` を定義する（`threading.Event` をラップし `raise_if_cancelled()` で `OperationCancelledError` を送出、`is_cancelled` プロパティを持つ）
-- [ ] `BaseMailFetcher(ABC)` を開発計画書4.1の署名どおりに定義する
-  - [ ] `connect()` / `disconnect()` / `__enter__` / `__exit__`
-  - [ ] `list_folders() -> list[RemoteFolder]`
-  - [ ] `select_folder(raw_name: str) -> int`（戻り値: UIDVALIDITY）
-  - [ ] `iter_message_refs(raw_name, *, min_uid=1, max_uid=None, descending=True, cancel) -> Iterator[RemoteMessageRef]`
-  - [ ] `get_max_uid(raw_name: str) -> int`（空フォルダは0。二カーソル初期化用）
-  - [ ] `list_existing_uids(raw_name: str) -> set[int]`
-  - [ ] `download_eml_bytes(raw_name: str, uid: int) -> bytes`
-  - [ ] `download_eml_headers(raw_name: str, uid: int) -> bytes`（oversizeのメタデータ登録用）
-  - [ ] `delete_remote_message(raw_name, uid, *, mode="trash") -> None`
+- [x] `RemoteFolder`（frozen dataclass）を定義する: `raw_name` / `display_name` / `uidvalidity: int | None` / `special_use: frozenset[str]` / `delimiter: str | None`
+- [x] `RemoteMessageRef`（frozen dataclass）を定義する: `uid: int` / `message_id: str | None` / `internal_date: datetime | None` / `size_bytes: int | None` / `flags: tuple[str, ...]`
+- [x] `CancelToken` を定義する（`threading.Event` をラップし `raise_if_cancelled()` で `OperationCancelledError` を送出、`is_cancelled` プロパティを持つ）
+- [x] `BaseMailFetcher(ABC)` を開発計画書4.1の署名どおりに定義する
+  - [x] `connect()` / `disconnect()` / `__enter__` / `__exit__`
+  - [x] `list_folders() -> list[RemoteFolder]`
+  - [x] `select_folder(raw_name: str) -> int`（戻り値: UIDVALIDITY）
+  - [x] `iter_message_refs(raw_name, *, min_uid=1, max_uid=None, descending=True, cancel) -> Iterator[RemoteMessageRef]`
+  - [x] `get_max_uid(raw_name: str) -> int`（空フォルダは0。二カーソル初期化用）
+  - [x] `list_existing_uids(raw_name: str) -> set[int]`
+  - [x] `download_eml_bytes(raw_name: str, uid: int) -> bytes`
+  - [x] `download_eml_headers(raw_name: str, uid: int) -> bytes`（oversizeのメタデータ登録用）
+  - [x] `delete_remote_message(raw_name, uid, *, mode="trash") -> None`
 - [ ] クラス docstring に「**実装にリトライを書かない。リトライは usecases 層に集約する**」と明記する
 - [ ] `BaseArchiveImporter`（Phase 4.5）と統合しない理由をコメントで残す
 
