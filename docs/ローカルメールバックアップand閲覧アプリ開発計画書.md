@@ -533,12 +533,12 @@ CREATE TABLE IF NOT EXISTS pst_import_items (
 **接続時に必ず設定するPRAGMA**
 
 ```python
-conn.execute("PRAGMA journal_mode=WAL")     # 起動時に1回（ネットワークドライブでは不可）
-conn.execute("PRAGMA synchronous=NORMAL")   # WAL時はNORMALで十分
-conn.execute("PRAGMA foreign_keys=ON")      # 接続ごとに必須（既定でOFF）
+conn.execute("PRAGMA journal_mode=WAL")  # 起動時に1回（ネットワークドライブでは不可）
+conn.execute("PRAGMA synchronous=NORMAL")  # WAL時はNORMALで十分
+conn.execute("PRAGMA foreign_keys=ON")  # 接続ごとに必須（既定でOFF）
 conn.execute("PRAGMA busy_timeout=10000")
 conn.execute("PRAGMA temp_store=MEMORY")
-conn.execute("PRAGMA cache_size=-64000")    # 64MB
+conn.execute("PRAGMA cache_size=-64000")  # 64MB
 ```
 
 * `synchronous=NORMAL` は「DBはEML＋マニフェストから再構築可能な派生キャッシュである」（不変条件1）という前提の上で成立する。**マニフェスト追記のfsyncを省略した瞬間にこの前提は崩れる。**
@@ -593,43 +593,54 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 
+
 @dataclass(frozen=True)
 class RemoteFolder:
-    raw_name: str            # IMAPへ発行する生の名前
-    display_name: str        # modified UTF-7 デコード済み
+    raw_name: str  # IMAPへ発行する生の名前
+    display_name: str  # modified UTF-7 デコード済み
     uidvalidity: int | None
+
 
 @dataclass(frozen=True)
 class RemoteMessageRef:
     uid: int
     message_id: str | None
     internal_date: datetime | None
-    size_bytes: int | None   # 事前にサイズが分かるとスキップ判定に使える
+    size_bytes: int | None  # 事前にサイズが分かるとスキップ判定に使える
+
 
 class CancelToken:
     """UIスレッドから threading.Event を set() することで長時間処理を中断する"""
-    def __init__(self, event): self._event = event
+
+    def __init__(self, event):
+        self._event = event
+
     def raise_if_cancelled(self) -> None:
         if self._event.is_set():
             raise OperationCancelled()
 
+
 class BaseMailFetcher(ABC):
     @abstractmethod
-    def connect(self) -> None: ...            # 失敗は例外で通知（boolを返さない）
+    def connect(self) -> None: ...  # 失敗は例外で通知（boolを返さない）
     @abstractmethod
     def disconnect(self) -> None: ...
-    def __enter__(self): self.connect(); return self
-    def __exit__(self, *exc): self.disconnect()
+    def __enter__(self):
+        self.connect()
+        return self
+
+    def __exit__(self, *exc):
+        self.disconnect()
 
     @abstractmethod
     def list_folders(self) -> list[RemoteFolder]: ...
     @abstractmethod
-    def select_folder(self, raw_name: str) -> int: ...   # 戻り値: UIDVALIDITY
+    def select_folder(self, raw_name: str) -> int: ...  # 戻り値: UIDVALIDITY
 
     @abstractmethod
     def iter_message_refs(
         self, raw_name: str, since_uid: int = 0, *, cancel: CancelToken
-    ) -> Iterator[RemoteMessageRef]: ...      # ページングしながら遅延生成
+    ) -> Iterator[RemoteMessageRef]: ...  # ページングしながら遅延生成
 
     @abstractmethod
     def list_existing_uids(self, raw_name: str) -> set[int]: ...  # 削除検知用（UIDのみで軽量）
@@ -639,7 +650,11 @@ class BaseMailFetcher(ABC):
 
     @abstractmethod
     def delete_remote_message(
-        self, raw_name: str, uid: int, *, mode: str = "trash"   # "trash" | "expunge"
+        self,
+        raw_name: str,
+        uid: int,
+        *,
+        mode: str = "trash",  # "trash" | "expunge"
     ) -> None: ...
 ```
 
@@ -774,9 +789,9 @@ Append-Onlyの例外として、ユーザーの明示操作に限り実ファイ
 
 ```python
 def normalize_for_search(text: str) -> str:
-    t = unicodedata.normalize("NFKC", text)   # 全角英数→半角、半角カナ→全角カナ
-    t = t.casefold()                          # 大文字小文字の同一視
-    t = re.sub(r"\s+", " ", t)                # 連続空白の圧縮
+    t = unicodedata.normalize("NFKC", text)  # 全角英数→半角、半角カナ→全角カナ
+    t = t.casefold()  # 大文字小文字の同一視
+    t = re.sub(r"\s+", " ", t)  # 連続空白の圧縮
     return t.strip()
 ```
 
@@ -978,17 +993,19 @@ readpst -e -t e -8 -j 0 -q -C {charset} [-D] -d {logs/pstimp-{job_id}.log} -o {s
 ```python
 @dataclass(frozen=True)
 class ArchiveFolder:
-    relative_path: str       # staging ルートからの相対ディレクトリパス（folders.raw_name へ）
-    display_name: str        # 解決できればPST表示名、曖昧ならreadpst出力名
+    relative_path: str  # staging ルートからの相対ディレクトリパス（folders.raw_name へ）
+    display_name: str  # 解決できればPST表示名、曖昧ならreadpst出力名
     estimated_count: int | None
+
 
 @dataclass(frozen=True)
 class ArchiveInfo:
-    format: str              # 'pst_unicode' | 'pst_ansi' | 'unknown'
+    format: str  # 'pst_unicode' | 'pst_ansi' | 'unknown'
     folders: list[ArchiveFolder]
     estimated_total: int | None
     source_sha256: str
     source_size_bytes: int
+
 
 @dataclass(frozen=True)
 class ExtractResult:
@@ -996,17 +1013,26 @@ class ExtractResult:
     file_count: int
     stderr_tail: str
 
+
 class BaseArchiveImporter(ABC):
     @abstractmethod
     def probe(
-        self, source: Path, *, cancel: CancelToken,
+        self,
+        source: Path,
+        *,
+        cancel: CancelToken,
         on_progress: Callable[[int], None],
     ) -> ArchiveInfo: ...
 
     @abstractmethod
     def extract(
-        self, source: Path, staging: Path, options: ImportOptions,
-        *, cancel: CancelToken, on_progress: Callable[[int], None],
+        self,
+        source: Path,
+        staging: Path,
+        options: ImportOptions,
+        *,
+        cancel: CancelToken,
+        on_progress: Callable[[int], None],
     ) -> ExtractResult: ...
 ```
 
@@ -1215,13 +1241,15 @@ Stage Aのキャンセルではreadpst停止後に不完全stagingを削除し `
 ```python
 _DETACH_WINERRORS = frozenset({6, 21, 55, 433, 995, 1117, 1167})
 
+
 def classify_os_error(e: OSError) -> Exception:
     if getattr(e, "winerror", None) in _DETACH_WINERRORS:
         return StorageDetachedError(...)
     return e
 
+
 def classify_sqlite_error(e: sqlite3.Error) -> Exception:
-    name = getattr(e, "sqlite_errorname", "")   # Python 3.11+
+    name = getattr(e, "sqlite_errorname", "")  # Python 3.11+
     if name.startswith("SQLITE_IOERR") or name in {"SQLITE_READONLY_DBMOVED", "SQLITE_CANTOPEN"}:
         return StorageDetachedError(...)
     return e
