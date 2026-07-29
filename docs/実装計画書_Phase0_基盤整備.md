@@ -222,35 +222,35 @@ MailDockError
 
 **ルートマーカー**
 
-- [ ] `.maildock_root` の内容を `{"schema": 1, "root_uuid": "<uuid4>", "created_at": "<UTC ISO8601>", "app": "mail-dock"}` として定義する
-- [ ] `class RootProbe(StrEnum)` に `OK` / `MISSING` / `FOREIGN` を定義する
-- [ ] `initialize_root(path: Path) -> RootMarker` を実装する（既存マーカーがあれば読み込み、無ければ生成して fsync する）
-- [ ] `probe(path: Path, expected_uuid: str | None) -> RootProbe` を実装する
-- [ ] `RootResolution(path: Path | None, probe: RootProbe)` の結果型を定義し、`resolve_root(candidates: Sequence[Path], expected_uuid: str | None) -> RootResolution` を実装する（候補を順に照合し、**ドライブレター変更に自動追従**する）
-- [ ] `resolve_root()` はプローブ専用として書き込みを行わず、指定パスにマーカーがない初回だけコンポジションルートから明示的に `initialize_root()` を呼ぶ
-- [ ] 候補の正規化・重複排除・成功候補の先頭移動を定義し、一致候補がない場合に `FOREIGN` を `MISSING` より優先して返す
-- [ ] `FOREIGN` を `MISSING` より危険として扱う旨をコメントで明記する（別デバイスへの書き込み事故防止：開発計画書2.4-10）
+- [x] `.maildock_root` の内容を `{"schema": 1, "root_uuid": "<uuid4>", "created_at": "<UTC ISO8601>", "app": "mail-dock"}` として定義する
+- [x] `class RootProbe(StrEnum)` に `OK` / `MISSING` / `FOREIGN` を定義する
+- [x] `initialize_root(path: Path) -> RootMarker` を実装する（既存マーカーがあれば読み込み、無ければ生成して fsync する）
+- [x] `probe(path: Path, expected_uuid: str | None) -> RootProbe` を実装する
+- [x] `RootResolution(path: Path | None, probe: RootProbe)` の結果型を定義し、`resolve_root(candidates: Sequence[Path], expected_uuid: str | None) -> RootResolution` を実装する（候補を順に照合し、**ドライブレター変更に自動追従**する）
+- [x] `resolve_root()` はプローブ専用として書き込みを行わず、指定パスにマーカーがない初回だけコンポジションルートから明示的に `initialize_root()` を呼ぶ
+- [x] 候補の正規化・重複排除・成功候補の先頭移動を定義し、一致候補がない場合に `FOREIGN` を `MISSING` より優先して返す
+- [x] `FOREIGN` を `MISSING` より危険として扱う旨をコメントで明記する（別デバイスへの書き込み事故防止：開発計画書2.4-10）
 
 **レイアウトと空き容量**
 
-- [ ] `ensure_layout(root: Path) -> None` を実装し、`eml/` `manifests/imap/` `manifests/pst/` `tmp/` `logs/` を作成する
-- [ ] `tmp/` が**必ずルート配下（EMLと同一ボリューム）**である理由（`os.replace` の原子性）をコメントで明記する
-- [ ] `free_space(path: Path) -> int` を `shutil.disk_usage` で実装する
-- [ ] `check_free_space(path: Path) -> SpaceStatus` を実装する（残20GB未満で警告、5GB未満で `InsufficientSpaceError`）
-- [ ] `drive_kind(path: Path) -> DriveKind` を実装する（Windows は `ctypes` で `GetDriveTypeW` を呼び `DRIVE_REMOTE` を検出、非Windowsは `LOCAL` 固定）
+- [x] `ensure_layout(root: Path) -> None` を実装し、`eml/` `manifests/imap/` `manifests/pst/` `tmp/` `logs/` を作成する
+- [x] `tmp/` が**必ずルート配下（EMLと同一ボリューム）**である理由（`os.replace` の原子性）をコメントで明記する
+- [x] `free_space(path: Path) -> int` を `shutil.disk_usage` で実装する
+- [x] `check_free_space(path: Path) -> SpaceStatus` を実装する（残20GB未満で警告、5GB未満で `InsufficientSpaceError`）
+- [x] `drive_kind(path: Path) -> DriveKind` を実装する（Windows は `ctypes` で `GetDriveTypeW` を呼び `DRIVE_REMOTE` を検出、非Windowsは `LOCAL` 固定）
 
 **多重起動ロック（開発計画書3.6）**
 
-- [ ] `class StorageLock` を実装する
-  - [ ] **ロック用ファイルと情報ファイルを分離する**: `.lock`（0バイト・排他ロック専用）と `.lock.meta.json`（`{pid, instance_uuid, machine_id, heartbeat_at}`）
+- [x] `class StorageLock` を実装する
+  - [x] **ロック用ファイルと情報ファイルを分離する**: `.lock`（0バイト・排他ロック専用）と `.lock.meta.json`（`{pid, instance_uuid, machine_id, heartbeat_at}`）
         ※ `msvcrt.locking` は現在位置から N バイトをロックするため、同一ファイルへJSONを書くとロック範囲と衝突する
-  - [ ] Windows は `msvcrt.locking(fd, LK_NBLCK, 1)`、POSIX は `fcntl.flock(LOCK_EX | LOCK_NB)` を用いる（WSLテスト用）
-  - [ ] `touch_heartbeat() -> None` を実装する（駆動はPhase 3のUI側。Phase 0はAPIのみ）。ロックメタ情報の間隔は `heartbeat_interval_sec=5` と統一する
-  - [ ] スタール判定を実装する（開発計画書3.6の表）
+  - [x] Windows は `msvcrt.locking(fd, LK_NBLCK, 1)`、POSIX は `fcntl.flock(LOCK_EX | LOCK_NB)` を用いる（WSLテスト用）
+  - [x] `touch_heartbeat() -> None` を実装する（駆動はPhase 3のUI側。Phase 0はAPIのみ）。ロックメタ情報の間隔は `heartbeat_interval_sec=5` と統一する
+  - [x] スタール判定を実装する（開発計画書3.6の表）
         ロック取得不可 → `StorageLockedError` /
         取得可かつ `heartbeat_at` が新しい → 短時間リトライ後に中止 /
         取得可かつ `heartbeat_at` が古い・読めない → **前回異常終了として回収して続行**
-  - [ ] コンテキストマネージャとして使え、`release()` で `.lock` を確実に解放・削除できるようにする
+  - [x] コンテキストマネージャとして使え、`release()` で `.lock` を確実に解放・削除できるようにする
 
 ---
 
