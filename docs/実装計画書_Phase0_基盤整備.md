@@ -160,18 +160,18 @@ MailDockError
 
 #### **B-2. `infrastructure/logging_config.py` — ロギング基盤（開発計画書5.5）**
 
-- [ ] `setup_logging(config_dir: Path, *, debug: bool) -> None` を実装する
-  - [ ] `{config_dir}/logs/app.log` に `RotatingFileHandler(maxBytes=5*1024*1024, backupCount=5, encoding="utf-8")` を設定する
-  - [ ] コンソールハンドラは `debug=True` または環境変数 `MAILDOCK_DEBUG` が設定されている場合のみ追加する（GUIでは stderr が失われるため、ファイル出力を必須とする）
-- [ ] `set_storage_log_target(path: Path | None) -> None` を実装する
-  - [ ] `path` 指定時は `{storage_root}/logs/sync-{YYYY-MM-DD}.log` ハンドラを追加する
-  - [ ] **`None` 指定時は当該ハンドラを確実に閉じて取り外す**（切断時に内蔵ディスク側へ退避するための必須API）
-- [ ] `MaskingFilter` を実装し、すべてのハンドラに装着する
-  - [ ] メールアドレスを `us***@example.com` 形式にマスクする
-  - [ ] `password` / `token` / `secret` を含むキーの値を `***` に置換する
-- [ ] `mask_subject(subject: str) -> str` を実装する（先頭20文字＋省略記号）
-- [ ] `purge_old_logs(log_dir: Path, days: int = 90) -> int` を実装する（Phase 0 では関数のみ。定期実行は Phase 4）
-- [ ] モジュール docstring に「**本文は絶対にログへ渡さない**」という呼び出し側の規約を明記する
+- [x] `setup_logging(config_dir: Path, *, debug: bool) -> None` を実装する
+  - [x] `{config_dir}/logs/app.log` に `RotatingFileHandler(maxBytes=5*1024*1024, backupCount=5, encoding="utf-8")` を設定する
+  - [x] コンソールハンドラは `debug=True` または環境変数 `MAILDOCK_DEBUG` が設定されている場合のみ追加する（GUIでは stderr が失われるため、ファイル出力を必須とする）
+- [x] `set_storage_log_target(path: Path | None) -> None` を実装する
+  - [x] `path` 指定時は `{storage_root}/logs/sync-{YYYY-MM-DD}.log` ハンドラを追加する
+  - [x] **`None` 指定時は当該ハンドラを確実に閉じて取り外す**（切断時に内蔵ディスク側へ退避するための必須API）
+- [x] `MaskingFilter` を実装し、すべてのハンドラに装着する
+  - [x] メールアドレスを `us***@example.com` 形式にマスクする
+  - [x] `password` / `token` / `secret` を含むキーの値を `***` に置換する
+- [x] `mask_subject(subject: str) -> str` を実装する（先頭20文字＋省略記号）
+- [x] `purge_old_logs(log_dir: Path, days: int = 90) -> int` を実装する（Phase 0 では関数のみ。定期実行は Phase 4）
+- [x] モジュール docstring に「**本文は絶対にログへ渡さない**」という呼び出し側の規約を明記する
 
 #### **B-3. `config.py` — 設定管理（開発計画書5.11）**
 
