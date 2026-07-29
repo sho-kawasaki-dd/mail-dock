@@ -1,0 +1,9 @@
+From: sender@example.test
+To: recipient@example.test
+Subject: Undeclared charset fixture
+Message-ID: <undeclared@example.test>
+MIME-Version: 1.0
+Content-Type: text/plain
+Content-Transfer-Encoding: base64
+
+VVRGLTgg44Gu5pys5paH44Gn44GZ44CC

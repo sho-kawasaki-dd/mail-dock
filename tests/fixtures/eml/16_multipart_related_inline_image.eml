@@ -1,0 +1,19 @@
+From: sender@example.test
+To: recipient@example.test
+Subject: Related fixture
+Message-ID: <related@example.test>
+MIME-Version: 1.0
+Content-Type: multipart/related; boundary="related-boundary"
+
+--related-boundary
+Content-Type: text/html; charset="utf-8"
+
+<html><body><p>Inline image</p><img src="cid:image-1"></body></html>
+--related-boundary
+Content-Type: image/png
+Content-ID: <image-1>
+Content-Disposition: inline; filename="logo.png"
+Content-Transfer-Encoding: base64
+
+UE5H
+--related-boundary--

@@ -1,0 +1,8 @@
+From: sender@example.test
+To: recipient@example.test
+Subject: Duplicate Message-ID fixture
+Message-ID: <duplicate@example.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+
+This fixture intentionally shares its Message-ID with another generated copy.

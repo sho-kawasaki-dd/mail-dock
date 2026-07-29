@@ -1,0 +1,10 @@
+From: sender@example.test
+To: recipient@example.test
+Subject: ISO-2022-JP fixture
+Message-ID: <iso2022@example.test>
+Date: Thu, 30 Jul 2026 12:00:00 +0000
+MIME-Version: 1.0
+Content-Type: text/plain; charset="iso-2022-jp"
+Content-Transfer-Encoding: base64
+
+GyRCRnxLXDhsJE5LXEo4JEckOSEjGyhC

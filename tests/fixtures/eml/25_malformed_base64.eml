@@ -1,0 +1,9 @@
+From: sender@example.test
+To: recipient@example.test
+Subject: Malformed base64 fixture
+Message-ID: <bad-base64@example.test>
+MIME-Version: 1.0
+Content-Type: text/plain
+Content-Transfer-Encoding: base64
+
+not-valid-base64-*

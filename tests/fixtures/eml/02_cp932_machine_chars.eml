@@ -1,0 +1,10 @@
+From: sender@example.test
+To: recipient@example.test
+Subject: CP932 fixture
+Message-ID: <cp932@example.test>
+Date: Thu, 30 Jul 2026 12:00:00 +0000
+MIME-Version: 1.0
+Content-Type: text/plain; charset="cp932"
+Content-Transfer-Encoding: base64
+
+i0CO7YjLkbaVto6aOiCHQIeK7uA=

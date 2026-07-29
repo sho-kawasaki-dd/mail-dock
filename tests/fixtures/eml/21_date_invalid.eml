@@ -1,0 +1,9 @@
+From: sender@example.test
+To: recipient@example.test
+Subject: Invalid Date fixture
+Date: definitely-not-a-date
+Message-ID: <invalid-date@example.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+
+The parser should use INTERNALDATE.

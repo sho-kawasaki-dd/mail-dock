@@ -1,0 +1,18 @@
+From: sender@example.test
+To: recipient@example.test
+Subject: Outlook attachment fixture
+Message-ID: <outlook@example.test>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="outlook-boundary"
+
+--outlook-boundary
+Content-Type: text/plain; charset="utf-8"
+
+Outlook filename follows.
+--outlook-boundary
+Content-Type: application/octet-stream
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="=?UTF-8?B?5pel5pysLnR4dA==?="
+
+Zml4dHVyZQ==
+--outlook-boundary--

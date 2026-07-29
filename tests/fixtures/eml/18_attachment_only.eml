@@ -1,0 +1,13 @@
+From: sender@example.test
+To: recipient@example.test
+Subject: Attachment-only fixture
+Message-ID: <attachment-only@example.test>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="only-boundary"
+
+--only-boundary
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="report.txt"
+
+report
+--only-boundary--

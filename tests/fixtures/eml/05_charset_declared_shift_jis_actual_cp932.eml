@@ -1,0 +1,9 @@
+From: sender@example.test
+To: recipient@example.test
+Subject: Declared shift_jis, actual CP932
+Message-ID: <wrong-shiftjis@example.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="shift_jis"
+Content-Transfer-Encoding: base64
+
+i0CO7YjLkbaVto6aOiCHQIeK7uA=

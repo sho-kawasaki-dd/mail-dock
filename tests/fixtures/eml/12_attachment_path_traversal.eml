@@ -1,0 +1,17 @@
+From: sender@example.test
+To: recipient@example.test
+Subject: Traversal filename fixture
+Message-ID: <traversal@example.test>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="traversal-boundary"
+
+--traversal-boundary
+Content-Type: text/plain
+
+Traversal filename follows.
+--traversal-boundary
+Content-Type: text/plain
+Content-Disposition: attachment; filename="..\..\secret.txt"
+
+secret
+--traversal-boundary--

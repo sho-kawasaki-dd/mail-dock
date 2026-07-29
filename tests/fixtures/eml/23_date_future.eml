@@ -1,0 +1,9 @@
+From: sender@example.test
+To: recipient@example.test
+Subject: Future Date fixture
+Date: Thu, 30 Jul 2036 12:00:00 +0000
+Message-ID: <future-date@example.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+
+The parser should reject dates more than one day in the future.

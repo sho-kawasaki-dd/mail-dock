@@ -1,0 +1,18 @@
+From: sender@example.test
+To: recipient@example.test
+Subject: Executable filename fixture
+Message-ID: <executable@example.test>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="executable-boundary"
+
+--executable-boundary
+Content-Type: text/plain
+
+Executable filename follows.
+--executable-boundary
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="run.exe"
+Content-Transfer-Encoding: base64
+
+TVpG
+--executable-boundary--

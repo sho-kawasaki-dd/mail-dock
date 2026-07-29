@@ -1,0 +1,9 @@
+From: sender@example.test
+To: recipient@example.test
+Subject: x-sjis fixture
+Message-ID: <x-sjis@example.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="x-sjis"
+Content-Transfer-Encoding: base64
+
+i0CO7YjLkbaVto6aOiCHQIeK7uA=

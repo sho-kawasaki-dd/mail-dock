@@ -1,0 +1,25 @@
+From: sender@example.test
+To: recipient@example.test
+Subject: Nested multipart fixture
+Message-ID: <nested@example.test>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="outer-boundary"
+
+--outer-boundary
+Content-Type: multipart/alternative; boundary="inner-boundary"
+
+--inner-boundary
+Content-Type: text/plain; charset="utf-8"
+
+Nested plain body.
+--inner-boundary
+Content-Type: text/html; charset="utf-8"
+
+<p>Nested HTML body.</p>
+--inner-boundary--
+--outer-boundary
+Content-Type: text/plain
+Content-Disposition: attachment; filename="nested.txt"
+
+Nested attachment.
+--outer-boundary--

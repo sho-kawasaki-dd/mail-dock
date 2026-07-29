@@ -1,0 +1,9 @@
+From: sender@example.test
+To: recipient@example.test
+Subject: iso-2022-jp-ms fixture
+Message-ID: <iso2022ms@example.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="iso-2022-jp-ms"
+Content-Transfer-Encoding: base64
+
+GyRCRnxLXDhsJE5LXEo4JEckOSEjGyhC

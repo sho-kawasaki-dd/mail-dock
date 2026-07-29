@@ -1,0 +1,12 @@
+From: sender@example.test
+To: recipient@example.test
+Subject: Malformed boundary fixture
+Message-ID: <bad-boundary@example.test>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="declared-boundary"
+
+--different-boundary
+Content-Type: text/plain
+
+The declared boundary is intentionally absent.
+--different-boundary--

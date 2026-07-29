@@ -1,0 +1,17 @@
+From: sender@example.test
+To: recipient@example.test
+Subject: Japanese attachment fixture
+Message-ID: <japanese-attachment@example.test>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="japanese-boundary"
+
+--japanese-boundary
+Content-Type: text/plain; charset="utf-8"
+
+Japanese filename follows.
+--japanese-boundary
+Content-Type: text/plain; charset="utf-8"
+Content-Disposition: attachment; filename*=utf-8''%E8%AB%8B%E6%B1%82%E6%9B%B8.txt
+
+invoice
+--japanese-boundary--

@@ -1,0 +1,8 @@
+From: sender@example.test
+To: recipient@example.test
+Subject: Missing Date fixture
+Message-ID: <missing-date@example.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+
+The parser should use INTERNALDATE when Date is absent.

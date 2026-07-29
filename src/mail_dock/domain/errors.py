@@ -58,8 +58,32 @@ class FetchError(MailDockError):
     """Base class for errors raised while fetching mail from a remote source."""
 
 
-# Phase 1 adds AuthenticationError, TransientError, and PermanentError here.
-# Phase 4.5 adds archive-import-specific leaf errors here as needed.
+class AuthenticationError(FetchError):
+    """Raised when remote authentication is rejected and must not be retried."""
+
+
+class TransientError(FetchError):
+    """Raised for a temporary remote failure that may succeed on retry."""
+
+
+class PermanentError(FetchError):
+    """Raised for a remote failure that cannot be fixed by retrying."""
+
+
+class UidValidityChanged(FetchError):  # noqa: N818
+    """Control-flow signal indicating that a folder needs a new UID generation."""
+
+
+class OversizeError(FetchError):
+    """Raised when a message is larger than the configured download limit."""
+
+
+class ManifestCorruptError(StorageError):
+    """Raised when a non-tail manifest record cannot be recovered safely."""
+
+
+class CredentialStoreError(MailDockError):
+    """Raised when the operating-system credential store is unavailable."""
 
 
 class OperationCancelledError(MailDockError):

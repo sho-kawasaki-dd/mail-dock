@@ -1,0 +1,16 @@
+From: sender@example.test
+To: recipient@example.test
+Subject: Alternative fixture
+Message-ID: <alternative@example.test>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="alternative-boundary"
+
+--alternative-boundary
+Content-Type: text/plain; charset="utf-8"
+
+Plain text wins.
+--alternative-boundary
+Content-Type: text/html; charset="utf-8"
+
+<html><body><p>HTML fallback</p></body></html>
+--alternative-boundary--

@@ -107,7 +107,7 @@
 
 #### **A-2. EMLコーパスとテスト支援（*Phase 0 引き継ぎ事項*）**
 
-- [ ] `tests/fixtures/eml/` に以下のケースを配置し、`README.md` に各ファイルの意図と期待値を記載する
+- [x] `tests/fixtures/eml/` に以下のケースを配置し、`README.md` に各ファイルの意図と期待値を記載する
   - [ ] 文字コード: ISO-2022-JP / CP932（機種依存文字を含む）/ EUC-JP / UTF-8
   - [ ] charset ラベル誤り（`shift_jis` 宣言だが実体は CP932、`x-sjis`、`iso-2022-jp-ms`）
   - [ ] charset 宣言なし（`charset-normalizer` 推定に落ちるケース）
@@ -117,9 +117,9 @@
   - [ ] `Date` 不正フォーマット / `Date` 欠損 / 未来日時（現在+10年）
   - [ ] 巨大添付（サイズ上限判定用。**リポジトリには入れず生成スクリプトで作る**）
   - [ ] 壊れたMIME（境界文字列不一致、途中で切れたBase64）
-- [ ] `tests/support/fake_fetcher.py` に `FakeFetcher(BaseMailFetcher)` を実装する（フォルダ・UID・INTERNALDATE・サイズ・生バイト列を任意に構成でき、指定UIDで `TransientError` / `PermanentError` を送出できる）
-- [ ] `tests/support/in_memory_repository.py` に `InMemoryMessageRepository(BaseMessageRepository)` を実装する
-- [ ] `tests/support/eml_builder.py` に、コーパス生成とアドホックなEML組み立てのヘルパを実装する
+- [x] `tests/support/fake_fetcher.py` に `FakeFetcher(BaseMailFetcher)` を実装する（フォルダ・UID・INTERNALDATE・サイズ・生バイト列を任意に構成でき、指定UIDで `TransientError` / `PermanentError` を送出できる）
+- [x] `tests/support/in_memory_repository.py` に `InMemoryMessageRepository(BaseMessageRepository)` を実装する
+- [x] `tests/support/eml_builder.py` に、コーパス生成とアドホックなEML組み立てのヘルパを実装する
 
 #### **A-3. 本計画書の運用（*A-1と並行可*）**
 

@@ -1,0 +1,17 @@
+From: sender@example.test
+To: recipient@example.test
+Subject: Reserved filename fixture
+Message-ID: <reserved@example.test>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="reserved-boundary"
+
+--reserved-boundary
+Content-Type: text/plain
+
+Reserved filename follows.
+--reserved-boundary
+Content-Type: text/plain
+Content-Disposition: attachment; filename="CON.txt"
+
+reserved
+--reserved-boundary--
