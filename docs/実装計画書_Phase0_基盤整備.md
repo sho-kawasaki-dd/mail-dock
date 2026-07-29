@@ -175,8 +175,8 @@ MailDockError
 
 #### **B-3. `config.py` — 設定管理（開発計画書5.11）**
 
-- [ ] 保存先を `platformdirs.user_config_dir("mail-dock", appauthor=False)` 配下の `config.json` として解決する関数を実装する
-- [ ] `@dataclass(frozen=True) class AppConfig` を定義し、**開発計画書5.11のPST以外の全項目**を初期から持たせる
+- [x] 保存先を `platformdirs.user_config_dir("mail-dock", appauthor=False)` 配下の `config.json` として解決する関数を実装する
+- [x] `@dataclass(frozen=True) class AppConfig` を定義し、**開発計画書5.11のPST以外の全項目**を初期から持たせる
 
 | フィールド | 既定値 |
 | :---- | :---- |
@@ -198,14 +198,14 @@ MailDockError
 | `sync_log_retention_days: int` | `90` |
 | `db_backup_to_local_disk: bool` | `False` ※D-9。**枠のみ定義し Phase 0 では未使用** |
 
-- [ ] `load() -> AppConfig` を実装する（ファイル不在時は既定値を返す）
-- [ ] `save(config: AppConfig) -> None` を**原子的に**実装する（同一ディレクトリの一時ファイルへ書き込み → `flush` + `os.fsync` → `os.replace`）
-- [ ] `AppConfig` に未知キーを保持する `extra` フィールドを持たせ、モジュールグローバルへ退避せずに**未知キーを保持して書き戻す**仕組みを実装する（将来版が書いた設定を破壊しないため）
-- [ ] `schema_version` が現行より新しい場合 `ConfigVersionTooNewError` を送出する
-- [ ] `schema_version` が古い場合のアップグレード関数チェーンの枠を用意する（Phase 0 は v1 のみ）
-- [ ] JSONの構文・ルート型・既知キーの型・負数・許可されないモード値を検証し、`ConfigError` として報告する（不正な設定を既定値へ黙ってフォールバックしない）
-- [ ] `heartbeat_interval_sec` は `0` 以下を拒否し、正本の既定値である5秒に統一する
-- [ ] モジュール docstring に「**設定の読み書きのみを担当し、オブジェクト生成（DI）は行わない**」（開発計画書2.2）と明記する
+- [x] `load() -> AppConfig` を実装する（ファイル不在時は既定値を返す）
+- [x] `save(config: AppConfig) -> None` を**原子的に**実装する（同一ディレクトリの一時ファイルへ書き込み → `flush` + `os.fsync` → `os.replace`）
+- [x] `AppConfig` に未知キーを保持する `extra` フィールドを持たせ、モジュールグローバルへ退避せずに**未知キーを保持して書き戻す**仕組みを実装する（将来版が書いた設定を破壊しないため）
+- [x] `schema_version` が現行より新しい場合 `ConfigVersionTooNewError` を送出する
+- [x] `schema_version` が古い場合のアップグレード関数チェーンの枠を用意する（Phase 0 は v1 のみ）
+- [x] JSONの構文・ルート型・既知キーの型・負数・許可されないモード値を検証し、`ConfigError` として報告する（不正な設定を既定値へ黙ってフォールバックしない）
+- [x] `heartbeat_interval_sec` は `0` 以下を拒否し、正本の既定値である5秒に統一する
+- [x] モジュール docstring に「**設定の読み書きのみを担当し、オブジェクト生成（DI）は行わない**」（開発計画書2.2）と明記する
 
 #### **B-4. `infrastructure/storage/detach.py` — I/O例外の分類（開発計画書5.7.1-2a）**
 
