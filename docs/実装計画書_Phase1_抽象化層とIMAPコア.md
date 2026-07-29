@@ -134,7 +134,7 @@
 
 #### **B-1. `domain/errors.py` — 例外階層の葉を追加**
 
-- [ ] `FetchError` 配下に以下を追加する（Phase 0 でコメントを残した箇所）
+- [x] `FetchError` 配下に以下を追加する（Phase 0 でコメントを残した箇所）
 
 ```Plaintext
 FetchError
@@ -145,11 +145,11 @@ FetchError
 └─ OversizeError         # 1通あたりのサイズ上限超過
 ```
 
-- [ ] `StorageError` 配下に `ManifestCorruptError` を追加する（末尾torn行以外の破損＝切り離しで回復できない場合）
-- [ ] `MailDockError` 配下に `CredentialStoreError` を追加する（keyringバックエンド不在・保存失敗。認証拒否とは区別する）
-- [ ] 各例外に用途を説明する docstring を付ける
-- [ ] `UidValidityChanged` に「これは異常ではなく制御フローである」旨を docstring で明記する
-- [ ] 外部依存がゼロであることを維持する
+- [x] `StorageError` 配下に `ManifestCorruptError` を追加する（末尾torn行以外の破損＝切り離しで回復できない場合）
+- [x] `MailDockError` 配下に `CredentialStoreError` を追加する（keyringバックエンド不在・保存失敗。認証拒否とは区別する）
+- [x] 各例外に用途を説明する docstring を付ける
+- [x] `UidValidityChanged` に「これは異常ではなく制御フローである」旨を docstring で明記する
+- [x] 外部依存がゼロであることを維持する
 
 #### **B-2. `domain/fetcher.py` — プロトコル抽象化**
 
