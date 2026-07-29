@@ -353,15 +353,15 @@ DDLは開発計画書の記述をそのまま使用する。
 
 #### **D-2. Dockerテスト環境（WSL/Linux 専用）**
 
-- [ ] `tests/docker/compose.yaml` を作成する（GreenMail standalone、IMAP 3143 / IMAPS 3993、`GREENMAIL_OPTS` でテストユーザーを作成）。healthcheckでIMAPポートの受付を確認する
-- [ ] `tests/integration/test_imap_smoke.py` を作成する（`@pytest.mark.docker`）
-  - [ ] `imaplib.IMAP4_SSL` で、総待機時間に上限を設けた接続リトライ後にLOGINできること
-  - [ ] `LIST` が応答すること
-  - [ ] テスト用自己署名証明書を使う場合は専用SSLコンテキストで検証し、本番コードの証明書検証無効化設定と共有しないこと
-  - [ ] ※ UIDVALIDITY変化・フォルダ移動・接続切断の検証は Phase 1
-- [ ] `README.md` にWSL手順を記載する（`docker compose -f tests/docker/compose.yaml up -d` → `MAILDOCK_DOCKER=1 uv run pytest -m docker`）
-- [ ] Windowsでの既定実行が `uv run pytest -m "not docker"` であることをREADMEに明記する
-- [ ] Dovecot の追加は Phase 1 冒頭で検討する旨をコメントに残す（SPECIAL-USE / UIDVALIDITY操作 / 同時接続数制限の再現用）
+- [x] `tests/docker/compose.yaml` を作成する（GreenMail standalone、IMAP 3143 / IMAPS 3993、`GREENMAIL_OPTS` でテストユーザーを作成）。healthcheckでIMAPポートの受付を確認する
+- [x] `tests/integration/test_imap_smoke.py` を作成する（`@pytest.mark.docker`）
+  - [x] `imaplib.IMAP4_SSL` で、総待機時間に上限を設けた接続リトライ後にLOGINできること
+  - [x] `LIST` が応答すること
+  - [x] テスト用自己署名証明書を使う場合は専用SSLコンテキストで検証し、本番コードの証明書検証無効化設定と共有しないこと
+  - [x] ※ UIDVALIDITY変化・フォルダ移動・接続切断の検証は Phase 1
+- [x] `README.md` にWSL手順を記載する（`docker compose -f tests/docker/compose.yaml up -d` → `MAILDOCK_DOCKER=1 uv run pytest -m docker`）
+- [x] Windowsでの既定実行が `uv run pytest -m "not docker"` であることをREADMEに明記する
+- [x] Dovecot の追加は Phase 1 冒頭で検討する旨をコメントに残す（SPECIAL-USE / UIDVALIDITY操作 / 同時接続数制限の再現用）
 
 #### **D-3. `.github/workflows/ci.yml`**
 
@@ -430,7 +430,7 @@ DDLは開発計画書の記述をそのまま使用する。
 - [ ] V-7. スタールロック検証: ロック保持プロセスを強制終了して古い `.lock.meta.json` を残し、`heartbeat_at` を過去日時に書き換えると、次回起動でOSロック取得可否を確認したうえでロックが回収され、正常に起動する
 - [ ] V-8. `FOREIGN` 検証: `.maildock_root` の `root_uuid` を書き換えると起動が拒否され、**その際にルートへ一切書き込みが発生していない**
 - [ ] V-9. 再実行検証: 2回目以降の起動でマイグレーションが冪等にスキップされる
-- [ ] V-10. WSL: `docker compose -f tests/docker/compose.yaml up -d` → `MAILDOCK_DOCKER=1 uv run pytest -m docker` で GreenMail への LOGIN / LIST が成功する
+- [x] V-10. WSL: `docker compose -f tests/docker/compose.yaml up -d` → `MAILDOCK_DOCKER=1 uv run pytest -m docker` で GreenMail への LOGIN / LIST が成功する
 - [ ] V-11. CI: プルリクエストを作成し、`lint` / `test-windows` / `test-linux` の3ジョブがすべて成功する
 
 ---

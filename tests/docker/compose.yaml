@@ -1,0 +1,24 @@
+ # Dovecot is deferred to the start of Phase 1 for SPECIAL-USE, UIDVALIDITY,
+ # folder movement, and concurrent-connection-limit scenarios.
+services:
+  greenmail:
+    image: greenmail/standalone:2.1.6
+    environment:
+      GREENMAIL_OPTS: >-
+        -Dgreenmail.setup.test.imap
+        -Dgreenmail.setup.test.imaps
+        -Dgreenmail.hostname=0.0.0.0
+        -Dgreenmail.users=testuser:password@localhost
+    ports:
+      - "3143:3143"
+      - "3993:3993"
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - "echo > /dev/tcp/127.0.0.1/3143 && echo > /dev/tcp/127.0.0.1/3993"
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 5s
