@@ -1,7 +1,69 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "mail-dock"
 version = "0.1.0"
-description = "Add your description here"
+description = "Local mail backup and viewing application"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "mail-dock contributors" }]
+dependencies = [
+	"PySide6>=6.8",
+	"beautifulsoup4>=4.12",
+	"charset-normalizer>=3.3",
+	"keyring>=25",
+	"platformdirs>=4",
+]
+
+[project.scripts]
+mail-dock = "mail_dock.__main__:main"
+
+[dependency-groups]
+dev = [
+	"mypy",
+	"pytest",
+	"pytest-cov",
+	"pytest-qt",
+	"ruff",
+	"types-beautifulsoup4",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mail_dock"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "PTH", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.mypy]
+strict = true
+python_version = "3.13"
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["mail_dock.presentation.*", "PySide6.*"]
+ignore_missing_imports = true
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+check_untyped_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+markers = [
+	"docker: tests requiring the Docker-based integration environment",
+	"gui: tests requiring the graphical user interface",
+]
+
+[tool.coverage.run]
+source = ["src/mail_dock"]

@@ -75,17 +75,17 @@ Phase 1 以降（IMAPコア / 検索 / GUI / 切断対応 / PSTアーカイブ�
 
 #### **A-1. `pyproject.toml` の確定**
 
-- [ ] `[build-system]` に `hatchling` を指定し、`[tool.hatch.build.targets.wheel] packages = ["src/mail_dock"]` を設定する
-- [ ] `[project]` に `requires-python = ">=3.13"`、`license = "GPL-3.0-or-later"`（PEP 639 SPDX文字列）、`license-files = ["LICENSE"]`、`description`、`authors` を設定する
-- [ ] `dependencies` を開発計画書2.1の確定リストどおりに記述する（`PySide6>=6.8` / `keyring>=25` / `beautifulsoup4>=4.12` / `charset-normalizer>=3.3` / `platformdirs>=4`）
-- [ ] `[dependency-groups] dev` に `pytest` / `pytest-qt` / `pytest-cov` / `ruff` / `mypy` を記述し、mypy strict のため **`types-beautifulsoup4`** を追加する
-- [ ] `[project.scripts]` に `mail-dock = "mail_dock.__main__:main"` を定義する
-- [ ] `[tool.ruff]` を設定する（`target-version = "py313"`、`line-length = 100`、`lint.select = ["E","F","I","N","UP","B","SIM","PTH","RUF"]`、`tests/**` の per-file-ignores）
-- [ ] `[tool.mypy]` を設定する（`strict = true`、`python_version = "3.13"`、`files = ["src", "tests"]`、`mail_dock.presentation.*` と `PySide6.*` の overrides）
-- [ ] `[tool.pytest.ini_options]` を設定する（`testpaths = ["tests"]`、`addopts = "--strict-markers"`、`markers = ["docker: ...", "gui: ..."]`）
-- [ ] `[tool.coverage.run]` に `source = ["src/mail_dock"]` を設定する
-- [ ] `uv lock` を実行し、`uv.lock` を生成してコミット対象に含める
-- [ ] `uv sync` が成功することを確認する
+- [x] `[build-system]` に `hatchling` を指定し、`[tool.hatch.build.targets.wheel] packages = ["src/mail_dock"]` を設定する
+- [x] `[project]` に `requires-python = ">=3.13"`、`license = "GPL-3.0-or-later"`（PEP 639 SPDX文字列）、`license-files = ["LICENSE"]`、`description`、`authors` を設定する
+- [x] `dependencies` を開発計画書2.1の確定リストどおりに記述する（`PySide6>=6.8` / `keyring>=25` / `beautifulsoup4>=4.12` / `charset-normalizer>=3.3` / `platformdirs>=4`）
+- [x] `[dependency-groups] dev` に `pytest` / `pytest-qt` / `pytest-cov` / `ruff` / `mypy` を記述し、mypy strict のため **`types-beautifulsoup4`** を追加する
+- [x] `[project.scripts]` に `mail-dock = "mail_dock.__main__:main"` を定義する
+- [x] `[tool.ruff]` を設定する（`target-version = "py313"`、`line-length = 100`、`lint.select = ["E","F","I","N","UP","B","SIM","PTH","RUF"]`、`tests/**` の per-file-ignores）
+- [x] `[tool.mypy]` を設定する（`strict = true`、`python_version = "3.13"`、`files = ["src", "tests"]`、`mail_dock.presentation.*` と `PySide6.*` の overrides）
+- [x] `[tool.pytest.ini_options]` を設定する（`testpaths = ["tests"]`、`addopts = "--strict-markers"`、`markers = ["docker: ...", "gui: ..."]`）
+- [x] `[tool.coverage.run]` に `source = ["src/mail_dock"]` を設定する
+- [x] `uv lock` を実行し、`uv.lock` を生成してコミット対象に含める
+- [x] `uv sync` が成功することを確認する
 
 #### **A-2. リポジトリ骨格の作成**
 
