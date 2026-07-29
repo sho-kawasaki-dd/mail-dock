@@ -171,11 +171,11 @@ FetchError
 
 #### **B-3. `domain/messages.py` — 解析結果のデータ構造**
 
-- [ ] `ParsedAttachment`（frozen dataclass）: `filename: str | None` / `content_type: str` / `size_bytes: int` / `is_inline: bool`
-- [ ] `ParsedMessage`（frozen dataclass）: `subject` / `sender` / `recipient` / `cc` / `date_sent: datetime | None` / `message_id: str | None` / `in_reply_to` / `references_ids` / `body_text` / `attachments: tuple[ParsedAttachment, ...]` / `has_attachment: bool` / `parse_error: str | None`
-- [ ] `StoredEml`（frozen dataclass）: `relative_path: str` / `file_hash: str` / `size_bytes: int` / `deduplicated: bool`
-- [ ] `content_key` / `thread_key` の算出結果を保持する箇所を明確にする（算出ロジックは `infrastructure/parsing` 側、値の保持は本モジュール）
-- [ ] 外部依存が標準ライブラリのみであることを維持する
+- [x] `ParsedAttachment`（frozen dataclass）: `filename: str | None` / `content_type: str` / `size_bytes: int` / `is_inline: bool`
+- [x] `ParsedMessage`（frozen dataclass）: `subject` / `sender` / `recipient` / `cc` / `date_sent: datetime | None` / `message_id: str | None` / `in_reply_to` / `references_ids` / `body_text` / `attachments: tuple[ParsedAttachment, ...]` / `has_attachment: bool` / `parse_error: str | None`
+- [x] `StoredEml`（frozen dataclass）: `relative_path: str` / `file_hash: str` / `size_bytes: int` / `deduplicated: bool`
+- [x] `content_key` / `thread_key` の算出結果を保持する箇所を明確にする（算出ロジックは `infrastructure/parsing` 側、値の保持は本モジュール）
+- [x] 外部依存が標準ライブラリのみであることを維持する
 
 #### **B-4. `domain/repository.py` — `BaseMessageRepository`（*B-3 に依存*）**
 
