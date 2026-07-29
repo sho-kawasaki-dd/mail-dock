@@ -194,11 +194,11 @@ FetchError
 
 #### **B-5. `domain/ports.py` — 外部I/Oポート**
 
-- [ ] `BaseCredentialStore(ABC)` を定義する: `set_password(account_id, password)` / `get_password(account_id) -> str | None` / `delete_password(account_id)`
-- [ ] `BaseEmlStorage(ABC)` を定義する: `save(account_id, internal_date, raw) -> StoredEml` / `reuse(relative_path, expected_hash) -> StoredEml | None` / `read(relative_path) -> bytes`
-- [ ] `BaseManifestWriter(ABC)` を定義する: `append(event)` / `flush_and_sync()`
-- [ ] 型は標準ライブラリと `domain` のデータ構造だけで表現し、外部依存を持たせない
-- [ ] 削除APIはPhase 1のusecaseで不要なため `BaseEmlStorage` に追加しない
+- [x] `BaseCredentialStore(ABC)` を定義する: `set_password(account_id, password)` / `get_password(account_id) -> str | None` / `delete_password(account_id)`
+- [x] `BaseEmlStorage(ABC)` を定義する: `save(account_id, internal_date, raw) -> StoredEml` / `reuse(relative_path, expected_hash) -> StoredEml | None` / `read(relative_path) -> bytes`
+- [x] `BaseManifestWriter(ABC)` を定義する: `append(event)` / `flush_and_sync()`
+- [x] 型は標準ライブラリと `domain` のデータ構造だけで表現し、外部依存を持たせない
+- [x] 削除APIはPhase 1のusecaseで不要なため `BaseEmlStorage` に追加しない
 
 ---
 
