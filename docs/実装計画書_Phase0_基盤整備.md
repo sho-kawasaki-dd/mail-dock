@@ -89,7 +89,7 @@ Phase 1 以降（IMAPコア / 検索 / GUI / 切断対応 / PSTアーカイブ�
 
 #### **A-2. リポジトリ骨格の作成**
 
-- [ ] 以下のファイル・ディレクトリを作成する（**Phase 0 で実装するモジュールのみ**。空の `views/` `usecases/` 等は作らない）
+- [x] 以下のファイル・ディレクトリを作成する（**Phase 0 で実装するモジュールのみ**。空の `views/` `usecases/` 等は作らない）
 
 ```Plaintext
 src/mail_dock/__init__.py
@@ -111,8 +111,8 @@ tests/conftest.py
 tests/unit/ tests/integration/ tests/support/ tests/fixtures/eml/ tests/docker/
 ```
 
-- [ ] `src/mail_dock/__init__.py` に `__version__` を定義する（`pyproject.toml` の version と一致させる）
-- [ ] `uv run python -c "import mail_dock"` が成功することを確認する
+- [x] `src/mail_dock/__init__.py` に `__version__` を定義する（`pyproject.toml` の version と一致させる）
+- [x] `uv run python -c "import mail_dock"` が成功することを確認する
 
 #### **A-3. ライセンス・ドキュメント（*A-1と並行可*）**
 
