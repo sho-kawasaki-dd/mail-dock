@@ -166,8 +166,8 @@ FetchError
   - [x] `download_eml_bytes(raw_name: str, uid: int) -> bytes`
   - [x] `download_eml_headers(raw_name: str, uid: int) -> bytes`（oversizeのメタデータ登録用）
   - [x] `delete_remote_message(raw_name, uid, *, mode="trash") -> None`
-- [ ] クラス docstring に「**実装にリトライを書かない。リトライは usecases 層に集約する**」と明記する
-- [ ] `BaseArchiveImporter`（Phase 4.5）と統合しない理由をコメントで残す
+- [x] クラス docstring に「**実装にリトライを書かない。リトライは usecases 層に集約する**」と明記する
+- [x] `BaseArchiveImporter`（Phase 4.5）と統合しない理由をコメントで残す
 
 #### **B-3. `domain/messages.py` — 解析結果のデータ構造**
 

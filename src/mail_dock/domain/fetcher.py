@@ -58,10 +58,16 @@ class CancelToken:
 
 
 class BaseMailFetcher(ABC):
-    """Provider boundary; retry and backoff belong in the use-case layer."""
+    """Provider boundary for live, incrementally synchronized mail sources.
 
-    # Archive import is intentionally separate: it has different resume and
-    # cancellation constraints from a live, incrementally synchronized inbox.
+    Implementations must not contain retry or backoff logic. Retry handling is
+    centralized in the use-case layer so every provider follows the same
+    policy.
+    """
+
+    # Do not combine this contract with BaseArchiveImporter (Phase 4.5): a
+    # live fetcher and a one-time archive import have different resume
+    # semantics and cancellation granularity.
 
     @abstractmethod
     def connect(self) -> None:
