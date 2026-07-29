@@ -333,23 +333,23 @@ DDLは開発計画書の記述をそのまま使用する。
 
 #### **D-1. pytest 基盤**
 
-- [ ] `tests/conftest.py` に共通fixtureを実装する
-  - [ ] `tmp_storage_root`: `tmp_path` 配下にマーカー付きルートを作成する
-  - [ ] `db_conn`: **一時ディレクトリ上の実ファイルSQLite**を返す（FTSトリガーとWALの検証に必須のため `:memory:` は使わない）
-  - [ ] `docker` マーカーの自動skip: 環境変数 `MAILDOCK_DOCKER=1` が無ければ skip する
-- [ ] 単体テスト（`tests/unit/`）を作成する
-  - [ ] `test_config.py`: 往復・未知キー保持・原子的書き込み（書き込み途中で落ちても旧ファイルが壊れない）・`ConfigVersionTooNewError`
-  - [ ] `test_config.py`: JSON構文・型・範囲・列挙値の検証、`heartbeat_interval_sec=0` の拒否
-  - [ ] `test_logging.py`: メールアドレス／パスワードのマスキング、`mask_subject` の20文字打ち切り、`set_storage_log_target(None)` でハンドラが確実に外れること
-  - [ ] `test_detach.py`: 各 winerror / POSIX errno / SQLite errorname が `StorageDetachedError` へ分類されること、無関係な `OSError` が素通しされること
-  - [ ] `test_storage_root.py`: `OK` / `MISSING` / `FOREIGN` の3値、候補リストによるドライブレター追従、`ensure_layout`、空き容量閾値
-  - [ ] `test_lock.py`: 2重取得で `StorageLockedError`、stale heartbeat の回収、正常解放後のファイル削除、`.lock` が残存していてもOSロック取得可なら起動できること
-  - [ ] `test_connection.py`: readonly接続がDBを新規作成せず、journal modeを変更せず、ワーカースレッドが自身の接続を閉じた後に `assert_all_closed()` が成功すること
-- [ ] 結合テスト（`tests/integration/`）を作成する
-  - [ ] `test_migrator.py`: 空v0 DB→`user_version=1`、非空v0 DB→`.bak.0` 生成、`PRAGMA integrity_check`、冪等な再実行、テスト用v2適用前のバックアップ、version too new の拒否
-  - [ ] `test_migrator.py`: 途中失敗時にDDLと `user_version` が更新されず、`foreign_keys` がONへ復帰すること
-  - [ ] `test_fts_triggers.py`: `message_contents` への insert→FTS検索ヒット→update→delete→ヒットしないこと（3.4の3トリガー検証）
-- [ ] `tests/fixtures/eml/` と `tests/support/` に **README のみ**を置く（EMLコーパスとimaplibモックの作り込みは Phase 1。`BaseMailFetcher` の設計に引きずられないため）
+- [x] `tests/conftest.py` に共通fixtureを実装する
+  - [x] `tmp_storage_root`: `tmp_path` 配下にマーカー付きルートを作成する
+  - [x] `db_conn`: **一時ディレクトリ上の実ファイルSQLite**を返す（FTSトリガーとWALの検証に必須のため `:memory:` は使わない）
+  - [x] `docker` マーカーの自動skip: 環境変数 `MAILDOCK_DOCKER=1` が無ければ skip する
+- [x] 単体テスト（`tests/unit/`）を作成する
+  - [x] `test_config.py`: 往復・未知キー保持・原子的書き込み（書き込み途中で落ちても旧ファイルが壊れない）・`ConfigVersionTooNewError`
+  - [x] `test_config.py`: JSON構文・型・範囲・列挙値の検証、`heartbeat_interval_sec=0` の拒否
+  - [x] `test_logging.py`: メールアドレス／パスワードのマスキング、`mask_subject` の20文字打ち切り、`set_storage_log_target(None)` でハンドラが確実に外れること
+  - [x] `test_detach.py`: 各 winerror / POSIX errno / SQLite errorname が `StorageDetachedError` へ分類されること、無関係な `OSError` が素通しされること
+  - [x] `test_storage_root.py`: `OK` / `MISSING` / `FOREIGN` の3値、候補リストによるドライブレター追従、`ensure_layout`、空き容量閾値
+  - [x] `test_lock.py`: 2重取得で `StorageLockedError`、stale heartbeat の回収、正常解放後のファイル削除、`.lock` が残存していてもOSロック取得可なら起動できること
+  - [x] `test_connection.py`: readonly接続がDBを新規作成せず、journal modeを変更せず、ワーカースレッドが自身の接続を閉じた後に `assert_all_closed()` が成功すること
+- [x] 結合テスト（`tests/integration/`）を作成する
+  - [x] `test_migrator.py`: 空v0 DB→`user_version=1`、非空v0 DB→`.bak.0` 生成、`PRAGMA integrity_check`、冪等な再実行、テスト用v2適用前のバックアップ、version too new の拒否
+  - [x] `test_migrator.py`: 途中失敗時にDDLと `user_version` が更新されず、`foreign_keys` がONへ復帰すること
+  - [x] `test_fts_triggers.py`: `message_contents` への insert→FTS検索ヒット→update→delete→ヒットしないこと（3.4の3トリガー検証）
+- [x] `tests/fixtures/eml/` と `tests/support/` に **README のみ**を置く（EMLコーパスとimaplibモックの作り込みは Phase 1。`BaseMailFetcher` の設計に引きずられないため）
 
 #### **D-2. Dockerテスト環境（WSL/Linux 専用）**
 
