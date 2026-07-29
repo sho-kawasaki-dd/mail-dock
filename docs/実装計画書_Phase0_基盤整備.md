@@ -258,18 +258,18 @@ MailDockError
 
 #### **C-1. `infrastructure/database/connection.py`**
 
-- [ ] `connect(db_path: Path, *, readonly: bool = False, network_drive: bool = False) -> sqlite3.Connection` を実装する
-  - [ ] 開発計画書3.6のPRAGMAをすべて適用する（`journal_mode=WAL` / `synchronous=NORMAL` / `foreign_keys=ON` / `busy_timeout=10000` / `temp_store=MEMORY` / `cache_size=-64000`）
-  - [ ] `network_drive=True` のとき `journal_mode` を **`DELETE` へフォールバック**する
-  - [ ] `readonly=True` のときSQLite URIの `mode=ro` と `PRAGMA query_only=ON` を使い、`journal_mode` の変更・マイグレーション・チェックポイントを実行しない（DBファイルを新規作成しない）
-  - [ ] `foreign_keys=ON` は**接続ごとに必須**である旨をコメントで明記する
-- [ ] `class ConnectionManager` を実装する
-  - [ ] `threading.local()` でスレッドローカル接続を保持する
-  - [ ] 生成した接続の所有スレッドを追跡し、各所有スレッドが `close_current_thread()` を呼ぶ協調停止プロトコルを実装する
-  - [ ] `request_close_all()` で新規接続を停止し、ワーカーの終了とjoin後に `assert_all_closed()` で漏れを検出する。別スレッドの接続を直接 `close()` してはならない
-- [ ] すべての `sqlite3.Error` を `detach.classify_sqlite_error` 経由で送出する
-- [ ] `checkpoint_truncate(conn)` を実装する（書き込み接続のみで `PRAGMA wal_checkpoint(TRUNCATE)`。定期実行は Phase 1、終了時実行は Phase 4）
-- [ ] モジュール docstring に「**接続をスレッド間で共有しない / `check_same_thread=False` を使わない / 書き込みは単一ライターに集約する**」方針を明記する
+- [x] `connect(db_path: Path, *, readonly: bool = False, network_drive: bool = False) -> sqlite3.Connection` を実装する
+  - [x] 開発計画書3.6のPRAGMAをすべて適用する（`journal_mode=WAL` / `synchronous=NORMAL` / `foreign_keys=ON` / `busy_timeout=10000` / `temp_store=MEMORY` / `cache_size=-64000`）
+  - [x] `network_drive=True` のとき `journal_mode` を **`DELETE` へフォールバック**する
+  - [x] `readonly=True` のときSQLite URIの `mode=ro` と `PRAGMA query_only=ON` を使い、`journal_mode` の変更・マイグレーション・チェックポイントを実行しない（DBファイルを新規作成しない）
+  - [x] `foreign_keys=ON` は**接続ごとに必須**である旨をコメントで明記する
+- [x] `class ConnectionManager` を実装する
+  - [x] `threading.local()` でスレッドローカル接続を保持する
+  - [x] 生成した接続の所有スレッドを追跡し、各所有スレッドが `close_current_thread()` を呼ぶ協調停止プロトコルを実装する
+  - [x] `request_close_all()` で新規接続を停止し、ワーカーの終了とjoin後に `assert_all_closed()` で漏れを検出する。別スレッドの接続を直接 `close()` してはならない
+- [x] すべての `sqlite3.Error` を `detach.classify_sqlite_error` 経由で送出する
+- [x] `checkpoint_truncate(conn)` を実装する（書き込み接続のみで `PRAGMA wal_checkpoint(TRUNCATE)`。定期実行は Phase 1、終了時実行は Phase 4）
+- [x] モジュール docstring に「**接続をスレッド間で共有しない / `check_same_thread=False` を使わない / 書き込みは単一ライターに集約する**」方針を明記する
 
 #### **C-2. `infrastructure/database/migrator.py`**
 
