@@ -209,14 +209,14 @@ MailDockError
 
 #### **B-4. `infrastructure/storage/detach.py` — I/O例外の分類（開発計画書5.7.1-2a）**
 
-- [ ] `_DETACH_WINERRORS = frozenset({6, 21, 55, 433, 995, 1117, 1167})` を定義する
-- [ ] `classify_os_error(e: OSError) -> Exception` を実装する
-  - [ ] Windows: `winerror` が `_DETACH_WINERRORS` に含まれる場合 `StorageDetachedError` へ変換する
-  - [ ] **POSIX: `EIO(5)` / `ENXIO(6)` / `ENODEV(19)` / `ESTALE(116)` も分類する**（WSLでの切断試験を可能にするため）
-  - [ ] 該当しない例外はそのまま返す
-- [ ] `classify_sqlite_error(e: sqlite3.Error) -> Exception` を実装する（`sqlite_errorname` が `SQLITE_IOERR*` / `SQLITE_READONLY_DBMOVED` / `SQLITE_CANTOPEN`）
-- [ ] `@contextmanager storage_io()` を実装する（内部で例外を分類してから再送出するラッパ）
-- [ ] モジュール docstring に「**上位層に `winerror` やSQLiteエラーコードを漏らさない唯一の関門**である」と明記する
+- [x] `_DETACH_WINERRORS = frozenset({6, 21, 55, 433, 995, 1117, 1167})` を定義する
+- [x] `classify_os_error(e: OSError) -> Exception` を実装する
+  - [x] Windows: `winerror` が `_DETACH_WINERRORS` に含まれる場合 `StorageDetachedError` へ変換する
+  - [x] **POSIX: `EIO(5)` / `ENXIO(6)` / `ENODEV(19)` / `ESTALE(116)` も分類する**（WSLでの切断試験を可能にするため）
+  - [x] 該当しない例外はそのまま返す
+- [x] `classify_sqlite_error(e: sqlite3.Error) -> Exception` を実装する（`sqlite_errorname` が `SQLITE_IOERR*` / `SQLITE_READONLY_DBMOVED` / `SQLITE_CANTOPEN`）
+- [x] `@contextmanager storage_io()` を実装する（内部で例外を分類してから再送出するラッパ）
+- [x] モジュール docstring に「**上位層に `winerror` やSQLiteエラーコードを漏らさない唯一の関門**である」と明記する
 
 #### **B-5. `infrastructure/storage/storage_root.py` — ルート同定とロック（*B-1に依存*）**
 
