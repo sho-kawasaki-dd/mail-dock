@@ -96,14 +96,14 @@
 
 #### **A-1. Dovecot コンテナの追加（*Phase 0 引き継ぎ事項の決着*）**
 
-- [ ] `tests/docker/compose.yaml` に `dovecot` サービスを追加する（IMAP: 3144 / IMAPS: 3994。GreenMail のポートと衝突させない）
-- [ ] `tests/docker/dovecot/` に設定を配置し、以下を再現できるようにする
-  - [ ] SPECIAL-USE 属性（`\Trash` / `\Sent` / `\Drafts`）を返すフォルダ
-  - [ ] modified UTF-7 でエンコードされる日本語フォルダ名（例: `受信トレイ/請求書`）
-  - [ ] 階層区切り文字が `.` のケース（お名前.com 想定。GreenMail の `/` と対比する）
-- [ ] テストから UIDVALIDITY を強制変更する手順を `tests/support/` のヘルパとして用意する（メールボックスの削除→再作成、または dovecot の uidvalidity ファイル操作）
-- [ ] `README.md` の WSL Dockerテスト手順に Dovecot を追記する
-- [ ] `docker compose -f tests/docker/compose.yaml up -d` で GreenMail と Dovecot が同時に healthy になることを確認する
+- [x] `tests/docker/compose.yaml` に `dovecot` サービスを追加する（IMAP: 3144 / IMAPS: 3994。GreenMail のポートと衝突させない）
+- [x] `tests/docker/dovecot/` に設定を配置し、以下を再現できるようにする
+  - [x] SPECIAL-USE 属性（`\Trash` / `\Sent` / `\Drafts`）を返すフォルダ
+  - [x] modified UTF-7 でエンコードされる日本語フォルダ名（例: `受信トレイ/請求書`）
+  - [x] 階層区切り文字が `.` のケース（お名前.com 想定。GreenMail の `/` と対比する）
+- [x] テストから UIDVALIDITY を強制変更する手順を `tests/support/` のヘルパとして用意する（メールボックスの削除→再作成、または dovecot の uidvalidity ファイル操作）
+- [x] `README.md` の WSL Dockerテスト手順に Dovecot を追記する
+- [x] `docker compose -f tests/docker/compose.yaml up -d` で GreenMail と Dovecot が同時に healthy になることを確認する
 
 #### **A-2. EMLコーパスとテスト支援（*Phase 0 引き継ぎ事項*）**
 

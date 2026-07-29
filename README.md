@@ -25,12 +25,18 @@ The default test command excludes Docker-based integration tests and is suitable
 
 ## WSL Docker tests
 
-Run the GreenMail integration environment from WSL/Linux:
+Run the GreenMail and Dovecot integration environments from WSL/Linux:
 
 ```sh
 docker compose -f tests/docker/compose.yaml up -d
 MAILDOCK_DOCKER=1 uv run pytest -m docker
 docker compose -f tests/docker/compose.yaml down
 ```
+
+The services expose GreenMail on IMAP `3143` / IMAPS `3993` and Dovecot on
+IMAP `3144` / IMAPS `3994`. Both use the test account `testuser` with password
+`password`. Dovecot also provides `Sent`, `Drafts`, and `Trash` SPECIAL-USE
+mailboxes plus the Japanese `受信トレイ.請求書` hierarchy with `.` as the
+folder delimiter.
 
 Use the application CLI with `uv run mail-dock`. The `--storage-root` option selects an archive root; `migrate` applies database migrations and `verify` performs read-only integrity checks.
