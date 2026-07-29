@@ -307,25 +307,25 @@ DDLは開発計画書の記述をそのまま使用する。
 
 #### **C-4. `__main__.py` — コンポジションルート**
 
-- [ ] `argparse` で以下を実装する（D-10）
-  - [ ] 共通オプション: `--storage-root` / `--debug` / `--version`
-  - [ ] サブコマンド `migrate`: マイグレーションのみ実行して終了
-  - [ ] サブコマンド `verify`: 接続確認と `PRAGMA quick_check` / `foreign_key_check` を実行（Phase 0 の範囲。フル検証は Phase 4）
-  - [ ] サブコマンド省略時: 起動シーケンスを通して正常終了（GUI起動は Phase 3 で差し替え）
-- [ ] 起動シーケンスを実装する
-  1. [ ] `config.load()`
-  2. [ ] `setup_logging(config_dir, debug=...)`
-  3. [ ] `--storage-root` 指定時はプローブ後、マーカーがない場合だけ `initialize_root()` を明示的に実行し、再読込したUUIDを期待値と照合する。候補探索時は `resolve_root()` の結果型を利用する
-  4. [ ] `FOREIGN` の場合、**対象ルートへ一切書き込みを行わずに** `StorageForeignRootError` で中止する
-  5. [ ] `StorageLock` の取得
-  6. [ ] `ensure_layout(root)` と `check_free_space(root)`
-  7. [ ] `set_storage_log_target(root / "logs")`
-  8. [ ] `connect(root / "metadata.db", network_drive=...)` → `migrate()`
-  9. [ ] 起動成功後に `storage_root_uuid` と正規化した候補パスを設定へ原子的に保存する
-  10. [ ] 終了処理（新規接続停止 → ワーカーへキャンセル通知 → 各所有スレッドで接続close → join → `assert_all_closed()` → ストレージログ解除 → ロック解放）
-- [ ] **DI組み立てをこのファイルに集約**し、他モジュールでオブジェクト生成をしないことを確認する（開発計画書2.2）
-- [ ] 例外を捕捉して終了コードを分ける（正常:0 / 設定・ルート異常:2 / ロック競合:3 / DB異常:4）
-- [ ] `verify` は書き込みを伴うマイグレーションを行わず、読み取り専用接続で `quick_check` / `foreign_key_check` を実行する。`migrate` は書き込み接続を使用する
+- [x] `argparse` で以下を実装する（D-10）
+  - [x] 共通オプション: `--storage-root` / `--debug` / `--version`
+  - [x] サブコマンド `migrate`: マイグレーションのみ実行して終了
+  - [x] サブコマンド `verify`: 接続確認と `PRAGMA quick_check` / `foreign_key_check` を実行（Phase 0 の範囲。フル検証は Phase 4）
+  - [x] サブコマンド省略時: 起動シーケンスを通して正常終了（GUI起動は Phase 3 で差し替え）
+- [x] 起動シーケンスを実装する
+  1. [x] `config.load()`
+  2. [x] `setup_logging(config_dir, debug=...)`
+  3. [x] `--storage-root` 指定時はプローブ後、マーカーがない場合だけ `initialize_root()` を明示的に実行し、再読込したUUIDを期待値と照合する。候補探索時は `resolve_root()` の結果型を利用する
+  4. [x] `FOREIGN` の場合、**対象ルートへ一切書き込みを行わずに** `StorageForeignRootError` で中止する
+  5. [x] `StorageLock` の取得
+  6. [x] `ensure_layout(root)` と `check_free_space(root)`
+  7. [x] `set_storage_log_target(root / "logs")`
+  8. [x] `connect(root / "metadata.db", network_drive=...)` → `migrate()`
+  9. [x] 起動成功後に `storage_root_uuid` と正規化した候補パスを設定へ原子的に保存する
+  10. [x] 終了処理（新規接続停止 → ワーカーへキャンセル通知 → 各所有スレッドで接続close → join → `assert_all_closed()` → ストレージログ解除 → ロック解放）
+- [x] **DI組み立てをこのファイルに集約**し、他モジュールでオブジェクト生成をしないことを確認する（開発計画書2.2）
+- [x] 例外を捕捉して終了コードを分ける（正常:0 / 設定・ルート異常:2 / ロック競合:3 / DB異常:4）
+- [x] `verify` は書き込みを伴うマイグレーションを行わず、読み取り専用接続で `quick_check` / `foreign_key_check` を実行する。`migrate` は書き込み接続を使用する
 
 ---
 
