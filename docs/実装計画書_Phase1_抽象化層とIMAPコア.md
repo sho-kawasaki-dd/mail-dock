@@ -123,8 +123,8 @@
 
 #### **A-3. 本計画書の運用（*A-1と並行可*）**
 
-- [ ] 本書のチェックボックスを、各タスクの完了確認後に埋める運用を守る
-- [ ] `002_sync_cursor.sql` で明示した変更以外に `001_init.sql` の過不足が判明した場合、既存マイグレーションは変更せず本書の「7. Phase 2 への引き継ぎ事項」へ記録する（D-12）
+- [x] 本書のチェックボックスを、各タスクの完了確認後に埋める運用を守る
+- [x] `002_sync_cursor.sql` で明示した変更以外に `001_init.sql` の過不足が判明した場合、既存マイグレーションは変更せず本書の「7. Phase 2 への引き継ぎ事項」へ記録する（D-12）
 
 ---
 
@@ -588,6 +588,7 @@ FetchError
 * `normalize.normalize_for_search()` は **検索側でも必ず同じ関数を使う**こと。Phase 2 で別実装を作らない。
 * FTS5 + trigram の性能PoC（1万通で実測）を Phase 2 冒頭で行う。Phase 1 で蓄積した実データをそのまま計測に使う。
 * `001_init.sql` は変更せず、Phase 1で必要な二カーソルとUIDVALIDITY別failure管理は `002_sync_cursor.sql` で追加する。これ以外の列の過不足は本節へ記録し、Phase 2以降のマイグレーションとして適用する。
+* A-3のスキーマ確認（2026-07-30）では、`001_init.sql`との差分は`002_sync_cursor.sql`で明示済みの範囲（`folders.backfill_next_uid` / `folders.initial_sync_completed`、`sync_failures.uidvalidity`と世代単位の一意制約、`idx_msg_file_hash`）に限定された。その他の過不足は確認されていない。後から判明した差分は`001_init.sql`を変更せず、Phase 2以降のマイグレーションとして本節へ追記する。
 * 実機検証（H-3）で判明したお名前.com のサーバー特性（区切り文字・`UID MOVE` / `UIDPLUS` / `SPECIAL-USE` 対応・タイムアウト値）を本節へ追記する。
 * `delete_remote_message()` は実装済みだが未使用。Phase 4 で安全装置（ドライラン・件数手入力・監査ログ・レート制限・切断ガード）を前段に置いてから初めて呼び出す。
 * `manifest.read_events()` / `repair_tail()` は Phase 4 の「EML＋マニフェストからのDB完全再構築」の入口として使う。
