@@ -179,18 +179,18 @@ FetchError
 
 #### **B-4. `domain/repository.py` — `BaseMessageRepository`（*B-3 に依存*）**
 
-- [ ] ABC として以下のみを定義する（**目的を超えたメソッドを足さない**）
-  - [ ] `upsert_account(...)` / `list_accounts()` / `upsert_folder(...)` / `list_folders(account_id)` / `list_sync_targets(account_id)` / `set_sync_target(...)`
-  - [ ] `initialize_sync_cursors(folder_id, uidvalidity, max_uid)` / `update_sync_cursors(folder_id, *, last_seen_uid=None, backfill_next_uid=None, initial_sync_completed=None)`
-  - [ ] `add_message(record, contents=None)` / `exists_source_item_key(account_id, folder_id, source_item_key)`。oversize時は `contents=None` とし `message_contents` 行を作らない
-  - [ ] `find_stored_eml(account_id, file_hash) -> StoredEml | None`
-  - [ ] `local_uids(account_id, folder_id, uidvalidity) -> set[int]`
-  - [ ] `find_move_candidates(account_id, content_key, file_hash, exclude_folder_id)`（`present` な候補をすべて返す）
-  - [ ] `update_remote_state(message_id, state, moved_to_folder_id=None)`
-  - [ ] `record_failure(account_id, folder_id, uidvalidity, uid, error_class, message)` / `pending_failures(account_id, folder_id, uidvalidity)` / `clear_failure(...)`
-  - [ ] `list_reparse_targets(account_id, only_failed)` / `update_message_contents(message_id, contents)`
-  - [ ] `begin_batch()` / `commit_batch()` / `checkpoint()`
-- [ ] モジュール docstring に「**この抽象はユースケースの単体テストをインメモリ実装へ差し替えるためだけに存在する**」と明記する
+- [x] ABC として以下のみを定義する（**目的を超えたメソッドを足さない**）
+  - [x] `upsert_account(...)` / `list_accounts()` / `upsert_folder(...)` / `list_folders(account_id)` / `list_sync_targets(account_id)` / `set_sync_target(...)`
+  - [x] `initialize_sync_cursors(folder_id, uidvalidity, max_uid)` / `update_sync_cursors(folder_id, *, last_seen_uid=None, backfill_next_uid=None, initial_sync_completed=None)`
+  - [x] `add_message(record, contents=None)` / `exists_source_item_key(account_id, folder_id, source_item_key)`。oversize時は `contents=None` とし `message_contents` 行を作らない
+  - [x] `find_stored_eml(account_id, file_hash) -> StoredEml | None`
+  - [x] `local_uids(account_id, folder_id, uidvalidity) -> set[int]`
+  - [x] `find_move_candidates(account_id, content_key, file_hash, exclude_folder_id)`（`present` な候補をすべて返す）
+  - [x] `update_remote_state(message_id, state, moved_to_folder_id=None)`
+  - [x] `record_failure(account_id, folder_id, uidvalidity, uid, error_class, message)` / `pending_failures(account_id, folder_id, uidvalidity)` / `clear_failure(...)`
+  - [x] `list_reparse_targets(account_id, only_failed)` / `update_message_contents(message_id, contents)`
+  - [x] `begin_batch()` / `commit_batch()` / `checkpoint()`
+- [x] モジュール docstring に「**この抽象はユースケースの単体テストをインメモリ実装へ差し替えるためだけに存在する**」と明記する
 
 #### **B-5. `domain/ports.py` — 外部I/Oポート**
 
