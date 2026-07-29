@@ -135,7 +135,7 @@ tests/unit/ tests/integration/ tests/support/ tests/fixtures/eml/ tests/docker/
 
 #### **B-1. `domain/errors.py` — ドメイン例外階層**
 
-- [ ] 外部依存ゼロで以下の階層を定義する
+- [x] 外部依存ゼロで以下の階層を定義する
 
 ```Plaintext
 MailDockError
@@ -154,9 +154,9 @@ MailDockError
 └─ OperationCancelledError
 ```
 
-- [ ] 各例外に用途を説明する docstring を付ける
-- [ ] モジュール docstring に「**infrastructure 層は生の例外をここへラップしてから上位へ渡す**」という規約を明記する
-- [ ] Phase 1 / 4.5 で葉を追加する箇所をコメントで示す
+- [x] 各例外に用途を説明する docstring を付ける
+- [x] モジュール docstring に「**infrastructure 層は生の例外をここへラップしてから上位へ渡す**」という規約を明記する
+- [x] Phase 1 / 4.5 で葉を追加する箇所をコメントで示す
 
 #### **B-2. `infrastructure/logging_config.py` — ロギング基盤（開発計画書5.5）**
 
