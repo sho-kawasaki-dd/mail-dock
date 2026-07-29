@@ -421,7 +421,7 @@ DDLは開発計画書の記述をそのまま使用する。
 
 各項目の完了を確認したうえで、対応するタスクのチェックボックスを埋めること。
 
-- [ ] V-1. `uv sync` → `uv run ruff format --check .` → `uv run ruff check .` → `uv run mypy` がすべて成功する
+- [x] V-1. `uv sync` → `uv run ruff format --check .` → `uv run ruff check .` → `uv run mypy` がすべて成功する
 - [ ] V-2. `uv run pytest -m "not docker"` が Windows で全緑になる（基盤モジュールのカバレッジ80%目安）
 - [x] V-3. `uv run mail-dock --storage-root <一時ディレクトリ>` を実行し、`.maildock_root` / `eml,manifests,tmp,logs` が生成され、設定へUUIDと候補パスが保存され、`metadata.db` の `user_version` が 1 になる。正常終了後に `.lock` / `.lock.meta.json` が残っていないことも確認する
 - [x] V-4. 生成された `metadata.db` に対し `PRAGMA integrity_check` と `PRAGMA foreign_key_check` が OK を返し、`PRAGMA journal_mode` が `wal` である
