@@ -53,3 +53,7 @@ vendor/readpst/
 Thumbs.db
 Desktop.ini
 
+# Logs and temporary files
+*.log
+*.tmp
+*.temp

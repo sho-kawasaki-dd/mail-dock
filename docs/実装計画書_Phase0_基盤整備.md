@@ -423,13 +423,13 @@ DDLは開発計画書の記述をそのまま使用する。
 
 - [ ] V-1. `uv sync` → `uv run ruff format --check .` → `uv run ruff check .` → `uv run mypy` がすべて成功する
 - [ ] V-2. `uv run pytest -m "not docker"` が Windows で全緑になる（基盤モジュールのカバレッジ80%目安）
-- [ ] V-3. `uv run mail-dock --storage-root <一時ディレクトリ>` を実行し、`.maildock_root` / `eml,manifests,tmp,logs` が生成され、設定へUUIDと候補パスが保存され、`metadata.db` の `user_version` が 1 になる。正常終了後に `.lock` / `.lock.meta.json` が残っていないことも確認する
-- [ ] V-4. 生成された `metadata.db` に対し `PRAGMA integrity_check` と `PRAGMA foreign_key_check` が OK を返し、`PRAGMA journal_mode` が `wal` である
-- [ ] V-5. FTSトリガー往復テスト: `message_contents` に日本語本文を挿入し、`messages_fts MATCH` で3文字語がヒットし、削除後にヒットしなくなる
-- [ ] V-6. 多重起動検証: ロック取得後にイベント待機するテストヘルパーを起動し、その間に2つ目を起動して `StorageLockedError` 相当で停止する
-- [ ] V-7. スタールロック検証: ロック保持プロセスを強制終了して古い `.lock.meta.json` を残し、`heartbeat_at` を過去日時に書き換えると、次回起動でOSロック取得可否を確認したうえでロックが回収され、正常に起動する
-- [ ] V-8. `FOREIGN` 検証: `.maildock_root` の `root_uuid` を書き換えると起動が拒否され、**その際にルートへ一切書き込みが発生していない**
-- [ ] V-9. 再実行検証: 2回目以降の起動でマイグレーションが冪等にスキップされる
+- [x] V-3. `uv run mail-dock --storage-root <一時ディレクトリ>` を実行し、`.maildock_root` / `eml,manifests,tmp,logs` が生成され、設定へUUIDと候補パスが保存され、`metadata.db` の `user_version` が 1 になる。正常終了後に `.lock` / `.lock.meta.json` が残っていないことも確認する
+- [x] V-4. 生成された `metadata.db` に対し `PRAGMA integrity_check` と `PRAGMA foreign_key_check` が OK を返し、`PRAGMA journal_mode` が `wal` である
+- [x] V-5. FTSトリガー往復テスト: `message_contents` に日本語本文を挿入し、`messages_fts MATCH` で3文字語がヒットし、削除後にヒットしなくなる
+- [x] V-6. 多重起動検証: ロック取得後にイベント待機するテストヘルパーを起動し、その間に2つ目を起動して `StorageLockedError` 相当で停止する
+- [x] V-7. スタールロック検証: ロック保持プロセスを強制終了して古い `.lock.meta.json` を残し、`heartbeat_at` を過去日時に書き換えると、次回起動でOSロック取得可否を確認したうえでロックが回収され、正常に起動する
+- [x] V-8. `FOREIGN` 検証: `.maildock_root` の `root_uuid` を書き換えると起動が拒否され、**その際にルートへ一切書き込みが発生していない**
+- [x] V-9. 再実行検証: 2回目以降の起動でマイグレーションが冪等にスキップされる
 - [x] V-10. WSL: `docker compose -f tests/docker/compose.yaml up -d` → `MAILDOCK_DOCKER=1 uv run pytest -m docker` で GreenMail への LOGIN / LIST が成功する
 - [ ] V-11. CI: プルリクエストを作成し、`lint` / `test-windows` / `test-linux` の3ジョブがすべて成功する
 
