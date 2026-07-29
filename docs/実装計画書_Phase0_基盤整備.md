@@ -273,18 +273,18 @@ MailDockError
 
 #### **C-2. `infrastructure/database/migrator.py`**
 
-- [ ] `migrations/` 内の `NNN_*.sql` を `importlib.resources.files()` で列挙し、番号昇順にソートする
-- [ ] `current_version(conn) -> int` を実装する（`PRAGMA user_version`）
-- [ ] `migrate(conn, db_path) -> int` を実装する
-  - [ ] `user_version` が最新マイグレーション番号より大きい場合 `SchemaVersionTooNewError` を送出する
-  - [ ] 未適用があり、かつ既存DBが非空の場合、`Connection.backup()` で `metadata.db.bak.{current_version}` を作成する。`user_version=0` の非空v0 DBも対象とし、新規作成直後の空DBは対象外とする
-  - [ ] バックアップ先を黙って上書きせず、同名がある場合はUTC時刻または連番で退避する。バックアップ後に `PRAGMA integrity_check` を実行して成功を確認する
-  - [ ] マイグレーション中はトランザクション開始前に `PRAGMA foreign_keys=OFF` とする
-  - [ ] 各SQLを1ファイル1トランザクションで適用する。`BEGIN IMMEDIATE;`、SQL本文、`PRAGMA user_version = N;`、`COMMIT;` を1つのスクリプトとして `executescript()` に渡し、失敗時は `ROLLBACK` する
-  - [ ] SQLファイル内の `BEGIN` / `COMMIT` / `ROLLBACK` / `PRAGMA user_version` を禁止し、採番とトランザクション境界をmigratorへ一元化する
-  - [ ] 成功・失敗を問わず `PRAGMA foreign_keys=ON` へ戻し、完了後に `PRAGMA foreign_key_check` を実行する。違反行があれば `MigrationError` とする
-- [ ] **`user_version` はSQLファイルに書かず、ファイル名の番号から migrator が設定する**（採番の一元管理）
-- [ ] Phase 5 で `messages.folder_id` を `message_folders` 中間テーブルへ移行する想定をコメントで残す（開発計画書3.6）
+- [x] `migrations/` 内の `NNN_*.sql` を `importlib.resources.files()` で列挙し、番号昇順にソートする
+- [x] `current_version(conn) -> int` を実装する（`PRAGMA user_version`）
+- [x] `migrate(conn, db_path) -> int` を実装する
+  - [x] `user_version` が最新マイグレーション番号より大きい場合 `SchemaVersionTooNewError` を送出する
+  - [x] 未適用があり、かつ既存DBが非空の場合、`Connection.backup()` で `metadata.db.bak.{current_version}` を作成する。`user_version=0` の非空v0 DBも対象とし、新規作成直後の空DBは対象外とする
+  - [x] バックアップ先を黙って上書きせず、同名がある場合はUTC時刻または連番で退避する。バックアップ後に `PRAGMA integrity_check` を実行して成功を確認する
+  - [x] マイグレーション中はトランザクション開始前に `PRAGMA foreign_keys=OFF` とする
+  - [x] 各SQLを1ファイル1トランザクションで適用する。`BEGIN IMMEDIATE;`、SQL本文、`PRAGMA user_version = N;`、`COMMIT;` を1つのスクリプトとして `executescript()` に渡し、失敗時は `ROLLBACK` する
+  - [x] SQLファイル内の `BEGIN` / `COMMIT` / `ROLLBACK` / `PRAGMA user_version` を禁止し、採番とトランザクション境界をmigratorへ一元化する
+  - [x] 成功・失敗を問わず `PRAGMA foreign_keys=ON` へ戻し、完了後に `PRAGMA foreign_key_check` を実行する。違反行があれば `MigrationError` とする
+- [x] **`user_version` はSQLファイルに書かず、ファイル名の番号から migrator が設定する**（採番の一元管理）
+- [x] Phase 5 で `messages.folder_id` を `message_folders` 中間テーブルへ移行する想定をコメントで残す（開発計画書3.6）
 
 #### **C-3. `migrations/001_init.sql`**
 
