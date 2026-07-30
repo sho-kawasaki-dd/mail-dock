@@ -484,13 +484,13 @@ FetchError
 
 #### **H-3. 実機検証（お名前.com）**
 
-- [ ] 小規模フォルダ（数十〜数百通）で `account add` → `folders --refresh --enable` → `sync` を完走させる
+- [x] 小規模フォルダ（数十〜数百通）で `account add` → `folders --refresh --enable` → `sync` を完走させる
 - [ ] 以下を記録し、必要なら実装へ反映する
-  - [ ] 階層区切り文字（`.` か `/` か）
-  - [ ] modified UTF-7 の日本語フォルダ名が正しくデコードされるか
-  - [ ] 同時接続数制限に抵触しないか（1接続で完走するか）
+  - [x] 階層区切り文字（`.` か `/` か） 結果: `/`
+  - [x] modified UTF-7 の日本語フォルダ名が正しくデコードされるか
+  - [x] 同時接続数制限に抵触しないか（1接続で完走するか）
   - [ ] アイドル時の切断タイムアウトと、その際の例外分類が `TransientError` になるか
-  - [ ] `UID MOVE` / `UIDPLUS` / `SPECIAL-USE` の対応状況
+  - [x] `UID MOVE` / `UIDPLUS` / `SPECIAL-USE` の対応状況
 - [ ] 検証結果を本書「7. Phase 2 への引き継ぎ事項」へ追記する
 
 #### **H-4. CI**
@@ -590,6 +590,7 @@ FetchError
 * `001_init.sql` は変更せず、Phase 1で必要な二カーソルとUIDVALIDITY別failure管理は `002_sync_cursor.sql` で追加する。これ以外の列の過不足は本節へ記録し、Phase 2以降のマイグレーションとして適用する。
 * A-3のスキーマ確認（2026-07-30）では、`001_init.sql`との差分は`002_sync_cursor.sql`で明示済みの範囲（`folders.backfill_next_uid` / `folders.initial_sync_completed`、`sync_failures.uidvalidity`と世代単位の一意制約、`idx_msg_file_hash`）に限定された。その他の過不足は確認されていない。後から判明した差分は`001_init.sql`を変更せず、Phase 2以降のマイグレーションとして本節へ追記する。
 * 実機検証（H-3）で判明したお名前.com のサーバー特性（区切り文字・`UID MOVE` / `UIDPLUS` / `SPECIAL-USE` 対応・タイムアウト値）を本節へ追記する。
+* 実機検証（2026-07-30、テスト用アカウント）では、階層区切り文字は `/`、`CAPABILITY` に `MOVE` / `UIDPLUS` / `SPECIAL-USE` が含まれ、`LIST` で `\Trash` / `\Sent` / `\Drafts` / `\Junk` を確認した。テスト用メールで `UID MOVE` による `Trash` への移動と、`UIDPLUS` を利用する `mode="expunge"` の消去が成功した。アイドル状態を70秒維持した後の `SEARCH` は成功し、切断は再現しなかったため、アイドル切断時間と切断時の `TransientError` 分類は未確認として残す。
 * `delete_remote_message()` は実装済みだが未使用。Phase 4 で安全装置（ドライラン・件数手入力・監査ログ・レート制限・切断ガード）を前段に置いてから初めて呼び出す。
 * `manifest.read_events()` / `repair_tail()` は Phase 4 の「EML＋マニフェストからのDB完全再構築」の入口として使う。
 * マニフェストfsync後・DBコミット前の中断では、マニフェストがDBより先行し得る。これは正本優先の許容状態であり、Phase 4の再構築ではイベントの冪等適用で吸収する。
