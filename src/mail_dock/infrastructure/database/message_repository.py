@@ -117,6 +117,10 @@ class SqliteMessageRepository(BaseMessageRepository):
         normalized: dict[str, str | None] = {}
         for key in ("subject_norm", "sender_norm", "body_text", "attachment_names"):
             value = contents.get(key)
+            if value is None and key == "subject_norm":
+                value = contents.get("subject")
+            elif value is None and key == "sender_norm":
+                value = contents.get("sender")
             normalized[key] = normalize_for_search(value) if value is not None else None
         return normalized
 
@@ -261,41 +265,46 @@ class SqliteMessageRepository(BaseMessageRepository):
         source_item_key = record["source_item_key"]
         with self._db_io("add message"):
             connection = self._conn()
-            if uid is None:
-                existing = connection.execute(
-                    "SELECT id FROM messages WHERE account_id = ? AND folder_id = ? "
-                    "AND uid IS NULL AND source_item_key = ?",
-                    (account_id, folder_id, source_item_key),
-                ).fetchone()
-            else:
-                existing = connection.execute(
-                    "SELECT id FROM messages WHERE account_id = ? AND folder_id = ? "
-                    "AND uidvalidity IS ? AND uid = ?",
-                    (account_id, folder_id, uidvalidity, uid),
-                ).fetchone()
-
             message_columns = [column for column in _MESSAGE_COLUMNS if column in record]
-            values = [record[column] for column in message_columns]
-            if existing is None:
-                insert_columns = ["account_id", "folder_id", *message_columns]
-                cursor = connection.execute(
-                    f"INSERT INTO messages ({', '.join(insert_columns)}) VALUES "
-                    f"({', '.join('?' for _ in insert_columns)})",
-                    (account_id, folder_id, *values),
+            insert_columns = ["account_id", "folder_id", *message_columns]
+            conflict_target = (
+                "(account_id, folder_id, uidvalidity, uid) WHERE uid IS NOT NULL"
+                if uid is not None
+                else "(account_id, folder_id, source_item_key) WHERE uid IS NULL"
+            )
+            update_columns = ", ".join(
+                f"{column} = excluded.{column}" for column in message_columns
+            )
+            connection.execute(
+                f"INSERT INTO messages ({', '.join(insert_columns)}) VALUES "
+                f"({', '.join('?' for _ in insert_columns)}) "
+                f"ON CONFLICT {conflict_target} DO UPDATE SET {update_columns}",
+                tuple(record[column] for column in insert_columns),
+            )
+            identity: tuple[str, tuple[Any, ...]]
+            if uid is None:
+                identity = (
+                    "account_id = ? AND folder_id = ? AND uid IS NULL "
+                    "AND source_item_key = ?",
+                    (account_id, folder_id, source_item_key),
                 )
-                message_id = cursor.lastrowid
             else:
-                message_id = int(existing[0])
-                if message_columns:
-                    assignments = ", ".join(f"{column} = ?" for column in message_columns)
-                    connection.execute(
-                        f"UPDATE messages SET {assignments} WHERE id = ?",
-                        (*values, message_id),
-                    )
+                identity = (
+                    "account_id = ? AND folder_id = ? AND uidvalidity IS ? AND uid = ?",
+                    (account_id, folder_id, uidvalidity, uid),
+                )
+            row = connection.execute(
+                f"SELECT id FROM messages WHERE {identity[0]}", identity[1]
+            ).fetchone()
+            if row is None:
+                raise DatabaseError("Message upsert did not return an id")
+            message_id = int(row[0])
 
             if contents is not None:
                 normalized = self._normalized_contents(contents)
-                connection.execute("DELETE FROM message_contents WHERE message_id = ?", (message_id,))
+                connection.execute(
+                    "DELETE FROM message_contents WHERE message_id = ?", (message_id,)
+                )
                 connection.execute(
                     "INSERT INTO message_contents "
                     "(message_id, subject_norm, sender_norm, body_text, attachment_names) "

@@ -8,7 +8,9 @@ from mail_dock.infrastructure.database.message_repository import SqliteMessageRe
 from mail_dock.infrastructure.database.migrator import migrate
 
 
-def _repository(connection: sqlite3.Connection, db_path: Path) -> tuple[SqliteMessageRepository, int]:
+def _repository(
+    connection: sqlite3.Connection, db_path: Path
+) -> tuple[SqliteMessageRepository, int]:
     migrate(connection, db_path)
     repository = SqliteMessageRepository(connection)
     repository.upsert_account({"id": "account", "provider_type": "imap"})
@@ -41,7 +43,7 @@ def test_add_message_separates_uid_generations_and_normalizes_contents(
     repository.begin_batch()
     first_id = repository.add_message(
         _message(folder_id, 11),
-        {"subject": "ＦＯＯ", "body_text": "Hello   WORLD"},
+        {"subject": "\uff26\uff2f\uff2f", "body_text": "Hello   WORLD"},
     )
     second_id = repository.add_message(_message(folder_id, 12))
     assert repository.add_message(_message(folder_id, 11)) == first_id

@@ -300,17 +300,17 @@ FetchError
 
 #### **D-3. `infrastructure/database/message_repository.py`**
 
-- [ ] `SqliteMessageRepository(BaseMessageRepository)` を実装する
-- [ ] 書き込みトランザクションを `BEGIN IMMEDIATE` で開始する（`isolation_level=None` + 明示BEGIN）
-- [ ] `add_message()` が `messages` へINSERTし、contentsがある場合だけ `message_contents` へ `normalize_for_search()` 済みテキストをINSERTする。oversizeのヘッダ行ではcontentsを省略する
-- [ ] 同一 `(account_id, folder_id, uidvalidity, uid)` の再実行だけを `ON CONFLICT DO UPDATE` し、UIDVALIDITYが異なる旧世代の行は履歴として保持する
-- [ ] `local_uids()` はUIDVALIDITYを必須条件とし、`find_move_candidates()` は同一アカウントの別フォルダにある `remote_state='present'` の候補だけを返す
-- [ ] `find_stored_eml()` は `(account_id, file_hash)` で完全ハッシュ一致を検索する。`002_sync_cursor.sql` で索引 `idx_msg_file_hash` を追加する
-- [ ] `record_failure()` は `UNIQUE(account_id, folder_id, uidvalidity, uid)` に対して upsertし、`attempt_count` を加算、`last_failed_at` を更新する
-- [ ] `commit_batch()` はコミットだけを行う。`checkpoint()` はPhase 0の `checkpoint_truncate()` へ委譲し、同期usecaseから10バッチごとに呼ばれる
-- [ ] `sqlite3.Error` を `detach.classify_sqlite_error()` 経由でドメイン例外へラップする
-- [ ] 接続をスレッド間で共有しない（Phase 0 の `ConnectionManager` を使う）
-- [ ] **1通ごとのコミットを行わない**ことをテストで担保する
+- [x] `SqliteMessageRepository(BaseMessageRepository)` を実装する
+- [x] 書き込みトランザクションを `BEGIN IMMEDIATE` で開始する（`isolation_level=None` + 明示BEGIN）
+- [x] `add_message()` が `messages` へINSERTし、contentsがある場合だけ `message_contents` へ `normalize_for_search()` 済みテキストをINSERTする。oversizeのヘッダ行ではcontentsを省略する
+- [x] 同一 `(account_id, folder_id, uidvalidity, uid)` の再実行だけを `ON CONFLICT DO UPDATE` し、UIDVALIDITYが異なる旧世代の行は履歴として保持する
+- [x] `local_uids()` はUIDVALIDITYを必須条件とし、`find_move_candidates()` は同一アカウントの別フォルダにある `remote_state='present'` の候補だけを返す
+- [x] `find_stored_eml()` は `(account_id, file_hash)` で完全ハッシュ一致を検索する。`002_sync_cursor.sql` で索引 `idx_msg_file_hash` を追加する
+- [x] `record_failure()` は `UNIQUE(account_id, folder_id, uidvalidity, uid)` に対して upsertし、`attempt_count` を加算、`last_failed_at` を更新する
+- [x] `commit_batch()` はコミットだけを行う。`checkpoint()` はPhase 0の `checkpoint_truncate()` へ委譲し、同期usecaseから10バッチごとに呼ばれる
+- [x] `sqlite3.Error` を `detach.classify_sqlite_error()` 経由でドメイン例外へラップする
+- [x] 接続をスレッド間で共有しない（Phase 0 の `ConnectionManager` を使う）
+- [x] **1通ごとのコミットを行わない**ことをテストで担保する
 
 #### **D-4. `migrations/002_sync_cursor.sql`**
 
