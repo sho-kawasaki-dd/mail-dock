@@ -29,6 +29,7 @@ pip-wheel-metadata/
 .coverage
 .coverage.*
 htmlcov/
+test-storage/
 
 # Local archive databases and temporary SQLite files
 *.db
