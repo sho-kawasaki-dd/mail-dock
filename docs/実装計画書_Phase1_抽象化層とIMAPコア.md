@@ -561,25 +561,25 @@ FetchError
 
 各項目の完了を確認したうえで、対応するタスクのチェックボックスを埋めること。
 
-- [ ] V-1. `uv sync` → `uv run ruff format --check .` → `uv run ruff check .` → `uv run mypy` がすべて成功する
-- [ ] V-2. `uv run pytest -m "not docker"` が全緑になり、`domain` + `usecases` のカバレッジが 80% 以上である
-- [ ] V-3. `tests/fixtures/eml/` の全件が例外を投げずに解析され、期待テキスト（件名・本文・添付名）と一致する。文字化けがゼロである
+- [x] V-1. `uv sync` → `uv run ruff format --check .` → `uv run ruff check .` → `uv run mypy` がすべて成功する
+- [x] V-2. `uv run pytest -m "not docker"` が全緑になり、`domain` + `usecases` のカバレッジが 80% 以上である（193 passed、対象カバレッジ87%）
+- [x] V-3. `tests/fixtures/eml/` の全件が例外を投げずに解析され、期待テキスト（件名・本文・添付名）と一致する。文字化けがゼロである（25件を走査。壊れたMIME 2件は想定どおり`parse_error`）
 - [ ] V-4. 中断注入試験: `os.replace` 直前 / マニフェスト追記途中 / マニフェストfsync後かつDBコミット前 / DBコミット前 の各点で中断させ、**「DBに行があるがEML実体またはfsync済みマニフェストが無い」状態が発生しない**こと。マニフェストがDBより先行する状態は許容し、再同期で回復すること
-- [ ] V-5. dedupe 検証: 同一メールを同一アカウントの2フォルダ・異なる年月で取得し、EMLファイルが1個・`messages` が2行・両行の完全な `file_hash` と `relative_path` が一致する。別アカウントでは実体を共有しない
+- [x] V-5. dedupe 検証: 同一メールを同一アカウントの2フォルダ・異なる年月で取得し、EMLファイルが1個・`messages` が2行・両行の完全な `file_hash` と `relative_path` が一致する。別アカウントでは実体を共有しない
 - [x] V-6. マニフェスト検証: 末尾行を意図的に途中で切って破損させると `read_events` が末尾行のみを切り離して継続し、中間行を破損させると `ManifestCorruptError` になる
 - [x] V-7. `docker compose -f tests/docker/compose.yaml up -d` → `MAILDOCK_DOCKER=1 uv run pytest -m docker` が GreenMail / Dovecot の両方で全緑になる
 - [x] V-8. UIDVALIDITY 変化検証（Dovecot）: 値を変更すると二カーソルが新世代の最大UIDで初期化され、旧世代の行とfailure履歴を保ったまま現在世代だけが再試行され、完全ハッシュ一致EMLの再書き込みが発生しない
-- [ ] V-9. レジューム検証: 最新メールが最初に取得されること、新着の固定範囲完了までは `last_seen_uid` が進まず中断時に冪等再走査されること、履歴同期中は `backfill_next_uid` から再開すること、初回同期中に到着した新着と100件を超える新着も欠損しないことを確認する
+- [x] V-9. レジューム検証: 最新メールが最初に取得されること、新着の固定範囲完了までは `last_seen_uid` が進まず中断時に冪等再走査されること、履歴同期中は `backfill_next_uid` から再開すること、初回同期中に到着した新着と100件を超える新着も欠損しないことを確認する
 - [x] V-10. 削除・移動検知: サーバー側で削除・移動すると、一意な完全一致だけが `'moved'`、候補なしが `'deleted'`、曖昧候補が `'unknown'` となり、**EMLファイルがすべて残っている**
-- [ ] V-11. 失敗記録: 接続断を注入すると `TransientError` が3回リトライされ `sync_failures` に記録され、次回同期で自動再試行されて `attempt_count` が加算される
-- [ ] V-12. サイズ上限: `max_message_bytes` を小さくして同期すると、超過メールの本文がダウンロードされず、ヘッダ情報を持ち `relative_path` / `file_hash` がNULLの行と `oversize` failureが登録される
-- [ ] V-13. 解析失敗の継続: 壊れたMIMEを含むメールボックスを同期すると、EMLは保存され `message_contents` は空、`sync_failures` に `parse` が記録され、`reparse` 実行後に内容が埋まる
-- [ ] V-14. 例外の隔離: `usecases` / `presentation` 層のコードに `imaplib` / `ssl` / `socket` / `sqlite3` の import が無いことを静的に確認する
+- [x] V-11. 失敗記録: 接続断を注入すると `TransientError` が3回リトライされ `sync_failures` に記録され、次回同期で自動再試行されて `attempt_count` が加算される
+- [x] V-12. サイズ上限: `max_message_bytes` を小さくして同期すると、超過メールの本文がダウンロードされず、ヘッダ情報を持ち `relative_path` / `file_hash` がNULLの行と `oversize` failureが登録される
+- [x] V-13. 解析失敗の継続: 壊れたMIMEを含むメールボックスを同期すると、EMLは保存され `message_contents` は空、`sync_failures` に `parse` が記録され、`reparse` 実行後に内容が埋まる
+- [x] V-14. 例外の隔離: `usecases` / `presentation` 層のコードに `imaplib` / `ssl` / `socket` / `sqlite3` の import が無いことを静的に確認する
 - [ ] V-15. 資格情報: 同期実行後に `metadata.db` / `config.json` / `logs/` をパスワード文字列で grep してヒットしないことを確認する
 - [ ] V-16. 実機（お名前.com）: 小規模フォルダの初回同期が完走し、H-3 の確認項目がすべて記録される
 - [ ] V-17. CI: プルリクエストで `lint` / `test-windows` / `test-linux`（Dovecot 追加後）の3ジョブがすべて成功する
-- [ ] V-18. マイグレーション: v1の実データを保持したまま `002_sync_cursor.sql` が適用され、二カーソル、UIDVALIDITY別failure一意性、完全ハッシュ索引が利用できる
-- [ ] V-19. バッチ耐久性: メッセージ・failure・対応カーソルが同じトランザクションで確定し、WALチェックポイントが1バッチごとではなく10バッチごとにだけ実行される
+- [x] V-18. マイグレーション: v1の実データを保持したまま `002_sync_cursor.sql` が適用され、二カーソル、UIDVALIDITY別failure一意性、完全ハッシュ索引が利用できる
+- [x] V-19. バッチ耐久性: メッセージ・failure・対応カーソルが同じトランザクションで確定し、WALチェックポイントが1バッチごとではなく10バッチごとにだけ実行される
 
 ---
 
