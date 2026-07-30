@@ -1,3 +1,4 @@
+import errno
 from pathlib import Path
 
 import pytest
@@ -84,7 +85,12 @@ def test_resolve_within_rejects_symlink_escape(tmp_path: Path) -> None:
     base.mkdir()
     outside = tmp_path / "outside"
     outside.mkdir()
-    (base / "link").symlink_to(outside, target_is_directory=True)
+    try:
+        (base / "link").symlink_to(outside, target_is_directory=True)
+    except OSError as error:
+        if error.errno in {errno.EACCES, errno.EPERM, errno.ENOSYS} or getattr(error, "winerror", None) == 1314:
+            pytest.skip("symlink creation is unavailable in this environment")
+        raise
 
     with pytest.raises(ValueError, match="escapes"):
         resolve_within(base, "link/file.txt")
