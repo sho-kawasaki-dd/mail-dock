@@ -387,11 +387,11 @@ FetchError
 
 #### **F-3. `usecases/sync_folders.py`**
 
-- [ ] `refresh_folders(fetcher, repo, account_id)` を実装する
-- [ ] 新規フォルダを **`is_sync_target=0`** で登録し、検出件数を返す（F-24）
-- [ ] 既存フォルダの `display_name` を更新する
-- [ ] サーバーから消えたフォルダは削除せず、ログと戻り値で通知する
-- [ ] `set_sync_target(repo, account_id, raw_name, enabled)` を実装する
+- [x] `refresh_folders(fetcher, repo, account_id)` を実装する
+- [x] 新規フォルダを **`is_sync_target=0`** で登録し、検出件数を返す（F-24）
+- [x] 既存フォルダの `display_name` を更新する
+- [x] サーバーから消えたフォルダは削除せず、ログと戻り値で通知する
+- [x] `set_sync_target(repo, account_id, raw_name, enabled)` を実装する
 
 #### **F-4. `usecases/sync_mail.py` — 同期フロー（*本フェーズの中核*）**
 
