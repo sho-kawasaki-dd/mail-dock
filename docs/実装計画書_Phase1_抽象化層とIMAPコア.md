@@ -457,16 +457,16 @@ FetchError
 - [x] `test_charset.py`: フォールバック順序、ラベル正規化、CP932機種依存文字、最終手段で例外を投げないこと
 - [x] `test_headers.py`: RFC2047、**RFC2231分割**、Outlook非標準、`Date` 不正・欠損・未来日時のフォールバック、`thread_key` / `content_key` 算出
 - [x] `test_eml_parser.py`: **コーパス全件が例外なく解析される**こと、本文優先順、`related` 追跡、インライン画像の除外、`has_attachment`、壊れたMIMEで `parse_error` が立つこと
-- [ ] `test_html_to_text.py`: script/style除去、空白圧縮
+- [x] `test_html_to_text.py`: script/style除去、空白圧縮
 - [x] `test_normalize.py`: 全角英数の半角化、大文字小文字、連続空白、かな・カナを同一視しないこと
 - [x] `test_filename.py`: 8項目すべて（パストラバーサル、`:` 置換、予約名、長さ制限、実行可能拡張子、`resolve_within` の最終防御）
 - [x] `test_eml_storage.py`: ファイル名＝sha256先頭32桁、`INTERNALDATE` による年月、`unknown/`、**dedupe時に書き込みが発生しないこと**、`tmp/` がルート配下であること、`os.replace` 前に中断しても本番ディレクトリが汚れないこと
 - [x] `test_eml_storage.py`: 同一アカウントの別年月・別フォルダでも完全ハッシュ一致時は既存パスを再検証して共有し、アカウント間では実体を共有しないこと。先頭32桁だけが同じ候補を同一視しないこと
 - [x] `test_manifest.py`: CRC32付与、追記のみ、月次ローテーション、**末尾torn行の切り離し**、中間破損で `ManifestCorruptError`
-- [ ] `test_message_repository.py`: `BEGIN IMMEDIATE`、バッチ境界でのみコミットされること、同一UIDVALIDITY内だけの `ON CONFLICT` 更新、UIDVALIDITY別failureの `attempt_count` 加算、現在世代フィルタ
+- [x] `test_message_repository.py`: `BEGIN IMMEDIATE`、バッチ境界でのみコミットされること、同一UIDVALIDITY内だけの `ON CONFLICT` 更新、UIDVALIDITY別failureの `attempt_count` 加算、現在世代フィルタ
 - [x] `test_retry.py`: `TransientError` のみリトライ、待機時間の系列、キャンセル即応
-- [ ] `test_sync_mail.py`（`FakeFetcher` + `InMemoryMessageRepository`）: 最新優先の初回同期、新着範囲完了時だけ進む高水位、履歴カーソルの降順レジューム、初回同期中の新着、100件超の新着中断時の冪等再走査、UIDVALIDITY変化、oversizeのヘッダ行、解析失敗の継続、キャンセル境界、削除・移動・曖昧検知、`AuthenticationError` での中止
-- [ ] `test_ports.py`: usecaseがdomainポートのFakeだけで動作し、`keyring` / SQLite / ファイルI/Oをimportしないこと
+- [x] `test_sync_mail.py`（`FakeFetcher` + `InMemoryMessageRepository`）: 最新優先の初回同期、新着範囲完了時だけ進む高水位、履歴カーソルの降順レジューム、初回同期中の新着、100件超の新着中断時の冪等再走査、UIDVALIDITY変化、oversizeのヘッダ行、解析失敗の継続、キャンセル境界、削除・移動・曖昧検知、`AuthenticationError` での中止
+- [x] `test_ports.py`: usecaseがdomainポートのFakeだけで動作し、`keyring` / SQLite / ファイルI/Oをimportしないこと
 - [x] `test_keyring_store.py`: 保存・読込・削除、バックエンド不在時に平文へフォールバックせず `CredentialStoreError` になること
 - [x] `test_002_sync_cursor.py`: v1 DBからカーソル列・UIDVALIDITY付きfailure一意制約・ハッシュ索引へデータを保持して移行できること
 - [x] `test_imap_common.py`: modified UTF-7 往復、LIST/FETCH応答パース、**例外ラップの網羅**（`imaplib` / `ssl` / `socket` の例外がドメイン例外になること）

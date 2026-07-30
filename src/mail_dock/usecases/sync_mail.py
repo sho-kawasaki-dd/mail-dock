@@ -519,6 +519,8 @@ def sync_account(
         token.raise_if_cancelled()
         try:
             item = make_item(folder_raw_name, folder_id, uidvalidity, ref)
+            if item.failure is not None:
+                item.failure_folder_id = folder_id
         except AuthenticationError:
             raise
         except FetchError as error:
@@ -622,8 +624,8 @@ def sync_account(
         folder_raw_name = str(folder["raw_name"])
         folder_id = folder["id"]
         current_uidvalidity = fetcher.select_folder(folder_raw_name)
-        folder["uidvalidity"] = current_uidvalidity
         old_uidvalidity = folder.get("uidvalidity")
+        folder["uidvalidity"] = current_uidvalidity
         last_seen_uid = _get_int(folder, "last_seen_uid")
         backfill_next_uid = folder.get("backfill_next_uid")
         initial_completed = bool(folder.get("initial_sync_completed", 0))

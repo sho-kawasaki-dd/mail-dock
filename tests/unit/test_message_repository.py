@@ -74,6 +74,22 @@ def test_batch_changes_are_not_committed_per_message(
     assert db_conn.execute("SELECT COUNT(*) FROM messages").fetchone() == (1,)
 
 
+def test_begin_batch_uses_immediate_transaction(
+    db_conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    repository, _ = _repository(db_conn, tmp_path / "metadata.db")
+    statements: list[str] = []
+    db_conn.set_trace_callback(statements.append)
+
+    try:
+        repository.begin_batch()
+        repository.commit_batch()
+    finally:
+        db_conn.set_trace_callback(None)
+
+    assert "BEGIN IMMEDIATE" in statements
+
+
 def test_failures_are_upserted_and_filtered_by_uid_generation(
     db_conn: sqlite3.Connection, tmp_path: Path
 ) -> None:
