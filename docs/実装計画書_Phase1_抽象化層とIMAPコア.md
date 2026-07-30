@@ -368,11 +368,11 @@ FetchError
 
 #### **F-1. `usecases/retry.py`**
 
-- [ ] `with_retry(fn, *, attempts=3, base_delay=1.0, cancel=None)` を実装する
-- [ ] **`TransientError` のみ**をリトライ対象とし、1s → 2s → 4s の指数バックオフに jitter を加える
-- [ ] `AuthenticationError` / `PermanentError` / `OversizeError` / `UidValidityChanged` は即座に再送出する
-- [ ] 待機中も `CancelToken` に反応する（`Event.wait(timeout)` を使う）
-- [ ] リトライ回数と待機時間をログに残す
+- [x] `with_retry(fn, *, attempts=3, base_delay=1.0, cancel=None)` を実装する
+- [x] **`TransientError` のみ**をリトライ対象とし、1s → 2s → 4s の指数バックオフに jitter を加える
+- [x] `AuthenticationError` / `PermanentError` / `OversizeError` / `UidValidityChanged` は即座に再送出する
+- [x] 待機中も `CancelToken` に反応する（`Event.wait(timeout)` を使う）
+- [x] リトライ回数と待機時間をログに残す
 
 #### **F-2. アカウント登録と資格情報ストア**
 
@@ -464,7 +464,7 @@ FetchError
 - [x] `test_eml_storage.py`: 同一アカウントの別年月・別フォルダでも完全ハッシュ一致時は既存パスを再検証して共有し、アカウント間では実体を共有しないこと。先頭32桁だけが同じ候補を同一視しないこと
 - [x] `test_manifest.py`: CRC32付与、追記のみ、月次ローテーション、**末尾torn行の切り離し**、中間破損で `ManifestCorruptError`
 - [ ] `test_message_repository.py`: `BEGIN IMMEDIATE`、バッチ境界でのみコミットされること、同一UIDVALIDITY内だけの `ON CONFLICT` 更新、UIDVALIDITY別failureの `attempt_count` 加算、現在世代フィルタ
-- [ ] `test_retry.py`: `TransientError` のみリトライ、待機時間の系列、キャンセル即応
+- [x] `test_retry.py`: `TransientError` のみリトライ、待機時間の系列、キャンセル即応
 - [ ] `test_sync_mail.py`（`FakeFetcher` + `InMemoryMessageRepository`）: 最新優先の初回同期、新着範囲完了時だけ進む高水位、履歴カーソルの降順レジューム、初回同期中の新着、100件超の新着中断時の冪等再走査、UIDVALIDITY変化、oversizeのヘッダ行、解析失敗の継続、キャンセル境界、削除・移動・曖昧検知、`AuthenticationError` での中止
 - [ ] `test_ports.py`: usecaseがdomainポートのFakeだけで動作し、`keyring` / SQLite / ファイルI/Oをimportしないこと
 - [ ] `test_keyring_store.py`: 保存・読込・削除、バックエンド不在時に平文へフォールバックせず `CredentialStoreError` になること
