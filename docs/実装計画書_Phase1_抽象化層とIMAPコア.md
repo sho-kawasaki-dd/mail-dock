@@ -340,27 +340,27 @@ FetchError
 
 #### **E-2. `infrastructure/fetchers/onamae_imap.py`**
 
-- [ ] `OnamaeImapFetcher(BaseMailFetcher)` を実装する（`IMAP4_SSL`、既定ポート993、接続タイムアウト・読み取りタイムアウトを設定）
-- [ ] `connect()` で `LOGIN` し、`CAPABILITY` を記録する（`MOVE` / `SPECIAL-USE` / `UIDPLUS` の有無を保持）
-- [ ] **1アカウント＝1接続**を守る（インスタンスが複数接続を張らない）
-- [ ] `list_folders()`: `LIST "" "*"` → modified UTF-7 デコード → `RemoteFolder` 化（区切り文字と SPECIAL-USE を含める）
-- [ ] `select_folder()`: `SELECT` の応答から `UIDVALIDITY` を取得して返す
-- [ ] `iter_message_refs()`
-  - [ ] `min_uid` / `max_uid` から `UID SEARCH UID {min_uid}:{max_uid or '*'}` を組み立て、`descending` の指定順に返す
-  - [ ] **500件ずつ**（D-10）`UID FETCH (UID INTERNALDATE RFC822.SIZE FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])` を発行する
-  - [ ] 各チャンクの前後で `cancel.raise_if_cancelled()` を呼ぶ
-  - [ ] 遅延生成（ジェネレータ）であり、全件をメモリに載せないこと
-- [ ] `list_existing_uids()`: `UID SEARCH ALL` の軽量実装
-- [ ] `get_max_uid()`: `UID SEARCH ALL` の応答末尾から最大UIDだけを返し、メッセージ参照や本文を取得しない
-- [ ] `download_eml_bytes()`: `UID FETCH {uid} BODY.PEEK[]`（**`\Seen` を立てない**）
-- [ ] `download_eml_headers()`: `UID FETCH {uid} BODY.PEEK[HEADER]`（本文を取得せず、**`\Seen` を立てない**）
-- [ ] `delete_remote_message()`（D-5）
-  - [ ] `mode="trash"`: `UID MOVE` があれば使用、無ければ `UID COPY` → `UID STORE +FLAGS (\Deleted)` → `UID EXPUNGE`（`UIDPLUS` 無ければ `EXPUNGE`）
-  - [ ] `mode="expunge"`: `UID STORE +FLAGS (\Deleted)` → `EXPUNGE`
-  - [ ] ゴミ箱の特定: SPECIAL-USE `\Trash` → 候補名（`Trash` / `ゴミ箱` / `Deleted Items` / `Deleted Messages` / `INBOX.Trash`）→ `AppConfig.remote_trash_folder`。特定できなければ `PermanentError`
-  - [ ] docstring に「**Phase 1 では usecase / CLI から呼ばない。安全装置は Phase 4**」と明記する
-- [ ] **リトライ・バックオフをこのクラスに書かない**
-- [ ] 実機で確認する項目をコメントで列挙する（区切り文字・modified UTF-7・同時接続数・タイムアウト）
+- [x] `OnamaeImapFetcher(BaseMailFetcher)` を実装する（`IMAP4_SSL`、既定ポート993、接続タイムアウト・読み取りタイムアウトを設定）
+- [x] `connect()` で `LOGIN` し、`CAPABILITY` を記録する（`MOVE` / `SPECIAL-USE` / `UIDPLUS` の有無を保持）
+- [x] **1アカウント＝1接続**を守る（インスタンスが複数接続を張らない）
+- [x] `list_folders()`: `LIST "" "*"` → modified UTF-7 デコード → `RemoteFolder` 化（区切り文字と SPECIAL-USE を含める）
+- [x] `select_folder()`: `SELECT` の応答から `UIDVALIDITY` を取得して返す
+- [x] `iter_message_refs()`
+  - [x] `min_uid` / `max_uid` から `UID SEARCH UID {min_uid}:{max_uid or '*'}` を組み立て、`descending` の指定順に返す
+  - [x] **500件ずつ**（D-10）`UID FETCH (UID INTERNALDATE RFC822.SIZE FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])` を発行する
+  - [x] 各チャンクの前後で `cancel.raise_if_cancelled()` を呼ぶ
+  - [x] 遅延生成（ジェネレータ）であり、全件をメモリに載せないこと
+- [x] `list_existing_uids()`: `UID SEARCH ALL` の軽量実装
+- [x] `get_max_uid()`: `UID SEARCH ALL` の応答末尾から最大UIDだけを返し、メッセージ参照や本文を取得しない
+- [x] `download_eml_bytes()`: `UID FETCH {uid} BODY.PEEK[]`（**`\Seen` を立てない**）
+- [x] `download_eml_headers()`: `UID FETCH {uid} BODY.PEEK[HEADER]`（本文を取得せず、**`\Seen` を立てない**）
+- [x] `delete_remote_message()`（D-5）
+  - [x] `mode="trash"`: `UID MOVE` があれば使用、無ければ `UID COPY` → `UID STORE +FLAGS (\Deleted)` → `UID EXPUNGE`（`UIDPLUS` 無ければ `EXPUNGE`）
+  - [x] `mode="expunge"`: `UID STORE +FLAGS (\Deleted)` → `EXPUNGE`
+  - [x] ゴミ箱の特定: SPECIAL-USE `\Trash` → 候補名（`Trash` / `ゴミ箱` / `Deleted Items` / `Deleted Messages` / `INBOX.Trash`）→ `AppConfig.remote_trash_folder`。特定できなければ `PermanentError`
+  - [x] docstring に「**Phase 1 では usecase / CLI から呼ばない。安全装置は Phase 4**」と明記する
+- [x] **リトライ・バックオフをこのクラスに書かない**
+- [x] 実機で確認する項目をコメントで列挙する（区切り文字・modified UTF-7・同時接続数・タイムアウト）
 
 ---
 
