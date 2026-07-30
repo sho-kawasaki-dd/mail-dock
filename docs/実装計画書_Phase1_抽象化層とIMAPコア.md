@@ -495,8 +495,8 @@ FetchError
 
 #### **H-4. CI**
 
-- [ ] `.github/workflows/ci.yml` の Linux ジョブに Dovecot コンテナを追加する
-- [ ] 結合テストの所要時間が許容範囲に収まることを確認する（超える場合はマーカーでさらに分離）
+- [x] `.github/workflows/ci.yml` の Linux ジョブに Dovecot コンテナを追加する
+- [x] 結合テストの所要時間が許容範囲に収まることを確認する（Docker統合テスト9件: 19.89秒）
 
 ---
 

@@ -45,24 +45,6 @@ jobs:
 
   test-linux:
     runs-on: ubuntu-latest
-    services:
-      greenmail:
-        image: greenmail/standalone:2.1.6
-        env:
-          GREENMAIL_OPTS: >-
-            -Dgreenmail.setup.test.imap
-            -Dgreenmail.setup.test.imaps
-            -Dgreenmail.hostname=0.0.0.0
-            -Dgreenmail.users=testuser:password@localhost
-        ports:
-          - 3143:3143
-          - 3993:3993
-        options: >-
-          --health-cmd "bash -c 'echo > /dev/tcp/127.0.0.1/3143 && echo > /dev/tcp/127.0.0.1/3993'"
-          --health-interval 2s
-          --health-timeout 2s
-          --health-retries 15
-          --health-start-period 5s
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -72,7 +54,12 @@ jobs:
           enable-cache: true
       - name: Install dependencies
         run: uv sync --frozen
+      - name: Start Docker integration services
+        run: docker compose -f tests/docker/compose.yaml up -d --wait
       - name: Run Docker integration tests
         env:
           MAILDOCK_DOCKER: "1"
         run: uv run pytest -m docker
+      - name: Stop Docker integration services
+        if: ${{ always() }}
+        run: docker compose -f tests/docker/compose.yaml down -v
