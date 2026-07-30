@@ -170,6 +170,19 @@ class InMemoryMessageRepository(BaseMessageRepository):
             and item.get("uid") is not None
         }
 
+    def get_message_by_uid(
+        self, account_id: str, folder_id: Any, uidvalidity: int, uid: int
+    ) -> MessageRecord | None:
+        for item in self.messages.values():
+            if (
+                item.get("account_id") == account_id
+                and item.get("folder_id") == folder_id
+                and item.get("uidvalidity") == uidvalidity
+                and item.get("uid") == uid
+            ):
+                return item
+        return None
+
     def find_move_candidates(
         self,
         account_id: str,

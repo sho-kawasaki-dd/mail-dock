@@ -356,6 +356,20 @@ class SqliteMessageRepository(BaseMessageRepository):
             ).fetchall()
         return {int(row[0]) for row in rows}
 
+    def get_message_by_uid(
+        self, account_id: str, folder_id: Any, uidvalidity: int, uid: int
+    ) -> MessageRecord | None:
+        """Return one concrete message row for remote-state reconciliation."""
+
+        with self._db_io("get message by UID"):
+            cursor = self._conn().execute(
+                "SELECT * FROM messages WHERE account_id = ? AND folder_id = ? "
+                "AND uidvalidity = ? AND uid = ?",
+                (account_id, folder_id, uidvalidity, uid),
+            )
+            row = cursor.fetchone()
+            return None if row is None else self._row(cursor, cast(tuple[Any, ...], row))
+
     def find_move_candidates(
         self,
         account_id: str,

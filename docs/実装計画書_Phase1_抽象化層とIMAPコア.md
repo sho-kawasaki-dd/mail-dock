@@ -395,33 +395,33 @@ FetchError
 
 #### **F-4. `usecases/sync_mail.py` — 同期フロー（*本フェーズの中核*）**
 
-- [ ] `SyncOptions`（frozen dataclass）を定義する: `max_message_bytes`。コンポジションルートが `AppConfig` から変換し、usecaseは `mail_dock.config` をimportしない
-- [ ] `SyncProgress`（frozen dataclass）を定義する: `transferred_bytes` / `total_bytes_estimate` / `message_count` / `current_folder` / `eta_seconds`
-- [ ] `sync_account(fetcher, repo, storage, manifest, *, account_id, options, cancel, on_progress)` を実装する。引数はdomainポートとusecase固有型だけにする
-- [ ] 同期対象フォルダごとに以下を実行する
-  - [ ] `select_folder()` で `UIDVALIDITY` を取得し、DBの値と比較する
-  - [ ] 初回／**UIDVALIDITY変化時**は `get_max_uid()` を呼び、`last_seen_uid=max_uid` / `backfill_next_uid=max_uid` / `initial_sync_completed=(max_uid == 0)` を同一トランザクションで初期化する。旧世代のメッセージと失敗履歴は保持する
-  - [ ] 現在のUIDVALIDITYに一致する `sync_failures` の未解決レコード（`attempt_count < 10`）だけを先に再試行する。`oversize` は現在の `options.max_message_bytes` 以下になった場合だけ再試行する（F-18）
-  - [ ] **新着パス**: 開始時に `new_max_uid=get_max_uid()` を固定し、`new_max_uid` から `last_seen_uid + 1` までUID**降順**で処理する。`last_seen_uid` は各バッチでは進めず、この固定範囲を全件処理した最後のバッチでだけ `new_max_uid` へ更新する
-  - [ ] 新着パス中断時は高水位が旧値のままなので、次回は同じ範囲を再走査する。確定済み行のupsert、完全ハッシュdedupe、マニフェストイベントの `source_item_key` による冪等適用を前提に、100件を超える新着でも欠損させない
-  - [ ] **履歴パス**: `backfill_next_uid` 以下をUID**降順**で処理し、バッチ確定時の最小UIDから1を引いた値へカーソルを進める。対象が無くなれば `backfill_next_uid=0` / `initial_sync_completed=1` とする
-  - [ ] `size_bytes > options.max_message_bytes` は本文をダウンロードせず `download_eml_headers()` だけを呼ぶ。解析したヘッダを `relative_path=NULL` / `file_hash=NULL` かつ `message_contents` なしの `messages` 行へ登録し、同じバッチで `oversize` failureと `fetch_skipped` イベントを記録する（F-19）
-  - [ ] `with_retry()` 経由で `download_eml_bytes()` を呼ぶ（F-17）
-  - [ ] EML取得後に完全なSHA-256で `repo.find_stored_eml()` を照会し、候補があればstorageで実体を再検証する。一致時は既存パスを共有し、不一致時は通常の `save()` を行う
-  - [ ] 解析失敗時もEMLを保存し、`message_contents` を空で登録し `parse` として記録する（F-9）
-  - [ ] **100通または50MB**でバッチを閉じ、次の順序を厳守する: 各EMLを原子的配置 → 各イベントを `manifest.append()` → バッチ境界で `manifest.flush_and_sync()` → `repo.begin_batch()` → 全メッセージ・failure・該当カーソルを更新 → `repo.commit_batch()`
-  - [ ] マニフェストfsync後・DBコミット前に停止した「マニフェストがDBより先行する状態」は許容する。逆順は許容しない
-  - [ ] 10バッチごとに `repo.checkpoint()` を1回呼ぶ（F-14）
-  - [ ] `on_progress` を**転送バイト数主体**で通知する（F-20）
-  - [ ] `cancel` は**バッチコミット境界**で成立させる（途中キャンセルで確定済み分のみ残る）
-- [ ] 全フォルダ完了後に削除・移動検知を行う（F-16）
-  - [ ] `list_existing_uids()` と `repo.local_uids(..., current_uidvalidity)` の差分を取る
-  - [ ] 消失UIDについて、他フォルダの `present` な候補を `content_key` と完全な `file_hash` の両方で照合する
-  - [ ] 一致候補が1件だけなら `remote_state='moved'` + `moved_to_folder_id`、候補なしなら `'deleted'`、複数候補またはハッシュ不明なら `'unknown'` + `moved_to_folder_id=NULL` とする
-  - [ ] マニフェストへ `moved` / `delete_detected` / `remote_state_unknown` を追記する
-  - [ ] **EMLファイルを絶対に削除しない**
-- [ ] `AuthenticationError` は同期全体を中止し、それ以外の単発失敗では**同期を止めない**（F-18）
-- [ ] `SyncResult`（取得件数・バイト数・スキップ件数・失敗件数・キャンセル有無）を返す
+- [x] `SyncOptions`（frozen dataclass）を定義する: `max_message_bytes`。コンポジションルートが `AppConfig` から変換し、usecaseは `mail_dock.config` をimportしない
+- [x] `SyncProgress`（frozen dataclass）を定義する: `transferred_bytes` / `total_bytes_estimate` / `message_count` / `current_folder` / `eta_seconds`
+- [x] `sync_account(fetcher, repo, storage, manifest, *, account_id, options, cancel, on_progress)` を実装する。引数はdomainポートとusecase固有型だけにする
+- [x] 同期対象フォルダごとに以下を実行する
+  - [x] `select_folder()` で `UIDVALIDITY` を取得し、DBの値と比較する
+  - [x] 初回／**UIDVALIDITY変化時**は `get_max_uid()` を呼び、`last_seen_uid=max_uid` / `backfill_next_uid=max_uid` / `initial_sync_completed=(max_uid == 0)` を同一トランザクションで初期化する。旧世代のメッセージと失敗履歴は保持する
+  - [x] 現在のUIDVALIDITYに一致する `sync_failures` の未解決レコード（`attempt_count < 10`）だけを先に再試行する。`oversize` は現在の `options.max_message_bytes` 以下になった場合だけ再試行する（F-18）
+  - [x] **新着パス**: 開始時に `new_max_uid=get_max_uid()` を固定し、`new_max_uid` から `last_seen_uid + 1` までUID**降順**で処理する。`last_seen_uid` は各バッチでは進めず、この固定範囲を全件処理した最後のバッチでだけ `new_max_uid` へ更新する
+  - [x] 新着パス中断時は高水位が旧値のままなので、次回は同じ範囲を再走査する。確定済み行のupsert、完全ハッシュdedupe、マニフェストイベントの `source_item_key` による冪等適用を前提に、100件を超える新着でも欠損させない
+  - [x] **履歴パス**: `backfill_next_uid` 以下をUID**降順**で処理し、バッチ確定時の最小UIDから1を引いた値へカーソルを進める。対象が無くなれば `backfill_next_uid=0` / `initial_sync_completed=1` とする
+  - [x] `size_bytes > options.max_message_bytes` は本文をダウンロードせず `download_eml_headers()` だけを呼ぶ。解析したヘッダを `relative_path=NULL` / `file_hash=NULL` かつ `message_contents` なしの `messages` 行へ登録し、同じバッチで `oversize` failureと `fetch_skipped` イベントを記録する（F-19）
+  - [x] `with_retry()` 経由で `download_eml_bytes()` を呼ぶ（F-17）
+  - [x] EML取得後に完全なSHA-256で `repo.find_stored_eml()` を照会し、候補があればstorageで実体を再検証する。一致時は既存パスを共有し、不一致時は通常の `save()` を行う
+  - [x] 解析失敗時もEMLを保存し、`message_contents` を空で登録し `parse` として記録する（F-9）
+  - [x] **100通または50MB**でバッチを閉じ、次の順序を厳守する: 各EMLを原子的配置 → 各イベントを `manifest.append()` → バッチ境界で `manifest.flush_and_sync()` → `repo.begin_batch()` → 全メッセージ・failure・該当カーソルを更新 → `repo.commit_batch()`
+  - [x] マニフェストfsync後・DBコミット前に停止した「マニフェストがDBより先行する状態」は許容する。逆順は許容しない
+  - [x] 10バッチごとに `repo.checkpoint()` を1回呼ぶ（F-14）
+  - [x] `on_progress` を**転送バイト数主体**で通知する（F-20）
+  - [x] `cancel` は**バッチコミット境界**で成立させる（途中キャンセルで確定済み分のみ残る）
+- [x] 全フォルダ完了後に削除・移動検知を行う（F-16）
+  - [x] `list_existing_uids()` と `repo.local_uids(..., current_uidvalidity)` の差分を取る
+  - [x] 消失UIDについて、他フォルダの `present` な候補を `content_key` と完全な `file_hash` の両方で照合する
+  - [x] 一致候補が1件だけなら `remote_state='moved'` + `moved_to_folder_id`、候補なしなら `'deleted'`、複数候補またはハッシュ不明なら `'unknown'` + `moved_to_folder_id=NULL` とする
+  - [x] マニフェストへ `moved` / `delete_detected` / `remote_state_unknown` を追記する
+  - [x] **EMLファイルを絶対に削除しない**
+- [x] `AuthenticationError` は同期全体を中止し、それ以外の単発失敗では**同期を止めない**（F-18）
+- [x] `SyncResult`（取得件数・バイト数・スキップ件数・失敗件数・キャンセル有無）を返す
 
 #### **F-5. `usecases/reparse.py`**
 
