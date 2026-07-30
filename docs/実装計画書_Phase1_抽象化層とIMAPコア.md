@@ -326,17 +326,17 @@ FetchError
 
 #### **E-1. `infrastructure/fetchers/imap_common.py`**
 
-- [ ] modified UTF-7 のエンコード / デコードを実装する（`imap4-utf-7`。標準ライブラリに無いため自前）
-- [ ] `LIST` / `LSUB` 応答のパーサを実装する（属性リスト・階層区切り文字・引用符付きフォルダ名）
-- [ ] SPECIAL-USE（RFC 6154）属性の抽出（`\Trash` / `\Sent` / `\Drafts` / `\Junk`）
-- [ ] `FETCH` 応答のパーサを実装する（`UID` / `INTERNALDATE` / `RFC822.SIZE` / `FLAGS` / リテラル本体）
-- [ ] `INTERNALDATE` を tz-aware な UTC `datetime` へ変換する
-- [ ] `wrap_imap_errors()`（コンテキストマネージャ or デコレータ）を実装し、以下をラップする
-  - [ ] `imaplib.IMAP4.error` → 応答本文から `AUTHENTICATIONFAILED` を検出したら `AuthenticationError`、それ以外は `PermanentError`
-  - [ ] `imaplib.IMAP4.abort` / `socket.timeout` / `TimeoutError` / `ConnectionError` → `TransientError`
-  - [ ] `ssl.SSLError` → 証明書検証失敗は `PermanentError`、それ以外は `TransientError`
-  - [ ] `OSError` は `detach.classify_os_error()` へ委譲する
-- [ ] **上位層へ `imaplib` / `ssl` / `socket` の例外を一切漏らさない**ことをテストで担保する
+- [x] modified UTF-7 のエンコード / デコードを実装する（`imap4-utf-7`。標準ライブラリに無いため自前）
+- [x] `LIST` / `LSUB` 応答のパーサを実装する（属性リスト・階層区切り文字・引用符付きフォルダ名）
+- [x] SPECIAL-USE（RFC 6154）属性の抽出（`\Trash` / `\Sent` / `\Drafts` / `\Junk`）
+- [x] `FETCH` 応答のパーサを実装する（`UID` / `INTERNALDATE` / `RFC822.SIZE` / `FLAGS` / リテラル本体）
+- [x] `INTERNALDATE` を tz-aware な UTC `datetime` へ変換する
+- [x] `wrap_imap_errors()`（コンテキストマネージャ or デコレータ）を実装し、以下をラップする
+  - [x] `imaplib.IMAP4.error` → 応答本文から `AUTHENTICATIONFAILED` を検出したら `AuthenticationError`、それ以外は `PermanentError`
+  - [x] `imaplib.IMAP4.abort` / `socket.timeout` / `TimeoutError` / `ConnectionError` → `TransientError`
+  - [x] `ssl.SSLError` → 証明書検証失敗は `PermanentError`、それ以外は `TransientError`
+  - [x] `OSError` は `detach.classify_os_error()` へ委譲する
+- [x] **上位層へ `imaplib` / `ssl` / `socket` の例外を一切漏らさない**ことをテストで担保する
 
 #### **E-2. `infrastructure/fetchers/onamae_imap.py`**
 
@@ -469,7 +469,7 @@ FetchError
 - [ ] `test_ports.py`: usecaseがdomainポートのFakeだけで動作し、`keyring` / SQLite / ファイルI/Oをimportしないこと
 - [ ] `test_keyring_store.py`: 保存・読込・削除、バックエンド不在時に平文へフォールバックせず `CredentialStoreError` になること
 - [x] `test_002_sync_cursor.py`: v1 DBからカーソル列・UIDVALIDITY付きfailure一意制約・ハッシュ索引へデータを保持して移行できること
-- [ ] `test_imap_common.py`: modified UTF-7 往復、LIST/FETCH応答パース、**例外ラップの網羅**（`imaplib` / `ssl` / `socket` の例外がドメイン例外になること）
+- [x] `test_imap_common.py`: modified UTF-7 往復、LIST/FETCH応答パース、**例外ラップの網羅**（`imaplib` / `ssl` / `socket` の例外がドメイン例外になること）
 - [ ] `test_reparse.py`: ハッシュ不一致・実体欠損のスキップ、`message_contents` 更新
 
 #### **H-2. 結合テスト（`docker` マーカー / WSL）**

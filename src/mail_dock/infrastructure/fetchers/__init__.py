@@ -1,0 +1,1 @@
+"""IMAP and other remote-mail fetcher implementations."""
