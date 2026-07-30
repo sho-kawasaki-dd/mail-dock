@@ -1,0 +1,54 @@
+"""Use cases for registering accounts and loading their credentials."""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+from mail_dock.domain.accounts import validate_account_id
+from mail_dock.domain.errors import AuthenticationError
+from mail_dock.domain.ports import BaseCredentialStore
+from mail_dock.domain.repository import BaseMessageRepository, MessageRecord
+
+
+def register_account(
+    repo: BaseMessageRepository,
+    credential_store: BaseCredentialStore,
+    *,
+    account_id: str,
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    display_name: str | None,
+) -> str:
+    """Store credentials outside SQLite and register the connection details."""
+
+    validate_account_id(account_id)
+    credential_store.set_password(account_id, password)
+    repo.upsert_account(
+        {
+            "id": account_id,
+            "provider_type": "onamae_imap",
+            "display_name": display_name,
+            "host": host,
+            "port": port,
+            "username": username,
+            "is_enabled": 1,
+        }
+    )
+    return account_id
+
+
+def load_credentials(credential_store: BaseCredentialStore, account_id: str) -> str:
+    """Load an account password or signal that credentials must be supplied."""
+
+    password = credential_store.get_password(account_id)
+    if password is None:
+        raise AuthenticationError(f"No credentials are registered for account: {account_id}")
+    return password
+
+
+def list_accounts(repo: BaseMessageRepository) -> Sequence[MessageRecord]:
+    """Return registered connection details without reading credential storage."""
+
+    return repo.list_accounts()

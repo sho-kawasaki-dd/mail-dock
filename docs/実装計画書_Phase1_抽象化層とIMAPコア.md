@@ -376,14 +376,14 @@ FetchError
 
 #### **F-2. アカウント登録と資格情報ストア**
 
-- [ ] `usecases/register_account.py` に `register_account(repo, credential_store, *, account_id, host, port, username, password, display_name)` を実装する
-- [ ] `account_id` のファイルシステム安全性を検証し、不正なIDは登録前に拒否する
-- [ ] パスワードを注入された `BaseCredentialStore` へ保存する。usecaseから `keyring` を直接importしない
-- [ ] `accounts` へ upsert する（**パスワードはDBへ書かない**）
-- [ ] `load_credentials(credential_store, account_id) -> str` を実装し、未登録時は `AuthenticationError` を送出する
-- [ ] `list_accounts()` を実装する（パスワードを返さない）
-- [ ] `infrastructure/security/keyring_store.py` に `KeyringCredentialStore(BaseCredentialStore)` を実装し、keyringの生例外を `CredentialStoreError` へ変換する
-- [ ] keyringバックエンド不在時は平文へフォールバックせず、分かりやすいエラーで登録を中止する
+- [x] `usecases/register_account.py` に `register_account(repo, credential_store, *, account_id, host, port, username, password, display_name)` を実装する
+- [x] `account_id` のファイルシステム安全性を検証し、不正なIDは登録前に拒否する
+- [x] パスワードを注入された `BaseCredentialStore` へ保存する。usecaseから `keyring` を直接importしない
+- [x] `accounts` へ upsert する（**パスワードはDBへ書かない**）
+- [x] `load_credentials(credential_store, account_id) -> str` を実装し、未登録時は `AuthenticationError` を送出する
+- [x] `list_accounts()` を実装する（パスワードを返さない）
+- [x] `infrastructure/security/keyring_store.py` に `KeyringCredentialStore(BaseCredentialStore)` を実装し、keyringの生例外を `CredentialStoreError` へ変換する
+- [x] keyringバックエンド不在時は平文へフォールバックせず、分かりやすいエラーで登録を中止する
 
 #### **F-3. `usecases/sync_folders.py`**
 
@@ -467,7 +467,7 @@ FetchError
 - [x] `test_retry.py`: `TransientError` のみリトライ、待機時間の系列、キャンセル即応
 - [ ] `test_sync_mail.py`（`FakeFetcher` + `InMemoryMessageRepository`）: 最新優先の初回同期、新着範囲完了時だけ進む高水位、履歴カーソルの降順レジューム、初回同期中の新着、100件超の新着中断時の冪等再走査、UIDVALIDITY変化、oversizeのヘッダ行、解析失敗の継続、キャンセル境界、削除・移動・曖昧検知、`AuthenticationError` での中止
 - [ ] `test_ports.py`: usecaseがdomainポートのFakeだけで動作し、`keyring` / SQLite / ファイルI/Oをimportしないこと
-- [ ] `test_keyring_store.py`: 保存・読込・削除、バックエンド不在時に平文へフォールバックせず `CredentialStoreError` になること
+- [x] `test_keyring_store.py`: 保存・読込・削除、バックエンド不在時に平文へフォールバックせず `CredentialStoreError` になること
 - [x] `test_002_sync_cursor.py`: v1 DBからカーソル列・UIDVALIDITY付きfailure一意制約・ハッシュ索引へデータを保持して移行できること
 - [x] `test_imap_common.py`: modified UTF-7 往復、LIST/FETCH応答パース、**例外ラップの網羅**（`imaplib` / `ssl` / `socket` の例外がドメイン例外になること）
 - [ ] `test_reparse.py`: ハッシュ不一致・実体欠損のスキップ、`message_contents` 更新
