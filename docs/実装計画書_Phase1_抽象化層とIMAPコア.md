@@ -282,21 +282,21 @@ FetchError
 
 #### **D-2. `infrastructure/storage/manifest.py` — 永続マニフェスト**
 
-- [ ] `ManifestWriter` を実装する
-  - [ ] 出力先 `root/manifests/imap/{account_id}/events-{YYYYMM}.jsonl`（D-4 の月次ローテーション）
-  - [ ] 1行の形式は `{json}|CRC32:xxxxxxxx`（ペイロードのCRC32を16進8桁で行末に付与）
-  - [ ] `append(event: Mapping[str, JSONValue]) -> None` と `flush_and_sync() -> None` を分離し、**バッチ境界で fsync** する
-  - [ ] イベント種別: `fetch` / `fetch_skipped` / `parse_failed` / `delete_detected` / `moved` / `remote_state_unknown`（`purge_intent` / `purged` は Phase 4 で追加する旨をコメント）
-  - [ ] `fetch` イベントの必須項目: `event` / `account_id` / `folder_raw_name` / `uid` / `uidvalidity` / `source_item_key` / `message_id` / `relative_path` / `file_hash` / `size_bytes` / `timestamp`
-  - [ ] `fetch` イベントに `deduplicated` を記録し、物理共有時も取得元ごとに必ずイベントを追記する
-  - [ ] oversizeは `fetch_skipped` イベントとして、UID・UIDVALIDITY・サイズ・理由を記録する（EMLパスとハッシュは持たない）
-- [ ] `read_events(path: Path) -> Iterator[Mapping[...]]` を実装する
-  - [ ] CRC32 不一致・改行欠落・JSON不正の行を検出する
-  - [ ] **末尾の不正行のみ**を切り離す（`repair_tail(path) -> int` で truncate）
-  - [ ] 中間行が壊れている場合は `ManifestCorruptError` を送出する
-- [ ] append-only を守る（既存行の書き換え・削除を行うAPIを作らない）
-- [ ] モジュール docstring に「**EML＋本マニフェストが正本、`metadata.db` は派生キャッシュ**」と明記する
-- [ ] DB完全再構築（Phase 4）が本モジュールの読み取りAPIを使う前提であることをコメントで残す
+- [x] `ManifestWriter` を実装する
+  - [x] 出力先 `root/manifests/imap/{account_id}/events-{YYYYMM}.jsonl`（D-4 の月次ローテーション）
+  - [x] 1行の形式は `{json}|CRC32:xxxxxxxx`（ペイロードのCRC32を16進8桁で行末に付与）
+  - [x] `append(event: Mapping[str, JSONValue]) -> None` と `flush_and_sync() -> None` を分離し、**バッチ境界で fsync** する
+  - [x] イベント種別: `fetch` / `fetch_skipped` / `parse_failed` / `delete_detected` / `moved` / `remote_state_unknown`（`purge_intent` / `purged` は Phase 4 で追加する旨をコメント）
+  - [x] `fetch` イベントの必須項目: `event` / `account_id` / `folder_raw_name` / `uid` / `uidvalidity` / `source_item_key` / `message_id` / `relative_path` / `file_hash` / `size_bytes` / `timestamp`
+  - [x] `fetch` イベントに `deduplicated` を記録し、物理共有時も取得元ごとに必ずイベントを追記する
+  - [x] oversizeは `fetch_skipped` イベントとして、UID・UIDVALIDITY・サイズ・理由を記録する（EMLパスとハッシュは持たない）
+- [x] `read_events(path: Path) -> Iterator[Mapping[...]]` を実装する
+  - [x] CRC32 不一致・改行欠落・JSON不正の行を検出する
+  - [x] **末尾の不正行のみ**を切り離す（`repair_tail(path) -> int` で truncate）
+  - [x] 中間行が壊れている場合は `ManifestCorruptError` を送出する
+- [x] append-only を守る（既存行の書き換え・削除を行うAPIを作らない）
+- [x] モジュール docstring に「**EML＋本マニフェストが正本、`metadata.db` は派生キャッシュ**」と明記する
+- [x] DB完全再構築（Phase 4）が本モジュールの読み取りAPIを使う前提であることをコメントで残す
 
 #### **D-3. `infrastructure/database/message_repository.py`**
 
@@ -462,7 +462,7 @@ FetchError
 - [x] `test_filename.py`: 8項目すべて（パストラバーサル、`:` 置換、予約名、長さ制限、実行可能拡張子、`resolve_within` の最終防御）
 - [x] `test_eml_storage.py`: ファイル名＝sha256先頭32桁、`INTERNALDATE` による年月、`unknown/`、**dedupe時に書き込みが発生しないこと**、`tmp/` がルート配下であること、`os.replace` 前に中断しても本番ディレクトリが汚れないこと
 - [x] `test_eml_storage.py`: 同一アカウントの別年月・別フォルダでも完全ハッシュ一致時は既存パスを再検証して共有し、アカウント間では実体を共有しないこと。先頭32桁だけが同じ候補を同一視しないこと
-- [ ] `test_manifest.py`: CRC32付与、追記のみ、月次ローテーション、**末尾torn行の切り離し**、中間破損で `ManifestCorruptError`
+- [x] `test_manifest.py`: CRC32付与、追記のみ、月次ローテーション、**末尾torn行の切り離し**、中間破損で `ManifestCorruptError`
 - [ ] `test_message_repository.py`: `BEGIN IMMEDIATE`、バッチ境界でのみコミットされること、同一UIDVALIDITY内だけの `ON CONFLICT` 更新、UIDVALIDITY別failureの `attempt_count` 加算、現在世代フィルタ
 - [ ] `test_retry.py`: `TransientError` のみリトライ、待機時間の系列、キャンセル即応
 - [ ] `test_sync_mail.py`（`FakeFetcher` + `InMemoryMessageRepository`）: 最新優先の初回同期、新着範囲完了時だけ進む高水位、履歴カーソルの降順レジューム、初回同期中の新着、100件超の新着中断時の冪等再走査、UIDVALIDITY変化、oversizeのヘッダ行、解析失敗の継続、キャンセル境界、削除・移動・曖昧検知、`AuthenticationError` での中止
@@ -566,7 +566,7 @@ FetchError
 - [ ] V-3. `tests/fixtures/eml/` の全件が例外を投げずに解析され、期待テキスト（件名・本文・添付名）と一致する。文字化けがゼロである
 - [ ] V-4. 中断注入試験: `os.replace` 直前 / マニフェスト追記途中 / マニフェストfsync後かつDBコミット前 / DBコミット前 の各点で中断させ、**「DBに行があるがEML実体またはfsync済みマニフェストが無い」状態が発生しない**こと。マニフェストがDBより先行する状態は許容し、再同期で回復すること
 - [ ] V-5. dedupe 検証: 同一メールを同一アカウントの2フォルダ・異なる年月で取得し、EMLファイルが1個・`messages` が2行・両行の完全な `file_hash` と `relative_path` が一致する。別アカウントでは実体を共有しない
-- [ ] V-6. マニフェスト検証: 末尾行を意図的に途中で切って破損させると `read_events` が末尾行のみを切り離して継続し、中間行を破損させると `ManifestCorruptError` になる
+- [x] V-6. マニフェスト検証: 末尾行を意図的に途中で切って破損させると `read_events` が末尾行のみを切り離して継続し、中間行を破損させると `ManifestCorruptError` になる
 - [ ] V-7. `docker compose -f tests/docker/compose.yaml up -d` → `MAILDOCK_DOCKER=1 uv run pytest -m docker` が GreenMail / Dovecot の両方で全緑になる
 - [ ] V-8. UIDVALIDITY 変化検証（Dovecot）: 値を変更すると二カーソルが新世代の最大UIDで初期化され、旧世代の行とfailure履歴を保ったまま現在世代だけが再試行され、完全ハッシュ一致EMLの再書き込みが発生しない
 - [ ] V-9. レジューム検証: 最新メールが最初に取得されること、新着の固定範囲完了までは `last_seen_uid` が進まず中断時に冪等再走査されること、履歴同期中は `backfill_next_uid` から再開すること、初回同期中に到着した新着と100件を超える新着も欠損しないことを確認する

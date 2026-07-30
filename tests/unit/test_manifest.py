@@ -2,6 +2,7 @@ import json
 import zlib
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -25,6 +26,113 @@ def _fetch_event(timestamp: str, *, uid: int = 7) -> dict[str, JSONValue]:
         "timestamp": timestamp,
         "deduplicated": False,
     }
+
+
+@pytest.mark.parametrize(
+    "event_name",
+    (
+        "fetch",
+        "fetch_skipped",
+        "parse_failed",
+        "delete_detected",
+        "moved",
+        "remote_state_unknown",
+    ),
+)
+def test_manifest_accepts_all_phase_one_event_types(tmp_path: Path, event_name: str) -> None:
+    event: dict[str, JSONValue] = {
+        "event": event_name,
+        "timestamp": "2026-07-30T12:34:56Z",
+    }
+    if event_name == "fetch":
+        event = _fetch_event("2026-07-30T12:34:56Z")
+    elif event_name == "fetch_skipped":
+        event.update({"uid": 7, "uidvalidity": 42, "size_bytes": 100, "reason": "oversize"})
+
+    with ManifestWriter(tmp_path, "account") as writer:
+        writer.append(event)
+
+    path = tmp_path / "manifests/imap/account/events-202607.jsonl"
+    assert list(read_events(path)) == [event]
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "event",
+        "account_id",
+        "folder_raw_name",
+        "uid",
+        "uidvalidity",
+        "source_item_key",
+        "message_id",
+        "relative_path",
+        "file_hash",
+        "size_bytes",
+        "timestamp",
+        "deduplicated",
+    ),
+)
+def test_fetch_requires_all_manifest_fields(tmp_path: Path, field: str) -> None:
+    event = _fetch_event("2026-07-30T12:34:56Z")
+    del event[field]
+
+    with ManifestWriter(tmp_path, "account") as writer, pytest.raises(ValueError):
+        writer.append(event)
+
+
+def test_manifest_flush_and_sync_is_the_fsync_boundary(tmp_path: Path) -> None:
+    writer = ManifestWriter(tmp_path, "account")
+    try:
+        with patch("mail_dock.infrastructure.storage.manifest.os.fsync") as fsync:
+            writer.append(_fetch_event("2026-07-30T12:34:56Z"))
+            fsync.assert_not_called()
+
+            writer.flush_and_sync()
+
+            assert fsync.call_count == 1
+    finally:
+        writer.close()
+
+
+def _valid_manifest_with_tail(tmp_path: Path, tail: bytes) -> Path:
+    with ManifestWriter(tmp_path, "account") as writer:
+        writer.append(_fetch_event("2026-07-30T12:34:56Z"))
+    source = tmp_path / "manifests/imap/account/events-202607.jsonl"
+    path = tmp_path / "events-with-tail.jsonl"
+    path.write_bytes(source.read_bytes() + tail)
+    return path
+
+
+@pytest.mark.parametrize("tail_kind", ("missing_newline", "bad_crc", "invalid_json"))
+def test_read_events_repairs_each_kind_of_malformed_tail(tmp_path: Path, tail_kind: str) -> None:
+    if tail_kind == "missing_newline":
+        tail = b'{"event":"fetch"}'
+    elif tail_kind == "bad_crc":
+        tail = b'{"event":"fetch"}|CRC32:00000000\n'
+    else:
+        payload = b"not-json"
+        checksum = zlib.crc32(payload) & 0xFFFFFFFF
+        tail = payload + f"|CRC32:{checksum:08x}\n".encode("ascii")
+
+    path = _valid_manifest_with_tail(tmp_path, tail)
+    source = path.parent / "manifests/imap/account/events-202607.jsonl"
+
+    assert len(list(read_events(path))) == 1
+    assert path.read_bytes() == source.read_bytes()
+
+
+def test_manifest_appends_without_rewriting_existing_records(tmp_path: Path) -> None:
+    path = tmp_path / "manifests/imap/account/events-202607.jsonl"
+    with ManifestWriter(tmp_path, "account") as writer:
+        writer.append(_fetch_event("2026-07-30T12:34:56Z", uid=7))
+        writer.flush_and_sync()
+
+    with ManifestWriter(tmp_path, "account") as writer:
+        writer.append(_fetch_event("2026-07-30T12:35:56Z", uid=8))
+        writer.flush_and_sync()
+
+    assert [event["uid"] for event in read_events(path)] == [7, 8]
 
 
 def test_manifest_appends_crc_and_rotates_months(tmp_path: Path) -> None:
