@@ -425,11 +425,11 @@ FetchError
 
 #### **F-5. `usecases/reparse.py`**
 
-- [ ] `reparse_messages(repo, storage, *, account_id=None, only_failed=True, cancel)` を実装し、`BaseEmlStorage` からEMLを読む
-- [ ] `relative_path` からEMLを読み直し、`file_hash` を再検証してから解析する
-- [ ] `message_contents` を更新し（FTSトリガーが追随することを確認）、`sync_failures` の `parse` レコードを解消する
-- [ ] 実体が無い・ハッシュ不一致のレコードはスキップして報告する（**この段階で修復は行わない。整合性チェックは Phase 4**）
-- [ ] oversizeによるヘッダのみの行はEML実体がない正常状態として対象外にし、欠損として報告しない
+- [x] `reparse_messages(repo, storage, *, account_id=None, only_failed=True, cancel)` を実装し、`BaseEmlStorage` からEMLを読む
+- [x] `relative_path` からEMLを読み直し、`file_hash` を再検証してから解析する
+- [x] `message_contents` を更新し（FTSトリガーが追随することを確認）、`sync_failures` の `parse` レコードを解消する
+- [x] 実体が無い・ハッシュ不一致のレコードはスキップして報告する（**この段階で修復は行わない。整合性チェックは Phase 4**）
+- [x] oversizeによるヘッダのみの行はEML実体がない正常状態として対象外にし、欠損として報告しない
 
 ---
 
@@ -470,7 +470,7 @@ FetchError
 - [x] `test_keyring_store.py`: 保存・読込・削除、バックエンド不在時に平文へフォールバックせず `CredentialStoreError` になること
 - [x] `test_002_sync_cursor.py`: v1 DBからカーソル列・UIDVALIDITY付きfailure一意制約・ハッシュ索引へデータを保持して移行できること
 - [x] `test_imap_common.py`: modified UTF-7 往復、LIST/FETCH応答パース、**例外ラップの網羅**（`imaplib` / `ssl` / `socket` の例外がドメイン例外になること）
-- [ ] `test_reparse.py`: ハッシュ不一致・実体欠損のスキップ、`message_contents` 更新
+- [x] `test_reparse.py`: ハッシュ不一致・実体欠損のスキップ、`message_contents` 更新
 
 #### **H-2. 結合テスト（`docker` マーカー / WSL）**
 
