@@ -119,9 +119,7 @@ def test_connect_reuses_one_connection_and_records_capabilities(fake_imap: None)
     connection = FakeImap.instances[0]
     assert connection.timeout == 11.0
     assert connection.sock.timeouts == [17.0]
-    assert fetcher.capabilities == frozenset(
-        {"IMAP4REV1", "MOVE", "UIDPLUS", "SPECIAL-USE"}
-    )
+    assert fetcher.capabilities == frozenset({"IMAP4REV1", "MOVE", "UIDPLUS", "SPECIAL-USE"})
 
     fetcher.disconnect()
 

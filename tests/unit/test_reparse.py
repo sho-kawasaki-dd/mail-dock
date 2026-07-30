@@ -13,9 +13,7 @@ class MemoryEmlStorage(BaseEmlStorage):
     def __init__(self, files: dict[str, bytes]) -> None:
         self.files = files
 
-    def save(
-        self, account_id: str, internal_date: datetime | None, raw: bytes
-    ) -> StoredEml:
+    def save(self, account_id: str, internal_date: datetime | None, raw: bytes) -> StoredEml:
         del account_id, internal_date, raw
         raise NotImplementedError
 

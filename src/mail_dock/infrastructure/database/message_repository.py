@@ -182,17 +182,20 @@ class SqliteMessageRepository(BaseMessageRepository):
                 f"({', '.join('?' for _ in insert_columns)}) "
             )
             if update_columns:
-                insert_sql += (
-                    "ON CONFLICT(account_id, raw_name) DO UPDATE SET "
-                    + ", ".join(f"{column}=excluded.{column}" for column in update_columns)
+                insert_sql += "ON CONFLICT(account_id, raw_name) DO UPDATE SET " + ", ".join(
+                    f"{column}=excluded.{column}" for column in update_columns
                 )
             else:
                 insert_sql += "ON CONFLICT(account_id, raw_name) DO NOTHING"
             self._conn().execute(insert_sql, tuple(values[column] for column in insert_columns))
-            row = self._conn().execute(
-                "SELECT id FROM folders WHERE account_id = ? AND raw_name = ?",
-                (account_id, raw_name),
-            ).fetchone()
+            row = (
+                self._conn()
+                .execute(
+                    "SELECT id FROM folders WHERE account_id = ? AND raw_name = ?",
+                    (account_id, raw_name),
+                )
+                .fetchone()
+            )
         if row is None:
             raise DatabaseError("Folder upsert did not return an id")
         return int(row[0])
@@ -284,8 +287,7 @@ class SqliteMessageRepository(BaseMessageRepository):
             identity: tuple[str, tuple[Any, ...]]
             if uid is None:
                 identity = (
-                    "account_id = ? AND folder_id = ? AND uid IS NULL "
-                    "AND source_item_key = ?",
+                    "account_id = ? AND folder_id = ? AND uid IS NULL AND source_item_key = ?",
                     (account_id, folder_id, source_item_key),
                 )
             else:
@@ -323,21 +325,29 @@ class SqliteMessageRepository(BaseMessageRepository):
 
     def exists_source_item_key(self, account_id: str, folder_id: Any, source_item_key: str) -> bool:
         with self._db_io("check source item key"):
-            row = self._conn().execute(
-                "SELECT EXISTS(SELECT 1 FROM messages WHERE account_id = ? "
-                "AND folder_id = ? AND source_item_key = ?)",
-                (account_id, folder_id, source_item_key),
-            ).fetchone()
+            row = (
+                self._conn()
+                .execute(
+                    "SELECT EXISTS(SELECT 1 FROM messages WHERE account_id = ? "
+                    "AND folder_id = ? AND source_item_key = ?)",
+                    (account_id, folder_id, source_item_key),
+                )
+                .fetchone()
+            )
         return bool(row and row[0])
 
     def find_stored_eml(self, account_id: str, file_hash: str) -> StoredEml | None:
         with self._db_io("find stored EML"):
-            row = self._conn().execute(
-                "SELECT relative_path, file_hash, size_bytes FROM messages "
-                "WHERE account_id = ? AND file_hash = ? AND relative_path IS NOT NULL "
-                "ORDER BY id LIMIT 1",
-                (account_id, file_hash),
-            ).fetchone()
+            row = (
+                self._conn()
+                .execute(
+                    "SELECT relative_path, file_hash, size_bytes FROM messages "
+                    "WHERE account_id = ? AND file_hash = ? AND relative_path IS NOT NULL "
+                    "ORDER BY id LIMIT 1",
+                    (account_id, file_hash),
+                )
+                .fetchone()
+            )
         if row is None:
             return None
         return StoredEml(
@@ -349,11 +359,15 @@ class SqliteMessageRepository(BaseMessageRepository):
 
     def local_uids(self, account_id: str, folder_id: Any, uidvalidity: int) -> set[int]:
         with self._db_io("list local UIDs"):
-            rows = self._conn().execute(
-                "SELECT uid FROM messages WHERE account_id = ? AND folder_id = ? "
-                "AND uidvalidity = ? AND uid IS NOT NULL",
-                (account_id, folder_id, uidvalidity),
-            ).fetchall()
+            rows = (
+                self._conn()
+                .execute(
+                    "SELECT uid FROM messages WHERE account_id = ? AND folder_id = ? "
+                    "AND uidvalidity = ? AND uid IS NOT NULL",
+                    (account_id, folder_id, uidvalidity),
+                )
+                .fetchall()
+            )
         return {int(row[0]) for row in rows}
 
     def get_message_by_uid(

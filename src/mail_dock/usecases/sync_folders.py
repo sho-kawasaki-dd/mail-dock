@@ -49,9 +49,7 @@ def refresh_folders(
             new_count += 1
         repo.upsert_folder(folder_record)
 
-    removed_raw_names = tuple(
-        raw_name for raw_name in existing if raw_name not in remote_raw_names
-    )
+    removed_raw_names = tuple(raw_name for raw_name in existing if raw_name not in remote_raw_names)
     for raw_name in removed_raw_names:
         _LOGGER.warning(
             "Remote folder is no longer available: account=%s folder=%s",

@@ -3,27 +3,40 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import logging
+import signal
 import sqlite3
 import sys
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from mail_dock import __version__, config
 from mail_dock.domain.errors import (
+    AuthenticationError,
     ConfigError,
     DatabaseError,
+    FetchError,
     MailDockError,
+    OperationCancelledError,
     StorageError,
     StorageForeignRootError,
     StorageLockedError,
     StorageRootMissingError,
 )
+from mail_dock.domain.fetcher import CancelToken
+from mail_dock.domain.repository import MessageRecord
 from mail_dock.infrastructure.database.connection import ConnectionManager
+from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
 from mail_dock.infrastructure.database.migrator import migrate
+from mail_dock.infrastructure.fetchers.onamae_imap import OnamaeImapFetcher
 from mail_dock.infrastructure.logging_config import set_storage_log_target, setup_logging
+from mail_dock.infrastructure.security.keyring_store import KeyringCredentialStore
 from mail_dock.infrastructure.storage.detach import storage_io
+from mail_dock.infrastructure.storage.eml_storage import EmlStorage, cleanup_tmp
+from mail_dock.infrastructure.storage.manifest import ManifestWriter
 from mail_dock.infrastructure.storage.storage_root import (
     DriveKind,
     RootProbe,
@@ -35,6 +48,14 @@ from mail_dock.infrastructure.storage.storage_root import (
     initialize_root,
     resolve_root,
 )
+from mail_dock.usecases.register_account import (
+    list_accounts,
+    load_credentials,
+    register_account,
+)
+from mail_dock.usecases.reparse import reparse_messages
+from mail_dock.usecases.sync_folders import refresh_folders, set_sync_target
+from mail_dock.usecases.sync_mail import SyncOptions, SyncProgress, sync_account
 
 LOGGER = logging.getLogger(__name__)
 
@@ -68,6 +89,61 @@ def _build_parser() -> argparse.ArgumentParser:
         "verify",
         parents=[common],
         help="run read-only database integrity checks and exit",
+    )
+    account_parser = subparsers.add_parser(
+        "account",
+        parents=[common],
+        help="manage registered mail accounts",
+    )
+    account_subparsers = account_parser.add_subparsers(dest="account_command", required=True)
+    account_add = account_subparsers.add_parser(
+        "add",
+        parents=[common],
+        help="register an IMAP account",
+    )
+    account_add.add_argument("--account-id", required=True, help="stable local account id")
+    account_add.add_argument("--host", required=True, help="IMAP server hostname")
+    account_add.add_argument("--port", type=int, default=993, help="IMAPS port")
+    account_add.add_argument("--username", required=True, help="IMAP username")
+    account_add.add_argument("--display-name", help="optional display name")
+    account_subparsers.add_parser(
+        "list",
+        parents=[common],
+        help="list registered accounts",
+    )
+
+    folders_parser = subparsers.add_parser(
+        "folders",
+        parents=[common],
+        help="list and choose synchronization folders",
+    )
+    folders_parser.add_argument("--account", required=True, help="account id")
+    folders_parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="refresh folder metadata from the IMAP server",
+    )
+    folder_action = folders_parser.add_mutually_exclusive_group()
+    folder_action.add_argument("--enable", metavar="RAW_NAME", help="enable a folder")
+    folder_action.add_argument("--disable", metavar="RAW_NAME", help="disable a folder")
+
+    sync_parser = subparsers.add_parser(
+        "sync",
+        parents=[common],
+        help="synchronize enabled folders",
+    )
+    sync_parser.add_argument("--account", help="only synchronize this account")
+
+    reparse_parser = subparsers.add_parser(
+        "reparse",
+        parents=[common],
+        help="rebuild searchable message contents from stored EML files",
+    )
+    reparse_parser.add_argument("--account", help="only reparse this account")
+    reparse_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="reparse all stored messages instead of failed messages only",
     )
     return parser
 
@@ -132,18 +208,260 @@ def _close_manager(manager: ConnectionManager | None) -> None:
     manager.assert_all_closed()
 
 
+def _account_by_id(repo: SqliteMessageRepository, account_id: str) -> MessageRecord:
+    for account in repo.list_accounts():
+        if account.get("id") == account_id:
+            return account
+    raise DatabaseError(f"Account does not exist: {account_id}")
+
+
+def _account_id(account: MessageRecord) -> str:
+    value = account.get("id")
+    if not isinstance(value, str) or not value:
+        raise DatabaseError("Account record has no valid id")
+    return value
+
+
+def _account_fetcher(
+    account: MessageRecord,
+    credential_store: KeyringCredentialStore,
+    settings: config.AppConfig,
+) -> OnamaeImapFetcher:
+    account_id = _account_id(account)
+    host = account.get("host")
+    username = account.get("username")
+    port = account.get("port", 993)
+    if not isinstance(host, str) or not host:
+        raise ConfigError(f"Account has no valid host: {account_id}")
+    if not isinstance(username, str) or not username:
+        raise ConfigError(f"Account has no valid username: {account_id}")
+    if isinstance(port, bool) or not isinstance(port, int) or port <= 0:
+        raise ConfigError(f"Account has no valid port: {account_id}")
+    return OnamaeImapFetcher(
+        host,
+        username,
+        load_credentials(credential_store, account_id),
+        port=port,
+        remote_trash_folder=settings.remote_trash_folder,
+    )
+
+
+def _format_bytes(value: int) -> str:
+    units = ("B", "KiB", "MiB", "GiB")
+    amount = float(value)
+    for unit in units:
+        if amount < 1024 or unit == units[-1]:
+            return f"{amount:.1f} {unit}" if unit != "B" else f"{value} B"
+        amount /= 1024
+    return f"{value} B"
+
+
+def _format_eta(value: float | None) -> str:
+    return "unknown" if value is None else f"{value:.0f}s"
+
+
+def _print_sync_progress(progress: SyncProgress) -> None:
+    estimate = (
+        _format_bytes(progress.total_bytes_estimate)
+        if progress.total_bytes_estimate > 0
+        else "unknown"
+    )
+    print(
+        f"{progress.current_folder}: {_format_bytes(progress.transferred_bytes)} / "
+        f"{estimate}, messages={progress.message_count}, eta={_format_eta(progress.eta_seconds)}"
+    )
+
+
+def _install_cancel_handler(token: CancelToken) -> Any:
+    previous = signal.getsignal(signal.SIGINT)
+    interrupt_count = 0
+
+    def handle_interrupt(signum: int, frame: Any) -> None:
+        del signum, frame
+        nonlocal interrupt_count
+        interrupt_count += 1
+        if interrupt_count == 1:
+            print("Cancellation requested; stopping at the next batch boundary.", file=sys.stderr)
+            token.cancel()
+            return
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGINT, handle_interrupt)
+    return previous
+
+
+def _restore_cancel_handler(previous: Any) -> None:
+    signal.signal(signal.SIGINT, previous)
+
+
+def _print_accounts(accounts: Sequence[MessageRecord]) -> None:
+    for account in accounts:
+        account_id = account.get("id", "")
+        display_name = account.get("display_name") or ""
+        host = account.get("host", "")
+        port = account.get("port", "")
+        username = account.get("username", "")
+        print(f"{account_id}\t{display_name}\t{username}@{host}:{port}")
+
+
+def _print_folders(folders: Sequence[MessageRecord]) -> None:
+    for folder in folders:
+        enabled = "enabled" if bool(folder.get("is_sync_target", 0)) else "disabled"
+        print(f"{folder.get('raw_name', '')}\t{folder.get('display_name', '')}\t{enabled}")
+
+
+def _run_account_command(
+    args: argparse.Namespace,
+    repo: SqliteMessageRepository,
+    credential_store: KeyringCredentialStore,
+) -> None:
+    account_command = getattr(args, "account_command", None)
+    if account_command == "add":
+        password = getpass.getpass("IMAP password: ")
+        account_id = register_account(
+            repo,
+            credential_store,
+            account_id=args.account_id,
+            host=args.host,
+            port=args.port,
+            username=args.username,
+            password=password,
+            display_name=getattr(args, "display_name", None),
+        )
+        print(f"Registered account: {account_id}")
+        return
+    if account_command == "list":
+        _print_accounts(list_accounts(repo))
+        return
+    raise ConfigError(f"Unknown account command: {account_command}")
+
+
+def _run_folders_command(
+    args: argparse.Namespace,
+    repo: SqliteMessageRepository,
+    credential_store: KeyringCredentialStore,
+    settings: config.AppConfig,
+) -> None:
+    account_id = args.account
+    if args.refresh:
+        account = _account_by_id(repo, account_id)
+        with _account_fetcher(account, credential_store, settings) as fetcher:
+            result = refresh_folders(fetcher, repo, account_id)
+        print(f"Discovered {result.new_count} new folder(s).")
+        for raw_name in result.removed_raw_names:
+            print(f"Remote folder unavailable: {raw_name}", file=sys.stderr)
+    if args.enable is not None:
+        set_sync_target(repo, account_id, args.enable, True)
+    elif args.disable is not None:
+        set_sync_target(repo, account_id, args.disable, False)
+    _print_folders(repo.list_folders(account_id))
+
+
+def _run_sync_command(
+    args: argparse.Namespace,
+    repo: SqliteMessageRepository,
+    credential_store: KeyringCredentialStore,
+    storage_root: Path,
+    settings: config.AppConfig,
+) -> int:
+    accounts = list(repo.list_accounts())
+    if args.account is not None:
+        accounts = [_account_by_id(repo, args.account)]
+    if not accounts:
+        raise DatabaseError("No accounts are registered")
+
+    token = CancelToken()
+    previous_handler = _install_cancel_handler(token)
+    try:
+        for account in accounts:
+            account_id = _account_id(account)
+            print(f"Synchronizing account: {account_id}")
+            fetcher = _account_fetcher(account, credential_store, settings)
+            storage = EmlStorage(storage_root)
+            with ManifestWriter(storage_root, account_id) as manifest, fetcher:
+                result = sync_account(
+                    fetcher,
+                    repo,
+                    storage,
+                    manifest,
+                    account_id=account_id,
+                    options=SyncOptions(max_message_bytes=settings.max_message_bytes),
+                    cancel=token,
+                    on_progress=_print_sync_progress,
+                )
+            print(
+                f"{account_id}: fetched={result.fetched_count}, "
+                f"bytes={_format_bytes(result.transferred_bytes)}, "
+                f"skipped={result.skipped_count}, failed={result.failed_count}"
+            )
+            if result.cancelled:
+                return 130
+        return 0
+    finally:
+        _restore_cancel_handler(previous_handler)
+
+
+def _run_reparse_command(
+    args: argparse.Namespace,
+    repo: SqliteMessageRepository,
+    storage_root: Path,
+) -> int:
+    token = CancelToken()
+    previous_handler = _install_cancel_handler(token)
+    try:
+        result = reparse_messages(
+            repo,
+            EmlStorage(storage_root),
+            account_id=args.account,
+            only_failed=not args.all,
+            cancel=token,
+        )
+    finally:
+        _restore_cancel_handler(previous_handler)
+    print(
+        f"Reparsed={result.reparsed_count}, skipped={result.skipped_count}, "
+        f"missing={result.missing_count}, hash_mismatch={result.hash_mismatch_count}, "
+        f"parse_failed={result.parse_failed_count}"
+    )
+    return 130 if result.cancelled else 0
+
+
+def _run_application_command(
+    args: argparse.Namespace,
+    repo: SqliteMessageRepository,
+    storage_root: Path,
+    settings: config.AppConfig,
+) -> int:
+    credential_store = KeyringCredentialStore()
+    command = getattr(args, "command", None)
+    if command == "account":
+        _run_account_command(args, repo, credential_store)
+        return 0
+    if command == "folders":
+        _run_folders_command(args, repo, credential_store, settings)
+        return 0
+    if command == "sync":
+        return _run_sync_command(args, repo, credential_store, storage_root, settings)
+    if command == "reparse":
+        return _run_reparse_command(args, repo, storage_root)
+    return 0
+
+
 def _run_command(
     settings: config.AppConfig,
     requested_root: Path | None,
     command: str | None,
-) -> None:
+    args: argparse.Namespace | None = None,
+) -> int:
     root, root_uuid = _select_root(settings, requested_root)
     lock = StorageLock(root, heartbeat_interval_sec=settings.heartbeat_interval_sec)
     manager: ConnectionManager | None = None
     storage_logging_enabled = False
+    result = 0
     try:
         lock.acquire()
         ensure_layout(root)
+        cleanup_tmp(root)
         check_free_space(root)
         set_storage_log_target(root / "logs")
         storage_logging_enabled = True
@@ -163,6 +481,12 @@ def _run_command(
             version = migrate(connection, root / "metadata.db")
             LOGGER.info("Database migration complete at schema version %d", version)
 
+        if command not in {None, "migrate", "verify"}:
+            if args is None:
+                raise ConfigError("Command arguments are missing")
+            repository = SqliteMessageRepository(manager)
+            result = _run_application_command(args, repository, root, settings)
+
         updated_settings = replace(
             settings,
             storage_root_uuid=root_uuid,
@@ -178,6 +502,7 @@ def _run_command(
                     set_storage_log_target(None)
             finally:
                 lock.release()
+    return result
 
 
 def _exit_code(error: MailDockError) -> int:
@@ -185,6 +510,12 @@ def _exit_code(error: MailDockError) -> int:
         return 3
     if isinstance(error, DatabaseError):
         return 4
+    if isinstance(error, AuthenticationError):
+        return 5
+    if isinstance(error, FetchError):
+        return 6
+    if isinstance(error, OperationCancelledError):
+        return 130
     if isinstance(error, ConfigError | StorageError):
         return 2
     return 1
@@ -198,11 +529,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         settings = config.load()
         setup_logging(config.config_dir(), debug=bool(getattr(args, "debug", False)))
-        _run_command(
+        return _run_command(
             settings,
             getattr(args, "storage_root", None),
             getattr(args, "command", None),
+            args,
         )
+    except KeyboardInterrupt:
+        return 130
     except MailDockError as error:
         LOGGER.error("mail-dock stopped: %s", error)
         print(f"mail-dock: {error}", file=sys.stderr)

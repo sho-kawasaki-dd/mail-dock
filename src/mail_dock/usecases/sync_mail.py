@@ -437,9 +437,7 @@ def sync_account(
                 transferred_bytes=len(headers),
             )
 
-        raw = with_retry(
-            lambda: fetcher.download_eml_bytes(folder_raw_name, ref.uid), cancel=token
-        )
+        raw = with_retry(lambda: fetcher.download_eml_bytes(folder_raw_name, ref.uid), cancel=token)
         stats.transferred_bytes += len(raw)
         if ref.size_bytes is None:
             stats.estimated_bytes += len(raw)
@@ -568,9 +566,11 @@ def sync_account(
                 continue
             attempted.add(uid)
             process_ref(folder_raw_name, folder_id, uidvalidity, ref, pending)
-            if len(pending) >= _BATCH_MESSAGE_LIMIT or sum(
-                pending_item.transferred_bytes for pending_item in pending
-            ) >= _BATCH_BYTES_LIMIT:
+            if (
+                len(pending) >= _BATCH_MESSAGE_LIMIT
+                or sum(pending_item.transferred_bytes for pending_item in pending)
+                >= _BATCH_BYTES_LIMIT
+            ):
                 commit_pending(pending)
 
     def process_range(
@@ -598,9 +598,11 @@ def sync_account(
             attempted.add(ref.uid)
             process_ref(folder_raw_name, folder_id, uidvalidity, ref, pending)
             minimum_seen = ref.uid if minimum_seen is None else min(minimum_seen, ref.uid)
-            batch_is_full = len(pending) >= _BATCH_MESSAGE_LIMIT or sum(
-                pending_item.transferred_bytes for pending_item in pending
-            ) >= _BATCH_BYTES_LIMIT
+            batch_is_full = (
+                len(pending) >= _BATCH_MESSAGE_LIMIT
+                or sum(pending_item.transferred_bytes for pending_item in pending)
+                >= _BATCH_BYTES_LIMIT
+            )
             if batch_is_full:
                 if history:
                     next_cursor = max(minimum_seen - 1, 0)

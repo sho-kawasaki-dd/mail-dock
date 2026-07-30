@@ -27,7 +27,7 @@ def test_modified_utf7_round_trip(value: str) -> None:
 
 
 def test_list_response_decodes_folder_and_special_use() -> None:
-    response = b'* LIST (\\HasNoChildren \\Trash) "." ' b'"&U9c-"'
+    response = b'* LIST (\\HasNoChildren \\Trash) "." "&U9c-"'
     folder = parse_list_response(response)
 
     assert folder.raw_name == "&U9c-"
@@ -46,7 +46,7 @@ def test_lsub_response_uses_the_same_folder_parser() -> None:
 def test_fetch_response_parses_metadata_and_message_id() -> None:
     response = (
         b'* 7 FETCH (UID 42 INTERNALDATE "30-Jul-2026 12:34:56 +0900" '
-        b'RFC822.SIZE 123 FLAGS (\\Seen \\Flagged) BODY[HEADER] {35}',
+        b"RFC822.SIZE 123 FLAGS (\\Seen \\Flagged) BODY[HEADER] {35}",
         b"Message-ID: <m@example.test>\r\nSubject: test\r\n",
     )
 

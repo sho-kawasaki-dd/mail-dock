@@ -141,7 +141,7 @@ def sanitize_attachment_name(name: str) -> SanitizedName:
 
     basename = value.split(".", 1)[0]
     if _RESERVED_NAMES.fullmatch(basename):
-        value = f"{basename}_{value[len(basename):]}"
+        value = f"{basename}_{value[len(basename) :]}"
         warnings.append("reserved_name")
 
     value = unicodedata.normalize("NFC", value)

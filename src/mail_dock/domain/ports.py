@@ -31,9 +31,7 @@ class BaseEmlStorage(ABC):
     """Use-case port for atomic EML persistence and integrity-checked reads."""
 
     @abstractmethod
-    def save(
-        self, account_id: str, internal_date: datetime | None, raw: bytes
-    ) -> StoredEml:
+    def save(self, account_id: str, internal_date: datetime | None, raw: bytes) -> StoredEml:
         """Persist raw EML bytes and return their stored location and hash."""
 
     @abstractmethod

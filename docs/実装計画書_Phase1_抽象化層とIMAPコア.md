@@ -437,16 +437,16 @@ FetchError
 
 #### **G-1. `__main__.py` — サブコマンド追加**
 
-- [ ] 既存の起動シーケンス（設定 → ロギング → ルート解決 → ロック → マイグレーション）を再利用する形でサブコマンドを追加する
-- [ ] `account add`: `--account-id` / `--host` / `--port` / `--username` を受け取り、**パスワードは `getpass` で対話入力**する（コマンドライン引数・環境変数から受け取らない）
-- [ ] `account list`: 登録済みアカウントと接続情報を表示する（パスワードは表示しない）
-- [ ] `folders`: 一覧表示（`--refresh` でサーバーから再取得）、`--enable RAW_NAME` / `--disable RAW_NAME` で `is_sync_target` を切り替える
-- [ ] `sync`: `--account` で対象を絞る。進捗を標準出力へ（転送バイト数・通数・推定残り時間）
-- [ ] `reparse`: `--all` / 既定は失敗レコードのみ
-- [ ] `SIGINT` ハンドラで `CancelToken` をセットし、**バッチ境界で安全に停止**する（2回目の Ctrl+C で即時終了）
-- [ ] 起動時に `cleanup_tmp()` を呼ぶ
-- [ ] 新しい例外に対する終了コードを `_exit_code()` へ追加する（`AuthenticationError` → 5、`FetchError` → 6、`OperationCancelledError` → 130）
-- [ ] `--help` の出力が日本語環境で崩れないことを確認する
+- [x] 既存の起動シーケンス（設定 → ロギング → ルート解決 → ロック → マイグレーション）を再利用する形でサブコマンドを追加する
+- [x] `account add`: `--account-id` / `--host` / `--port` / `--username` を受け取り、**パスワードは `getpass` で対話入力**する（コマンドライン引数・環境変数から受け取らない）
+- [x] `account list`: 登録済みアカウントと接続情報を表示する（パスワードは表示しない）
+- [x] `folders`: 一覧表示（`--refresh` でサーバーから再取得）、`--enable RAW_NAME` / `--disable RAW_NAME` で `is_sync_target` を切り替える
+- [x] `sync`: `--account` で対象を絞る。進捗を標準出力へ（転送バイト数・通数・推定残り時間）
+- [x] `reparse`: `--all` / 既定は失敗レコードのみ
+- [x] `SIGINT` ハンドラで `CancelToken` をセットし、**バッチ境界で安全に停止**する（2回目の Ctrl+C で即時終了）
+- [x] 起動時に `cleanup_tmp()` を呼ぶ
+- [x] 新しい例外に対する終了コードを `_exit_code()` へ追加する（`AuthenticationError` → 5、`FetchError` → 6、`OperationCancelledError` → 130）
+- [x] `--help` の出力が日本語環境で崩れないことを確認する
 
 ---
 

@@ -168,9 +168,7 @@ class EmlStorage(BaseEmlStorage):
     def __init__(self, root: Path) -> None:
         self.root = root.expanduser().resolve()
 
-    def save(
-        self, account_id: str, internal_date: datetime | None, raw: bytes
-    ) -> StoredEml:
+    def save(self, account_id: str, internal_date: datetime | None, raw: bytes) -> StoredEml:
         return save_eml(self.root, account_id, internal_date, raw)
 
     def reuse(self, relative_path: str, expected_hash: str) -> StoredEml | None:

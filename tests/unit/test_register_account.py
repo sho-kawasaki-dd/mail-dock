@@ -88,4 +88,3 @@ def test_list_accounts_delegates_without_credentials() -> None:
     repository.upsert_account({"id": "account", "username": "user"})
 
     assert list_accounts(repository) == repository.list_accounts()
-
