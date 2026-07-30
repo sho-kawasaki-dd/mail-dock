@@ -232,33 +232,33 @@ FetchError
 
 #### **C-4. `infrastructure/parsing/normalize.py`**
 
-- [ ] `normalize_for_search(text: str) -> str` を実装する（NFKC → `casefold()` → `\s+` を単一空白へ圧縮 → `strip()`）
-- [ ] ひらがな・カタカナの同一視を **行わない**
-- [ ] モジュール docstring に「**投入時と検索時で必ず本関数を使う。片方だけだと恒久的にヒットしなくなる**」と明記する（Phase 2 の検索実装もこれを使う）
+- [x] `normalize_for_search(text: str) -> str` を実装する（NFKC → `casefold()` → `\s+` を単一空白へ圧縮 → `strip()`）
+- [x] ひらがな・カタカナの同一視を **行わない**
+- [x] モジュール docstring に「**投入時と検索時で必ず本関数を使う。片方だけだと恒久的にヒットしなくなる**」と明記する（Phase 2 の検索実装もこれを使う）
 
 #### **C-5. `infrastructure/parsing/eml_parser.py`**
 
-- [ ] `parse_eml(raw: bytes, internal_date: datetime | None) -> ParsedMessage` を実装する
-- [ ] ヘッダ（`Subject` / `From` / `To` / `Cc` / `Message-ID` / `In-Reply-To` / `References`）を C-2 経由で抽出する
-- [ ] 本文抽出: `text/plain` 優先 → 無ければ `text/html` を C-3 でテキスト化。`multipart/alternative` は plain 優先、`multipart/related` は本体を辿る
-- [ ] 添付一覧を抽出し、**`Content-ID` を持つインライン画像を添付名リストから除外**する（`is_inline=True` として保持はする）
-- [ ] `has_attachment` を判定する（インライン画像のみの場合は添付ありとしない）
-- [ ] **解析中の例外をすべて捕捉し、`parse_error` を設定した `ParsedMessage` を返す**（呼び出し側は例外を受け取らない）
-- [ ] コーパス全件が例外なく処理できることをテストで担保する
+- [x] `parse_eml(raw: bytes, internal_date: datetime | None) -> ParsedMessage` を実装する
+- [x] ヘッダ（`Subject` / `From` / `To` / `Cc` / `Message-ID` / `In-Reply-To` / `References`）を C-2 経由で抽出する
+- [x] 本文抽出: `text/plain` 優先 → 無ければ `text/html` を C-3 でテキスト化。`multipart/alternative` は plain 優先、`multipart/related` は本体を辿る
+- [x] 添付一覧を抽出し、**`Content-ID` を持つインライン画像を添付名リストから除外**する（`is_inline=True` として保持はする）
+- [x] `has_attachment` を判定する（インライン画像のみの場合は添付ありとしない）
+- [x] **解析中の例外をすべて捕捉し、`parse_error` を設定した `ParsedMessage` を返す**（呼び出し側は例外を受け取らない）
+- [x] コーパス全件が例外なく処理できることをテストで担保する
 
 #### **C-6. `infrastructure/storage/filename.py`**
 
-- [ ] `sanitize_attachment_name(name: str) -> SanitizedName` を実装する（開発計画書 4.6-4 の8項目）
-  - [ ] パス成分（`../` / `\` / `/`）の除去と警告
-  - [ ] NTFS禁止文字 `< > : " / \ | ? *` を `_` へ置換（`:` を含めて代替データストリームを封じる）
-  - [ ] 末尾のドット・空白の除去
-  - [ ] Windows予約名（`CON` / `PRN` / `AUX` / `NUL` / `COM1-9` / `LPT1-9`）にサフィックスを付与
-  - [ ] NFC 正規化
-  - [ ] 長さ制限（UTF-8バイト長で判定し、拡張子を保ったまま切り詰め）
-  - [ ] 実行可能拡張子（`.exe .scr .js .vbs .lnk .bat .cmd .ps1`）に警告フラグを立てる
-  - [ ] `resolve_within(base: Path, name: str) -> Path`（`Path(dest).resolve()` が `base` 配下であることを確認する最終防御）
-- [ ] 空文字・全置換で空になる場合の代替名（`attachment`）を用意する
-- [ ] **実ファイル保存は Phase 3。ここは純粋関数のみ**である旨をコメントで残す
+- [x] `sanitize_attachment_name(name: str) -> SanitizedName` を実装する（開発計画書 4.6-4 の8項目）
+  - [x] パス成分（`../` / `\` / `/`）の除去と警告
+  - [x] NTFS禁止文字 `< > : " / \ | ? *` を `_` へ置換（`:` を含めて代替データストリームを封じる）
+  - [x] 末尾のドット・空白の除去
+  - [x] Windows予約名（`CON` / `PRN` / `AUX` / `NUL` / `COM1-9` / `LPT1-9`）にサフィックスを付与
+  - [x] NFC 正規化
+  - [x] 長さ制限（UTF-8バイト長で判定し、拡張子を保ったまま切り詰め）
+  - [x] 実行可能拡張子（`.exe .scr .js .vbs .lnk .bat .cmd .ps1`）に警告フラグを立てる
+  - [x] `resolve_within(base: Path, name: str) -> Path`（`Path(dest).resolve()` が `base` 配下であることを確認する最終防御）
+- [x] 空文字・全置換で空になる場合の代替名（`attachment`）を用意する
+- [x] **実ファイル保存は Phase 3。ここは純粋関数のみ**である旨をコメントで残す
 
 ---
 
@@ -456,10 +456,10 @@ FetchError
 
 - [x] `test_charset.py`: フォールバック順序、ラベル正規化、CP932機種依存文字、最終手段で例外を投げないこと
 - [x] `test_headers.py`: RFC2047、**RFC2231分割**、Outlook非標準、`Date` 不正・欠損・未来日時のフォールバック、`thread_key` / `content_key` 算出
-- [ ] `test_eml_parser.py`: **コーパス全件が例外なく解析される**こと、本文優先順、`related` 追跡、インライン画像の除外、`has_attachment`、壊れたMIMEで `parse_error` が立つこと
+- [x] `test_eml_parser.py`: **コーパス全件が例外なく解析される**こと、本文優先順、`related` 追跡、インライン画像の除外、`has_attachment`、壊れたMIMEで `parse_error` が立つこと
 - [ ] `test_html_to_text.py`: script/style除去、空白圧縮
-- [ ] `test_normalize.py`: 全角英数の半角化、大文字小文字、連続空白、かな・カナを同一視しないこと
-- [ ] `test_filename.py`: 8項目すべて（パストラバーサル、`:` 置換、予約名、長さ制限、実行可能拡張子、`resolve_within` の最終防御）
+- [x] `test_normalize.py`: 全角英数の半角化、大文字小文字、連続空白、かな・カナを同一視しないこと
+- [x] `test_filename.py`: 8項目すべて（パストラバーサル、`:` 置換、予約名、長さ制限、実行可能拡張子、`resolve_within` の最終防御）
 - [ ] `test_eml_storage.py`: ファイル名＝sha256先頭32桁、`INTERNALDATE` による年月、`unknown/`、**dedupe時に書き込みが発生しないこと**、`tmp/` がルート配下であること、`os.replace` 前に中断しても本番ディレクトリが汚れないこと
 - [ ] `test_eml_storage.py`: 同一アカウントの別年月・別フォルダでも完全ハッシュ一致時は既存パスを再検証して共有し、アカウント間では共有しないこと。先頭32桁だけが同じ候補を同一視しないこと
 - [ ] `test_manifest.py`: CRC32付与、追記のみ、月次ローテーション、**末尾torn行の切り離し**、中間破損で `ManifestCorruptError`
