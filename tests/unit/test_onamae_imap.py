@@ -52,7 +52,7 @@ class FakeImap:
         self.commands.append(("LIST", (reference, pattern)))
         return "OK", [b'* LIST (\\HasNoChildren \\Trash) "." "Trash"', b'* LIST () "." "INBOX"']
 
-    def select(self, mailbox: str, *, readonly: bool) -> tuple[str, builtins.list[bytes]]:
+    def select(self, mailbox: str, *, readonly: bool = False) -> tuple[str, builtins.list[bytes]]:
         self.commands.append(("SELECT", (mailbox, readonly)))
         return "OK", [b"1"]
 

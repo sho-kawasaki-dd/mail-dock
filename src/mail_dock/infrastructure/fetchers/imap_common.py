@@ -99,10 +99,10 @@ def parse_list_response(response: ImapResponse) -> RemoteFolder:
 
     text = _response_text(response)
     match = _LIST_PREFIX.match(text)
-    if match is None:
+    if match is None and not text.lstrip().startswith("("):
         raise PermanentError(f"invalid IMAP LIST response: {text[:80]}")
 
-    position = match.end()
+    position = match.end() if match is not None else text.index("(")
     if position >= len(text) or text[position] != "(":
         raise PermanentError("IMAP LIST response has no attribute list")
     attributes_end = text.find(")", position + 1)

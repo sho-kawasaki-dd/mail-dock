@@ -474,13 +474,13 @@ FetchError
 
 #### **H-2. 結合テスト（`docker` マーカー / WSL）**
 
-- [ ] `test_imap_fetcher.py`（GreenMail + Dovecot の両方でパラメトライズ）: `connect` / `list_folders`（**日本語フォルダの modified UTF-7 と区切り文字**）/ `select_folder` / `iter_message_refs` / `list_existing_uids` / `download_eml_bytes`（`\Seen` が立たないこと）
-- [ ] `test_imap_delete.py`（Dovecot）: `delete_remote_message(mode="trash")` でゴミ箱へMOVEされること、`mode="expunge"` で消えること、SPECIAL-USE からゴミ箱を特定できること
-- [ ] `test_sync_flow.py`: 実ストレージルート + 実SQLite で end-to-end 同期し、EML・マニフェスト・DB の三者が一致すること
-- [ ] `test_sync_resume.py`: 新着パスと履歴パスの各途中でキャンセル → 再実行で対応するカーソルから継続し、重複・欠損が出ないこと
-- [ ] `test_uidvalidity_change.py`（Dovecot）: UIDVALIDITY を変更 → 二カーソルが再初期化され、旧世代の行とfailure履歴を保持し、現在世代だけを再試行し、EMLが再書き込みされないこと（dedupe）
-- [ ] `test_delete_detection.py`: 一意な完全一致は `'moved'`、候補なしは `'deleted'`、同一Message-IDの複数候補・ハッシュ不明は `'unknown'` となり、**EMLが残っていること**
-- [ ] `test_fetch_failure.py`: 接続断を注入し、`TransientError` リトライ後に `sync_failures` へ記録され、次回同期で自動再試行されること
+- [x] `test_imap_fetcher.py`（GreenMail + Dovecot の両方でパラメトライズ）: `connect` / `list_folders`（**日本語フォルダの modified UTF-7 と区切り文字**）/ `select_folder` / `iter_message_refs` / `list_existing_uids` / `download_eml_bytes`（`\Seen` が立たないこと）
+- [x] `test_imap_delete.py`（Dovecot）: `delete_remote_message(mode="trash")` でゴミ箱へMOVEされること、`mode="expunge"` で消えること、SPECIAL-USE からゴミ箱を特定できること
+- [x] `test_sync_flow.py`: 実ストレージルート + 実SQLite で end-to-end 同期し、EML・マニフェスト・DB の三者が一致すること
+- [x] `test_sync_resume.py`: 新着パスと履歴パスの各途中でキャンセル → 再実行で対応するカーソルから継続し、重複・欠損が出ないこと
+- [x] `test_uidvalidity_change.py`（Dovecot）: UIDVALIDITY を変更 → 二カーソルが再初期化され、旧世代の行とfailure履歴を保持し、現在世代だけを再試行し、EMLが再書き込みされないこと（dedupe）
+- [x] `test_delete_detection.py`: 一意な完全一致は `'moved'`、候補なしは `'deleted'`、同一Message-IDの複数候補・ハッシュ不明は `'unknown'` となり、**EMLが残っていること**
+- [x] `test_fetch_failure.py`: 接続断を注入し、`TransientError` リトライ後に `sync_failures` へ記録され、次回同期で自動再試行されること
 
 #### **H-3. 実機検証（お名前.com）**
 
@@ -567,10 +567,10 @@ FetchError
 - [ ] V-4. 中断注入試験: `os.replace` 直前 / マニフェスト追記途中 / マニフェストfsync後かつDBコミット前 / DBコミット前 の各点で中断させ、**「DBに行があるがEML実体またはfsync済みマニフェストが無い」状態が発生しない**こと。マニフェストがDBより先行する状態は許容し、再同期で回復すること
 - [ ] V-5. dedupe 検証: 同一メールを同一アカウントの2フォルダ・異なる年月で取得し、EMLファイルが1個・`messages` が2行・両行の完全な `file_hash` と `relative_path` が一致する。別アカウントでは実体を共有しない
 - [x] V-6. マニフェスト検証: 末尾行を意図的に途中で切って破損させると `read_events` が末尾行のみを切り離して継続し、中間行を破損させると `ManifestCorruptError` になる
-- [ ] V-7. `docker compose -f tests/docker/compose.yaml up -d` → `MAILDOCK_DOCKER=1 uv run pytest -m docker` が GreenMail / Dovecot の両方で全緑になる
-- [ ] V-8. UIDVALIDITY 変化検証（Dovecot）: 値を変更すると二カーソルが新世代の最大UIDで初期化され、旧世代の行とfailure履歴を保ったまま現在世代だけが再試行され、完全ハッシュ一致EMLの再書き込みが発生しない
+- [x] V-7. `docker compose -f tests/docker/compose.yaml up -d` → `MAILDOCK_DOCKER=1 uv run pytest -m docker` が GreenMail / Dovecot の両方で全緑になる
+- [x] V-8. UIDVALIDITY 変化検証（Dovecot）: 値を変更すると二カーソルが新世代の最大UIDで初期化され、旧世代の行とfailure履歴を保ったまま現在世代だけが再試行され、完全ハッシュ一致EMLの再書き込みが発生しない
 - [ ] V-9. レジューム検証: 最新メールが最初に取得されること、新着の固定範囲完了までは `last_seen_uid` が進まず中断時に冪等再走査されること、履歴同期中は `backfill_next_uid` から再開すること、初回同期中に到着した新着と100件を超える新着も欠損しないことを確認する
-- [ ] V-10. 削除・移動検知: サーバー側で削除・移動すると、一意な完全一致だけが `'moved'`、候補なしが `'deleted'`、曖昧候補が `'unknown'` となり、**EMLファイルがすべて残っている**
+- [x] V-10. 削除・移動検知: サーバー側で削除・移動すると、一意な完全一致だけが `'moved'`、候補なしが `'deleted'`、曖昧候補が `'unknown'` となり、**EMLファイルがすべて残っている**
 - [ ] V-11. 失敗記録: 接続断を注入すると `TransientError` が3回リトライされ `sync_failures` に記録され、次回同期で自動再試行されて `attempt_count` が加算される
 - [ ] V-12. サイズ上限: `max_message_bytes` を小さくして同期すると、超過メールの本文がダウンロードされず、ヘッダ情報を持ち `relative_path` / `file_hash` がNULLの行と `oversize` failureが登録される
 - [ ] V-13. 解析失敗の継続: 壊れたMIMEを含むメールボックスを同期すると、EMLは保存され `message_contents` は空、`sync_failures` に `parse` が記録され、`reparse` 実行後に内容が埋まる

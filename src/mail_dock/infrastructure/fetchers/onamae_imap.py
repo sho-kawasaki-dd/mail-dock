@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import imaplib
 import re
+import ssl
 from collections.abc import Iterator
 from contextlib import suppress
 from typing import cast
@@ -58,6 +59,7 @@ class OnamaeImapFetcher(BaseMailFetcher):
         timeout: float = 30.0,
         read_timeout: float | None = None,
         remote_trash_folder: str | None = None,
+        ssl_context: ssl.SSLContext | None = None,
     ) -> None:
         if not host:
             raise ValueError("host must not be empty")
@@ -76,6 +78,7 @@ class OnamaeImapFetcher(BaseMailFetcher):
         self._timeout = timeout
         self._read_timeout = read_timeout if read_timeout is not None else timeout
         self._remote_trash_folder = remote_trash_folder
+        self._ssl_context = ssl_context
         self._connection: imaplib.IMAP4_SSL | None = None
         self._capabilities: frozenset[str] = frozenset()
 
@@ -94,11 +97,19 @@ class OnamaeImapFetcher(BaseMailFetcher):
         connection: imaplib.IMAP4_SSL | None = None
         try:
             with wrap_imap_errors("IMAP connect"):
-                connection = imaplib.IMAP4_SSL(
-                    self._host,
-                    self._port,
-                    timeout=self._timeout,
-                )
+                if self._ssl_context is None:
+                    connection = imaplib.IMAP4_SSL(
+                        self._host,
+                        self._port,
+                        timeout=self._timeout,
+                    )
+                else:
+                    connection = imaplib.IMAP4_SSL(
+                        self._host,
+                        self._port,
+                        ssl_context=self._ssl_context,
+                        timeout=self._timeout,
+                    )
                 connection.sock.settimeout(self._read_timeout)
                 status, data = connection.login(self._username, self._password)
                 self._ensure_ok(status, data, "LOGIN")
@@ -128,7 +139,7 @@ class OnamaeImapFetcher(BaseMailFetcher):
 
         connection = self._require_connection()
         with wrap_imap_errors("LIST folders"):
-            status, data = connection.list("", "*")
+            status, data = connection.list('""', "*")
             self._ensure_ok(status, data, "LIST")
         return parse_list_responses(
             item for item in self._response_items(data) if isinstance(item, (bytes, str))
@@ -231,18 +242,20 @@ class OnamaeImapFetcher(BaseMailFetcher):
 
         if mode not in {"trash", "expunge"}:
             raise ValueError("mode must be 'trash' or 'expunge'")
-        self.select_folder(raw_name)
+        connection = self._require_connection()
+        with wrap_imap_errors(f"SELECT {raw_name} for deletion"):
+            status, data = connection.select(raw_name)
+            self._ensure_ok(status, data, "SELECT")
         if mode == "trash":
             trash_folder = self._find_trash_folder()
             if "MOVE" in self._capabilities:
                 self._uid_command("MOVE", str(uid), trash_folder)
                 return
             self._uid_command("COPY", str(uid), trash_folder)
-        self._uid_command("STORE", str(uid), "+FLAGS.SILENT", r"(\\Deleted)")
+        self._uid_command("STORE", str(uid), "+FLAGS.SILENT", r"(\Deleted)")
         if "UIDPLUS" in self._capabilities:
             self._uid_command("EXPUNGE", str(uid))
         else:
-            connection = self._require_connection()
             with wrap_imap_errors("EXPUNGE"):
                 status, data = connection.expunge()
                 self._ensure_ok(status, data, "EXPUNGE")

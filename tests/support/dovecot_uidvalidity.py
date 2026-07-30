@@ -3,22 +3,27 @@
 from __future__ import annotations
 
 import subprocess
+import time
 from pathlib import Path
 
 
 def force_uidvalidity_change(mailbox_path: Path) -> None:
-    """Remove Dovecot UID state so the next mailbox open creates a new generation.
+    """Change the Dovecot uidlist generation for a local Maildir mailbox.
 
-    ``mailbox_path`` must be the Maildir directory for the mailbox inside the
-    Dovecot container or a bind-mounted test volume. Dovecot recreates both
-    files when the mailbox is opened again. Existing messages remain in place,
-    but their UID generation is intentionally reset for integration tests.
+    Dovecot stores the effective UIDVALIDITY in the ``V`` field of
+    ``dovecot-uidlist``. Existing messages remain in place while their UID
+    generation is intentionally changed for integration tests.
     """
 
-    for state_file in ("dovecot-uidvalidity", "dovecot-uidlist"):
-        state_path = mailbox_path / state_file
-        if state_path.exists():
-            state_path.unlink()
+    uidlist = mailbox_path / "dovecot-uidlist"
+    contents = uidlist.read_text(encoding="ascii")
+    lines = contents.splitlines(keepends=True)
+    if not lines or " V" not in lines[0]:
+        raise ValueError(f"Dovecot uidlist has no UIDVALIDITY field: {uidlist}")
+    prefix, _, suffix = lines[0].partition(" V")
+    _, _, remainder = suffix.partition(" ")
+    lines[0] = f"{prefix} V{int(time.time()) + 100} {remainder}"
+    uidlist.write_text("".join(lines), encoding="ascii")
 
 
 def force_uidvalidity_change_in_container(
@@ -27,7 +32,7 @@ def force_uidvalidity_change_in_container(
     service: str = "dovecot",
     mailbox_path: str = "/var/mail/vmail/testuser/Maildir",
 ) -> None:
-    """Reset UID state in a running Dovecot Compose service.
+    """Change the uidlist generation in a running Dovecot Compose service.
 
     This variant supports the named volume used by the test Compose file.
     ``mailbox_path`` is restricted to an absolute container path so test code
@@ -37,7 +42,8 @@ def force_uidvalidity_change_in_container(
     if not mailbox_path.startswith("/"):
         raise ValueError("mailbox_path must be an absolute container path")
 
-    state_paths = [f"{mailbox_path}/{name}" for name in ("dovecot-uidvalidity", "dovecot-uidlist")]
+    uidlist_path = f"{mailbox_path}/dovecot-uidlist"
+    replacement = f"s/^3 V[0-9]*/3 V{int(time.time()) + 100}/"
     subprocess.run(
         [
             "docker",
@@ -47,9 +53,10 @@ def force_uidvalidity_change_in_container(
             "exec",
             "-T",
             service,
-            "rm",
-            "-f",
-            *state_paths,
+            "sed",
+            "-i",
+            replacement,
+            uidlist_path,
         ],
         check=True,
     )
