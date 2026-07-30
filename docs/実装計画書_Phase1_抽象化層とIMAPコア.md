@@ -266,19 +266,19 @@ FetchError
 
 #### **D-1. `infrastructure/storage/eml_storage.py` — 原子的保存（*設計不変条件2の中核*）**
 
-- [ ] `save_eml(root: Path, account_id: str, internal_date: datetime | None, raw: bytes) -> StoredEml` を実装する
-  - [ ] `root/tmp/{uuid4}.eml` へ書き込み → `flush()` → `os.fsync(fd)`
-  - [ ] `sha256(raw)` を計算し、先頭32桁をファイル名にする
-  - [ ] 保存先 `root/eml/{account_id}/{YYYY}/{MM}/{hash32}.eml`。`internal_date` が無ければ `{account_id}/unknown/`
-  - [ ] `file_hash` は完全なSHA-256を保持し、ファイル名だけを先頭32桁とする
-  - [ ] usecaseから同一アカウント内の既存候補が渡された場合、実体の完全なSHA-256を再検証し、一致すればtmpを書かず既存 `relative_path` を返す。不一致・実体欠損時は通常保存へ進む
-  - [ ] 計算した保存先が既に存在する場合も完全なSHA-256を検証し、一致時だけ `deduplicated=True` を返す
-  - [ ] `os.replace()` でアトミック配置し、POSIX では親ディレクトリを fsync する
-  - [ ] すべてのI/Oを `detach.storage_io()` で包み、`OSError` を `StorageDetachedError` 等へ分類する
-- [ ] `account_id` がWindowsで安全な文字列か登録時に検証する純粋関数を実装する。不正値を別文字列へ暗黙変換せず拒否し、ID衝突を防ぐ
-- [ ] `cleanup_tmp(root: Path) -> int` を実装する（起動時に `tmp/` の残骸を削除。`tmp/pstimp/` は対象外）
-- [ ] モジュール docstring に「**EMLの配置はこの関数以外から行わない。`tmp/` は必ずストレージルート配下（＝同一ボリューム）**」と明記する
-- [ ] `EmlStorage(BaseEmlStorage)` を実装し、`save()` は `save_eml()` へ委譲、`reuse()` は既存実体の完全ハッシュを再検証、`read()` は相対パスがルート配下であることを検証して読み込む
+- [x] `save_eml(root: Path, account_id: str, internal_date: datetime | None, raw: bytes) -> StoredEml` を実装する
+  - [x] `root/tmp/{uuid4}.eml` へ書き込み → `flush()` → `os.fsync(fd)`
+  - [x] `sha256(raw)` を計算し、先頭32桁をファイル名にする
+  - [x] 保存先 `root/eml/{account_id}/{YYYY}/{MM}/{hash32}.eml`。`internal_date` が無ければ `{account_id}/unknown/`
+  - [x] `file_hash` は完全なSHA-256を保持し、ファイル名だけを先頭32桁とする
+  - [x] usecaseから同一アカウント内の既存候補が渡された場合、実体の完全なSHA-256を再検証し、一致すればtmpを書かず既存 `relative_path` を返す。不一致・実体欠損時は通常保存へ進む
+  - [x] 計算した保存先が既に存在する場合も完全なSHA-256を検証し、一致時だけ `deduplicated=True` を返す
+  - [x] `os.replace()` でアトミック配置し、POSIX では親ディレクトリを fsync する
+  - [x] すべてのI/Oを `detach.storage_io()` で包み、`OSError` を `StorageDetachedError` 等へ分類する
+- [x] `account_id` がWindowsで安全な文字列か登録時に検証する純粋関数を実装する。不正値を別文字列へ暗黙変換せず拒否し、ID衝突を防ぐ
+- [x] `cleanup_tmp(root: Path) -> int` を実装する（起動時に `tmp/` の残骸を削除。`tmp/pstimp/` は対象外）
+- [x] モジュール docstring に「**EMLの配置はこの関数以外から行わない。`tmp/` は必ずストレージルート配下（＝同一ボリューム）**」と明記する
+- [x] `EmlStorage(BaseEmlStorage)` を実装し、`save()` は `save_eml()` へ委譲、`reuse()` は既存実体の完全ハッシュを再検証、`read()` は相対パスがルート配下であることを検証して読み込む
 
 #### **D-2. `infrastructure/storage/manifest.py` — 永続マニフェスト**
 
@@ -314,11 +314,11 @@ FetchError
 
 #### **D-4. `migrations/002_sync_cursor.sql`**
 
-- [ ] `folders` に `backfill_next_uid INTEGER` と `initial_sync_completed INTEGER NOT NULL DEFAULT 0` を追加する
-- [ ] `sync_failures` を安全に再作成し、`uidvalidity INTEGER NOT NULL DEFAULT 0` と `UNIQUE(account_id, folder_id, uidvalidity, uid)` を持たせる。既存行は `uidvalidity=0` の旧世代履歴として移行する
-- [ ] `messages(account_id, file_hash)` に部分索引 `idx_msg_file_hash WHERE file_hash IS NOT NULL` を追加する
-- [ ] oversizeは既存の `messages.relative_path IS NULL` / `file_hash IS NULL` と `sync_failures.error_class='oversize'` で表現し、専用列を追加しない
-- [ ] `001_init.sql` を変更しない
+- [x] `folders` に `backfill_next_uid INTEGER` と `initial_sync_completed INTEGER NOT NULL DEFAULT 0` を追加する
+- [x] `sync_failures` を安全に再作成し、`uidvalidity INTEGER NOT NULL DEFAULT 0` と `UNIQUE(account_id, folder_id, uidvalidity, uid)` を持たせる。既存行は `uidvalidity=0` の旧世代履歴として移行する
+- [x] `messages(account_id, file_hash)` に部分索引 `idx_msg_file_hash WHERE file_hash IS NOT NULL` を追加する
+- [x] oversizeは既存の `messages.relative_path IS NULL` / `file_hash IS NULL` と `sync_failures.error_class='oversize'` で表現し、専用列を追加しない
+- [x] `001_init.sql` を変更しない
 
 ---
 
@@ -460,15 +460,15 @@ FetchError
 - [ ] `test_html_to_text.py`: script/style除去、空白圧縮
 - [x] `test_normalize.py`: 全角英数の半角化、大文字小文字、連続空白、かな・カナを同一視しないこと
 - [x] `test_filename.py`: 8項目すべて（パストラバーサル、`:` 置換、予約名、長さ制限、実行可能拡張子、`resolve_within` の最終防御）
-- [ ] `test_eml_storage.py`: ファイル名＝sha256先頭32桁、`INTERNALDATE` による年月、`unknown/`、**dedupe時に書き込みが発生しないこと**、`tmp/` がルート配下であること、`os.replace` 前に中断しても本番ディレクトリが汚れないこと
-- [ ] `test_eml_storage.py`: 同一アカウントの別年月・別フォルダでも完全ハッシュ一致時は既存パスを再検証して共有し、アカウント間では共有しないこと。先頭32桁だけが同じ候補を同一視しないこと
+- [x] `test_eml_storage.py`: ファイル名＝sha256先頭32桁、`INTERNALDATE` による年月、`unknown/`、**dedupe時に書き込みが発生しないこと**、`tmp/` がルート配下であること、`os.replace` 前に中断しても本番ディレクトリが汚れないこと
+- [x] `test_eml_storage.py`: 同一アカウントの別年月・別フォルダでも完全ハッシュ一致時は既存パスを再検証して共有し、アカウント間では実体を共有しないこと。先頭32桁だけが同じ候補を同一視しないこと
 - [ ] `test_manifest.py`: CRC32付与、追記のみ、月次ローテーション、**末尾torn行の切り離し**、中間破損で `ManifestCorruptError`
 - [ ] `test_message_repository.py`: `BEGIN IMMEDIATE`、バッチ境界でのみコミットされること、同一UIDVALIDITY内だけの `ON CONFLICT` 更新、UIDVALIDITY別failureの `attempt_count` 加算、現在世代フィルタ
 - [ ] `test_retry.py`: `TransientError` のみリトライ、待機時間の系列、キャンセル即応
 - [ ] `test_sync_mail.py`（`FakeFetcher` + `InMemoryMessageRepository`）: 最新優先の初回同期、新着範囲完了時だけ進む高水位、履歴カーソルの降順レジューム、初回同期中の新着、100件超の新着中断時の冪等再走査、UIDVALIDITY変化、oversizeのヘッダ行、解析失敗の継続、キャンセル境界、削除・移動・曖昧検知、`AuthenticationError` での中止
 - [ ] `test_ports.py`: usecaseがdomainポートのFakeだけで動作し、`keyring` / SQLite / ファイルI/Oをimportしないこと
 - [ ] `test_keyring_store.py`: 保存・読込・削除、バックエンド不在時に平文へフォールバックせず `CredentialStoreError` になること
-- [ ] `test_002_sync_cursor.py`: v1 DBからカーソル列・UIDVALIDITY付きfailure一意制約・ハッシュ索引へデータを保持して移行できること
+- [x] `test_002_sync_cursor.py`: v1 DBからカーソル列・UIDVALIDITY付きfailure一意制約・ハッシュ索引へデータを保持して移行できること
 - [ ] `test_imap_common.py`: modified UTF-7 往復、LIST/FETCH応答パース、**例外ラップの網羅**（`imaplib` / `ssl` / `socket` の例外がドメイン例外になること）
 - [ ] `test_reparse.py`: ハッシュ不一致・実体欠損のスキップ、`message_contents` 更新
 
