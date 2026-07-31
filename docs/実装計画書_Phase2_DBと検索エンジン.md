@@ -231,28 +231,28 @@
 
 #### **D-1. `infrastructure/database/search_repository.py` — `SqliteSearchRepository`**
 
-- [ ] `SqliteSearchRepository(BaseSearchRepository)` を実装する（`sqlite3.Connection` / `ConnectionManager` の両方を受け付ける。Phase 1 の `SqliteMessageRepository` と同じ構成）
-- [ ] **MATCH 経路**: 語ごとに `SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?` を発行する
-  - [ ] AND は `INTERSECT`、OR は `UNION`、除外は `EXCEPT` で合成する（F-6）
-  - [ ] 列を限定せず4列すべてを対象とする（F-8。フィールド指定を採らないため）
-- [ ] **LIKE 経路**: `SELECT message_id FROM message_contents WHERE subject_norm LIKE ? ESCAPE '\' OR sender_norm LIKE ? ESCAPE '\' OR body_text LIKE ? ESCAPE '\' OR attachment_names LIKE ? ESCAPE '\'`
-- [ ] 両経路の結果を `mode` に従って合成し、`messages` と JOIN する
-- [ ] 構造化フィルタを `WHERE` で適用する（アカウント・フォルダ・日付範囲・添付有無・`local_state` / `remote_state`）（F-7）
-- [ ] `folders` を JOIN し、`folder_raw_name` / `folder_display_name` を `MessageSummary` に格納する
-- [ ] **ソートとページング**（F-9 / F-10）
-  - [ ] ソートキーを `COALESCE(date_sent, internal_date, '')` とし、`ORDER BY sort_key DESC, id DESC` で全順序を確定させる
-  - [ ] keyset の継続条件を行値比較 `(sort_key, id) < (?, ?)` で表現する
-  - [ ] `limit + 1` 件を取得し、余剰行は次ページの存在判定にだけ使って返却対象から除外する
-  - [ ] `next_cursor` は**今回返した最後の行**の `(sort_key, id)` から組み立てる（余剰行から作ると次回の `<` 条件で1件欠落するため）
-  - [ ] `date_sent` が NULL の行が脱落しないことをコメントで明記する
-- [ ] **キャンセル**（F-14 / D-11）
-  - [ ] `set_progress_handler` を設定し、`CancelToken` が立っていたら中断させる
-  - [ ] `finally` で必ずハンドラを解除する（他のクエリに影響を残さない）
-  - [ ] `sqlite3.Error` の一般分類より先に、キャンセル済みトークンに伴う `SQLITE_INTERRUPT` を `OperationCancelledError` へ変換する
-- [ ] Phase 1 の `_db_io()` パターンで `sqlite3.Error` を `classify_sqlite_error()` 経由でドメイン例外へラップする（F-17）
-- [ ] **トランザクションを開かない**（読み取り専用。同期中の書き込みをブロックしない）ことをモジュール docstring に明記する
-- [ ] SQL をプレースホルダで組み立てる（キーワード数に応じた `?` の展開のみ許可し、値を文字列連結しない）
-- [ ] 接続をスレッド間で共有しない（`ConnectionManager` を使う）
+- [x] `SqliteSearchRepository(BaseSearchRepository)` を実装する（`sqlite3.Connection` / `ConnectionManager` の両方を受け付ける。Phase 1 の `SqliteMessageRepository` と同じ構成）
+- [x] **MATCH 経路**: 語ごとに `SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?` を発行する
+  - [x] AND は `INTERSECT`、OR は `UNION`、除外は `EXCEPT` で合成する（F-6）
+  - [x] 列を限定せず4列すべてを対象とする（F-8。フィールド指定を採らないため）
+- [x] **LIKE 経路**: `SELECT message_id FROM message_contents WHERE subject_norm LIKE ? ESCAPE '\' OR sender_norm LIKE ? ESCAPE '\' OR body_text LIKE ? ESCAPE '\' OR attachment_names LIKE ? ESCAPE '\'`
+- [x] 両経路の結果を `mode` に従って合成し、`messages` と JOIN する
+- [x] 構造化フィルタを `WHERE` で適用する（アカウント・フォルダ・日付範囲・添付有無・`local_state` / `remote_state`）（F-7）
+- [x] `folders` を JOIN し、`folder_raw_name` / `folder_display_name` を `MessageSummary` に格納する
+- [x] **ソートとページング**（F-9 / F-10）
+  - [x] ソートキーを `COALESCE(date_sent, internal_date, '')` とし、`ORDER BY sort_key DESC, id DESC` で全順序を確定させる
+  - [x] keyset の継続条件を行値比較 `(sort_key, id) < (?, ?)` で表現する
+  - [x] `limit + 1` 件を取得し、余剰行は次ページの存在判定にだけ使って返却対象から除外する
+  - [x] `next_cursor` は**今回返した最後の行**の `(sort_key, id)` から組み立てる（余剰行から作ると次回の `<` 条件で1件欠落するため）
+  - [x] `date_sent` が NULL の行が脱落しないことをコメントで明記する
+- [x] **キャンセル**（F-14 / D-11）
+  - [x] `set_progress_handler` を設定し、`CancelToken` が立っていたら中断させる
+  - [x] `finally` で必ずハンドラを解除する（他のクエリに影響を残さない）
+  - [x] `sqlite3.Error` の一般分類より先に、キャンセル済みトークンに伴う `SQLITE_INTERRUPT` を `OperationCancelledError` へ変換する
+- [x] Phase 1 の `_db_io()` パターンで `sqlite3.Error` を `classify_sqlite_error()` 経由でドメイン例外へラップする（F-17）
+- [x] **トランザクションを開かない**（読み取り専用。同期中の書き込みをブロックしない）ことをモジュール docstring に明記する
+- [x] SQL をプレースホルダで組み立てる（キーワード数に応じた `?` の展開のみ許可し、値を文字列連結しない）
+- [x] 接続をスレッド間で共有しない（`ConnectionManager` を使う）
 
 #### **D-2. `migrations/003_search_index.sql`（*A-5 の判定で必要と決まった場合のみ*）**
 
