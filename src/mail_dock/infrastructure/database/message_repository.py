@@ -14,9 +14,9 @@ from typing import Any, cast
 
 from mail_dock.domain.errors import DatabaseError
 from mail_dock.domain.messages import StoredEml
+from mail_dock.domain.normalize import normalize_for_search
 from mail_dock.domain.repository import BaseMessageRepository, MessageContents, MessageRecord
 from mail_dock.infrastructure.database.connection import ConnectionManager, checkpoint_truncate
-from mail_dock.infrastructure.parsing.normalize import normalize_for_search
 from mail_dock.infrastructure.storage.detach import classify_sqlite_error, storage_io
 
 _ACCOUNT_COLUMNS = (

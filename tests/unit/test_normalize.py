@@ -1,4 +1,4 @@
-from mail_dock.infrastructure.parsing.normalize import normalize_for_search
+from mail_dock.domain.normalize import normalize_for_search
 
 
 def test_normalize_for_search_applies_nfkc_and_casefold() -> None:

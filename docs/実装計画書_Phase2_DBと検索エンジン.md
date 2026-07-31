@@ -155,10 +155,10 @@
 
 #### **B-0. `domain/normalize.py` — 検索正規化の純粋関数**
 
-- [ ] `infrastructure/parsing/normalize.py` の `normalize_for_search()` を `domain/normalize.py` へ移す
-- [ ] 標準ライブラリ以外への依存を持たせない
+- [x] `infrastructure/parsing/normalize.py` の `normalize_for_search()` を `domain/normalize.py` へ移す
+- [x] 標準ライブラリ以外への依存を持たせない
 - [ ] `SqliteMessageRepository` と `usecases/search_query.py` の双方が `domain.normalize` から同じ関数を import する
-- [ ] 旧モジュールを残して正規化経路を二重化しない
+- [x] 旧モジュールを残して正規化経路を二重化しない
 
 #### **B-1. `domain/errors.py` — 例外の追加**
 

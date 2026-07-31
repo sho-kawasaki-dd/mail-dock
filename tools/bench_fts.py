@@ -27,7 +27,7 @@ for import_root in (REPOSITORY_ROOT, REPOSITORY_ROOT / "src"):
     if str(import_root) not in sys.path:
         sys.path.insert(0, str(import_root))
 
-from mail_dock.infrastructure.parsing.normalize import (  # noqa: E402, I001
+from mail_dock.domain.normalize import (  # noqa: E402, I001
     normalize_for_search,
 )
 from tests.support.eml_builder import AttachmentSpec, build_eml  # noqa: E402
