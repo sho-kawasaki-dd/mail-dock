@@ -300,11 +300,11 @@
 
 #### **E-2. `verify` の拡張**
 
-- [ ] 既存の `PRAGMA quick_check` / `foreign_key_check` に加えて FTS の `integrity-check` を実行する（F-20）
-- [ ] `quick_check` / `foreign_key_check` は従来どおり読み取り専用接続で実行する
-- [ ] 通常検査の接続を閉じた後、StorageLock を保持したまま FTS 検査専用の書き込み可能接続を開く
-- [ ] 専用接続ではマイグレーションを実行せず、`integrity_check()` だけを実行して直ちに閉じる
-- [ ] FTS検査専用接続の開始・終了と、例外発生時にも接続が閉じられることをテストする
+- [x] 既存の `PRAGMA quick_check` / `foreign_key_check` に加えて FTS の `integrity-check` を実行する（F-20）
+- [x] `quick_check` / `foreign_key_check` は従来どおり読み取り専用接続で実行する
+- [x] 通常検査の接続を閉じた後、StorageLock を保持したまま FTS 検査専用の書き込み可能接続を開く
+- [x] 専用接続ではマイグレーションを実行せず、`integrity_check()` だけを実行して直ちに閉じる
+- [x] FTS検査専用接続の開始・終了と、例外発生時にも接続が閉じられることをテストする
 
 ---
 
@@ -341,7 +341,7 @@
 - [ ] `test_003_search_index.py`（`003` を作る場合のみ）: v2 の実データを保持して適用され、`integrity-check` が通ること
 - [ ] `test_ports.py`（既存を拡張）: `usecases/` 配下に `sqlite3` と infrastructure の import が無いこと、投入側と検索側が `domain.normalize` を参照することを静的に確認する（F-3 / F-16）
 - [x] `test_fts_maintenance.py`: 正常DBで `rank=1` の `integrity-check` が通り、external-content と意図的に乖離させたFTSで `DatabaseError` になること
-- [ ] `test_main.py`（既存CLIテストを拡張）: 通常検査は読み取り専用接続、FTS検査は専用の書き込み可能接続で実行され、成功時・失敗時とも両接続が閉じられること
+- [x] `test_main.py`（既存CLIテストを拡張）: 通常検査は読み取り専用接続、FTS検査は専用の書き込み可能接続で実行され、成功時・失敗時とも両接続が閉じられること
 
 #### **F-2. 結合テスト（`docker` マーカー / WSL）**
 
@@ -425,7 +425,7 @@
 - [ ] V-10. エスケープと不正入力: `"` / `*` / `^` / `-` / `NEAR` / `%` / `_` / `\` を含む正当なクエリで Parse Error も SQL エラーも発生せず、未閉鎖の引用符・空フレーズ・単独 `-`・正規化後に空になる語は `SearchQueryError` になる
 - [ ] V-11. 日本語検索: ひらがなとカタカナが同一視されず、全角英数と半角英数が同一視され、大文字小文字が区別されない
 - [ ] V-12. マイグレーション（`003` を作る場合）: v2 の実データを保持して適用され、適用後に `integrity-check` が通る
-- [ ] V-13. FTS 追随・検証: `message_contents` の UPDATE / DELETE で `messages_fts` が追随し、`verify` が専用の書き込み可能接続で `rank=1` の `integrity-check` を実行してexternal-contentとの乖離を検出できる。通常検査は読み取り専用接続を維持し、両接続は確実に閉じられる
+- [x] V-13. FTS 追随・検証: `message_contents` の UPDATE / DELETE で `messages_fts` が追随し、`verify` が専用の書き込み可能接続で `rank=1` の `integrity-check` を実行してexternal-contentとの乖離を検出できる。通常検査は読み取り専用接続を維持し、両接続は確実に閉じられる
 - [ ] V-14. CLI: `mail-dock search` が Phase 1 で同期した実データに対して期待どおりヒットし、`--after` による継続取得が機能する
 - [ ] V-15. CI: プルリクエストで `lint` / `test-windows` / `test-linux` の3ジョブがすべて成功し、ベンチマークが実行されていない
 

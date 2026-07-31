@@ -32,7 +32,8 @@ from mail_dock.domain.errors import (
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.repository import MessageRecord
 from mail_dock.domain.search import MessageFilter, MessageSummary, PageCursor, SearchPage
-from mail_dock.infrastructure.database.connection import ConnectionManager
+from mail_dock.infrastructure.database.connection import ConnectionManager, connect
+from mail_dock.infrastructure.database.fts_maintenance import integrity_check
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
 from mail_dock.infrastructure.database.migrator import migrate
 from mail_dock.infrastructure.database.search_repository import SqliteSearchRepository
@@ -277,6 +278,16 @@ def _verify_database(connection: sqlite3.Connection) -> None:
         raise DatabaseError("Database quick_check failed")
     if foreign_key_violations:
         raise DatabaseError("Database foreign_key_check failed")
+
+
+def _verify_fts_database(db_path: Path, *, network_drive: bool) -> None:
+    """Run the FTS check on a short-lived writable connection only."""
+
+    connection = connect(db_path, network_drive=network_drive)
+    try:
+        integrity_check(connection)
+    finally:
+        connection.close()
 
 
 def _close_manager(manager: ConnectionManager | None) -> None:
@@ -671,6 +682,8 @@ def _run_command(
         connection = manager.get_connection()
         if readonly:
             _verify_database(connection)
+            manager.close_current_thread()
+            _verify_fts_database(root / "metadata.db", network_drive=network_drive)
             LOGGER.info("Database verification succeeded")
         else:
             version = migrate(connection, root / "metadata.db")

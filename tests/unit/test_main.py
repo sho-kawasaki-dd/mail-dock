@@ -1,7 +1,11 @@
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast
 
+import pytest
+
+import mail_dock.__main__ as main
 from mail_dock.__main__ import _build_parser, _exit_code, _run_search_command
 from mail_dock.domain.errors import SearchQueryError
 from mail_dock.domain.search import MessageSummary, PageCursor, SearchPage
@@ -158,3 +162,57 @@ def test_search_command_warns_for_short_terms(capsys: Any) -> None:
 
 def test_search_query_error_uses_exit_code_seven() -> None:
     assert _exit_code(SearchQueryError("invalid query")) == 7
+
+
+class FakeConnection:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_verify_fts_uses_and_closes_writable_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    connection = FakeConnection()
+    connect_calls: list[tuple[Path, bool, bool]] = []
+    integrity_calls: list[FakeConnection] = []
+
+    def fake_connect(
+        db_path: Path,
+        *,
+        readonly: bool = False,
+        network_drive: bool = False,
+    ) -> FakeConnection:
+        connect_calls.append((db_path, readonly, network_drive))
+        return connection
+
+    def fake_integrity_check(value: FakeConnection) -> None:
+        integrity_calls.append(value)
+
+    monkeypatch.setattr(main, "connect", fake_connect)
+    monkeypatch.setattr(main, "integrity_check", fake_integrity_check)
+
+    main._verify_fts_database(Path("metadata.db"), network_drive=True)
+
+    assert connect_calls == [(Path("metadata.db"), False, True)]
+    assert integrity_calls == [connection]
+    assert connection.closed
+
+
+def test_verify_fts_closes_connection_when_check_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = FakeConnection()
+
+    monkeypatch.setattr(main, "connect", lambda *args, **kwargs: connection)
+
+    def fail_integrity_check(value: FakeConnection) -> None:
+        del value
+        raise RuntimeError("check failed")
+
+    monkeypatch.setattr(main, "integrity_check", fail_integrity_check)
+
+    with pytest.raises(RuntimeError, match="check failed"):
+        main._verify_fts_database(Path("metadata.db"), network_drive=False)
+
+    assert connection.closed
