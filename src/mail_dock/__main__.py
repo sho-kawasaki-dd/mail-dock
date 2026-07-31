@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import json
 import logging
 import signal
 import sqlite3
 import sys
 from collections.abc import Sequence
 from dataclasses import replace
+from datetime import UTC, date, datetime, time
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +23,7 @@ from mail_dock.domain.errors import (
     FetchError,
     MailDockError,
     OperationCancelledError,
+    SearchQueryError,
     StorageError,
     StorageForeignRootError,
     StorageLockedError,
@@ -28,9 +31,11 @@ from mail_dock.domain.errors import (
 )
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.repository import MessageRecord
+from mail_dock.domain.search import MessageFilter, MessageSummary, PageCursor, SearchPage
 from mail_dock.infrastructure.database.connection import ConnectionManager
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
 from mail_dock.infrastructure.database.migrator import migrate
+from mail_dock.infrastructure.database.search_repository import SqliteSearchRepository
 from mail_dock.infrastructure.fetchers.onamae_imap import OnamaeImapFetcher
 from mail_dock.infrastructure.logging_config import set_storage_log_target, setup_logging
 from mail_dock.infrastructure.security.keyring_store import KeyringCredentialStore
@@ -54,6 +59,8 @@ from mail_dock.usecases.register_account import (
     register_account,
 )
 from mail_dock.usecases.reparse import reparse_messages
+from mail_dock.usecases.search_messages import search_messages
+from mail_dock.usecases.search_query import parse_query
 from mail_dock.usecases.sync_folders import refresh_folders, set_sync_target
 from mail_dock.usecases.sync_mail import SyncOptions, SyncProgress, sync_account
 
@@ -70,6 +77,28 @@ def _common_parser() -> argparse.ArgumentParser:
         version=f"%(prog)s {__version__}",
     )
     return parser
+
+
+def _positive_limit(value: str) -> int:
+    limit = int(value)
+    if limit <= 0:
+        raise argparse.ArgumentTypeError("limit must be positive")
+    return limit
+
+
+def _parse_cli_date(value: str) -> date:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("date must use YYYY-MM-DD") from error
+
+
+def _date_start(value: date | None) -> datetime | None:
+    return datetime.combine(value, time.min, tzinfo=UTC) if value is not None else None
+
+
+def _date_end(value: date | None) -> datetime | None:
+    return datetime.combine(value, time.max, tzinfo=UTC) if value is not None else None
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -145,6 +174,56 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="reparse all stored messages instead of failed messages only",
     )
+    search_parser = subparsers.add_parser(
+        "search",
+        parents=[common],
+        help="search stored messages",
+    )
+    search_parser.add_argument("query", help="search query")
+    search_parser.add_argument(
+        "--account",
+        action="append",
+        dest="accounts",
+        metavar="ACCOUNT_ID",
+        help="limit results to an account; may be repeated",
+    )
+    search_parser.add_argument(
+        "--folder",
+        action="append",
+        dest="folders",
+        metavar="RAW_NAME",
+        help="limit results to a folder; may be repeated",
+    )
+    search_parser.add_argument("--since", type=_parse_cli_date, help="earliest date (YYYY-MM-DD)")
+    search_parser.add_argument("--until", type=_parse_cli_date, help="latest date (YYYY-MM-DD)")
+    attachment_action = search_parser.add_mutually_exclusive_group()
+    attachment_action.add_argument(
+        "--has-attachment",
+        action="store_true",
+        dest="has_attachment",
+        help="only messages with attachments",
+    )
+    attachment_action.add_argument(
+        "--no-attachment",
+        action="store_false",
+        dest="has_attachment",
+        help="only messages without attachments",
+    )
+    search_parser.set_defaults(has_attachment=None)
+    search_parser.add_argument(
+        "--mode",
+        choices=("and", "or"),
+        default="and",
+        help="combine query terms with AND or OR",
+    )
+    search_parser.add_argument(
+        "--limit",
+        type=_positive_limit,
+        default=50,
+        help="maximum number of results (default: 50)",
+    )
+    search_parser.add_argument("--after", help="continue after a previous next_cursor")
+    search_parser.add_argument("--json", action="store_true", help="print machine-readable JSON")
     return parser
 
 
@@ -310,6 +389,119 @@ def _print_folders(folders: Sequence[MessageRecord]) -> None:
         print(f"{folder.get('raw_name', '')}\t{folder.get('display_name', '')}\t{enabled}")
 
 
+def _search_folder_ids(
+    repo: SqliteMessageRepository,
+    account_ids: tuple[str, ...] | None,
+    raw_names: Sequence[str] | None,
+) -> tuple[int, ...] | None:
+    if raw_names is None:
+        return None
+    accounts = (
+        account_ids
+        if account_ids is not None
+        else tuple(_account_id(account) for account in repo.list_accounts())
+    )
+    requested_names = frozenset(raw_names)
+    folder_ids: list[int] = []
+    for account_id in accounts:
+        for folder in repo.list_folders(account_id):
+            if folder.get("raw_name") in requested_names:
+                folder_id = folder.get("id")
+                if isinstance(folder_id, int):
+                    folder_ids.append(folder_id)
+    return tuple(folder_ids)
+
+
+def _summary_json(summary: MessageSummary) -> dict[str, object]:
+    return {
+        "id": summary.id,
+        "account_id": summary.account_id,
+        "folder_id": summary.folder_id,
+        "folder_raw_name": summary.folder_raw_name,
+        "folder_display_name": summary.folder_display_name,
+        "subject": summary.subject,
+        "sender": summary.sender,
+        "date_sent": summary.date_sent.isoformat() if summary.date_sent else None,
+        "internal_date": summary.internal_date.isoformat() if summary.internal_date else None,
+        "size_bytes": summary.size_bytes,
+        "has_attachment": summary.has_attachment,
+        "remote_state": summary.remote_state,
+        "local_state": summary.local_state,
+        "thread_key": summary.thread_key,
+    }
+
+
+def _print_search_page(page: SearchPage, *, as_json: bool) -> None:
+    if as_json:
+        payload = {
+            "items": [_summary_json(item) for item in page.items],
+            "next_cursor": page.next_cursor.to_string() if page.next_cursor else None,
+            "exhausted": page.exhausted,
+        }
+        print(json.dumps(payload, ensure_ascii=False))
+        return
+    for item in page.items:
+        date_value = item.date_sent or item.internal_date
+        date_text = date_value.isoformat() if date_value else ""
+        folder_text = item.folder_display_name or item.folder_raw_name
+        size_text = _format_bytes(item.size_bytes) if item.size_bytes is not None else ""
+        print(
+            f"{date_text}\t{item.account_id}\t{folder_text}\t"
+            f"{item.sender}\t{item.subject}\t{size_text}"
+        )
+    print(f"next_cursor: {page.next_cursor.to_string() if page.next_cursor else ''}")
+
+
+def _run_search_command(
+    args: argparse.Namespace,
+    repo: SqliteMessageRepository,
+    search_repo: SqliteSearchRepository,
+) -> int:
+    account_ids = tuple(args.accounts) if args.accounts is not None else None
+    filters = MessageFilter(
+        account_ids=account_ids,
+        folder_ids=_search_folder_ids(repo, account_ids, args.folders),
+        date_from=_date_start(args.since),
+        date_to=_date_end(args.until),
+        has_attachment=args.has_attachment,
+    )
+    if (
+        filters.date_from is not None
+        and filters.date_to is not None
+        and filters.date_from > filters.date_to
+    ):
+        raise ConfigError("--since must not be later than --until")
+    cursor = None
+    if args.after is not None:
+        try:
+            cursor = PageCursor.from_string(args.after)
+        except ValueError as error:
+            raise ConfigError("--after is not a valid page cursor") from error
+
+    plan = parse_query(args.query, mode=args.mode)
+    if plan.has_slow_path:
+        print(
+            "短い語を含むため時間がかかる場合があります",
+            file=sys.stderr,
+        )
+    token = CancelToken()
+    previous_handler = _install_cancel_handler(token)
+    try:
+        page = search_messages(
+            search_repo,
+            query=args.query,
+            mode=args.mode,
+            filters=filters,
+            cursor=cursor,
+            limit=args.limit,
+            cancel=token,
+        )
+    finally:
+        _restore_cancel_handler(previous_handler)
+    _print_search_page(page, as_json=args.json)
+    return 0
+
+
 def _run_account_command(
     args: argparse.Namespace,
     repo: SqliteMessageRepository,
@@ -429,6 +621,7 @@ def _run_reparse_command(
 def _run_application_command(
     args: argparse.Namespace,
     repo: SqliteMessageRepository,
+    search_repo: SqliteSearchRepository,
     storage_root: Path,
     settings: config.AppConfig,
 ) -> int:
@@ -444,6 +637,8 @@ def _run_application_command(
         return _run_sync_command(args, repo, credential_store, storage_root, settings)
     if command == "reparse":
         return _run_reparse_command(args, repo, storage_root)
+    if command == "search":
+        return _run_search_command(args, repo, search_repo)
     return 0
 
 
@@ -485,7 +680,14 @@ def _run_command(
             if args is None:
                 raise ConfigError("Command arguments are missing")
             repository = SqliteMessageRepository(manager)
-            result = _run_application_command(args, repository, root, settings)
+            search_repository = SqliteSearchRepository(manager)
+            result = _run_application_command(
+                args,
+                repository,
+                search_repository,
+                root,
+                settings,
+            )
 
         updated_settings = replace(
             settings,
@@ -514,6 +716,8 @@ def _exit_code(error: MailDockError) -> int:
         return 5
     if isinstance(error, FetchError):
         return 6
+    if isinstance(error, SearchQueryError):
+        return 7
     if isinstance(error, OperationCancelledError):
         return 130
     if isinstance(error, ConfigError | StorageError):

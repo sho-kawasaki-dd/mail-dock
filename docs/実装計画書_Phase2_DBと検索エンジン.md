@@ -283,20 +283,20 @@
 
 #### **E-1. `__main__.py` — `search` サブコマンド**
 
-- [ ] `mail-dock search QUERY` を追加する
-  - [ ] `--account ACCOUNT_ID`（複数指定可）/ `--folder RAW_NAME`（複数指定可）
-  - [ ] `--since YYYY-MM-DD` / `--until YYYY-MM-DD`
-  - [ ] `--has-attachment` / `--no-attachment`
-  - [ ] `--mode and|or`（既定 `and`）
-  - [ ] `--limit N`（既定 50）/ `--after CURSOR`（前回出力の `next_cursor` を渡して継続）
-  - [ ] `--json`（機械可読出力）
-- [ ] 結果を「日付 / アカウント / フォルダ / 差出人 / 件名 / サイズ」で整形表示し、末尾に `next_cursor` を出す
-  - [ ] フォルダ欄には `folder_display_name` を表示し、`--json` には `folder_raw_name` / `folder_display_name` の両方を含める
-- [ ] `has_slow_path` が立っている場合に「短い語を含むため時間がかかる場合があります」を表示する（F-13）
-- [ ] `SIGINT` ハンドラで `CancelToken` をセットする（2回目の Ctrl+C で即時終了。Phase 1 と同じ）
-- [ ] `SqliteSearchRepository` をコンポジションルートで注入する（Phase 1 の `_run_application_command` と同じ形）
-- [ ] `_exit_code()` に `SearchQueryError` → **7** を追加する
-- [ ] `--help` の出力が日本語環境で崩れないことを確認する
+- [x] `mail-dock search QUERY` を追加する
+  - [x] `--account ACCOUNT_ID`（複数指定可）/ `--folder RAW_NAME`（複数指定可）
+  - [x] `--since YYYY-MM-DD` / `--until YYYY-MM-DD`
+  - [x] `--has-attachment` / `--no-attachment`
+  - [x] `--mode and|or`（既定 `and`）
+  - [x] `--limit N`（既定 50）/ `--after CURSOR`（前回出力の `next_cursor` を渡して継続）
+  - [x] `--json`（機械可読出力）
+- [x] 結果を「日付 / アカウント / フォルダ / 差出人 / 件名 / サイズ」で整形表示し、末尾に `next_cursor` を出す
+  - [x] フォルダ欄には `folder_display_name` を表示し、`--json` には `folder_raw_name` / `folder_display_name` の両方を含める
+- [x] `has_slow_path` が立っている場合に「短い語を含むため時間がかかる場合があります」を表示する（F-13）
+- [x] `SIGINT` ハンドラで `CancelToken` をセットする（2回目の Ctrl+C で即時終了。Phase 1 と同じ）
+- [x] `SqliteSearchRepository` をコンポジションルートで注入する（Phase 1 の `_run_application_command` と同じ形）
+- [x] `_exit_code()` に `SearchQueryError` → **7** を追加する
+- [x] `--help` の出力が日本語環境で崩れないことを確認する
 
 #### **E-2. `verify` の拡張**
 
