@@ -166,33 +166,33 @@
 - [x] 「これは利用者の入力誤りであり、システム障害ではない」旨を docstring に明記する
 - [x] 外部依存がゼロであることを維持する
 
-#### **B-2. `domain/search.py` — 検索モデルと読み取り専用ポート**
+#### B-2. `domain/search.py` — 検索モデルと読み取り専用ポート
 
-- [ ] `MessageFilter`（frozen dataclass）を定義する
-  - [ ] `account_ids: tuple[str, ...] | None`（None は全アカウント横断＝既定。D-10）
-  - [ ] `folder_ids: tuple[int, ...] | None`
-  - [ ] `date_from: datetime | None` / `date_to: datetime | None`
-  - [ ] `has_attachment: bool | None`
-  - [ ] `local_states: frozenset[str]`（既定 `{"active"}`。D-9）
-  - [ ] `remote_states: frozenset[str] | None`（既定 None＝問わない。D-9）
-  - [ ] `thread_key: str | None`
-- [ ] `PageCursor`（frozen dataclass）を定義する: `sort_key: str` / `message_id: int`
-  - [ ] 文字列化・復元（CLI の `--after` 用）を純粋関数として持たせる
-- [ ] `MessageSummary`（frozen dataclass）を定義する: `id` / `account_id` / `folder_id` / `folder_raw_name` / `folder_display_name` / `subject` / `sender` / `date_sent` / `internal_date` / `size_bytes` / `has_attachment` / `remote_state` / `local_state` / `thread_key`
-  - [ ] Phase 3 の一覧表示に必要な列だけを持たせる（本文は含めない）
-  - [ ] `folders` を JOIN してフォルダの生名と表示名を取得し、CLI と Phase 3 が追加問い合わせなしで出所を表示できるようにする
-- [ ] `MessageDetail`（frozen dataclass）を定義する: `MessageSummary` の項目に `recipient` / `cc` / `message_id` / `in_reply_to` / `references_ids` / `relative_path` / `file_hash` / `imap_flags` を加える
-- [ ] `SearchPage`（frozen dataclass）を定義する: `items: tuple[MessageSummary, ...]` / `next_cursor: PageCursor | None` / `exhausted: bool`
-- [ ] `SearchPlan`（frozen dataclass）を定義する: `match_terms` / `like_terms` / `exclude_match_terms` / `exclude_like_terms` / `mode: Literal["and", "or"]` / `has_slow_path: bool`
-  - [ ] 各 term は**正規化済み**であることを docstring に明記する
-- [ ] `BaseSearchRepository(ABC)` を定義する
-  - [ ] `search_messages(plan, filters, *, cursor=None, limit=200, cancel=None) -> SearchPage`
-  - [ ] `list_messages(filters, *, cursor=None, limit=200) -> SearchPage`
-  - [ ] `count_messages(filters, plan=None, *, cancel=None) -> int`
-  - [ ] `list_thread(thread_key, filters) -> Sequence[MessageSummary]`
-  - [ ] `get_message(message_id) -> MessageDetail | None`
-- [ ] モジュール docstring に「**読み取り専用。書き込みは `BaseMessageRepository`。両者を統合しない**（関心とライフサイクルが異なるため）」と明記する
-- [ ] 外部依存が標準ライブラリと `domain` のデータ構造だけであることを維持する
+- [x] `MessageFilter`（frozen dataclass）を定義する
+  - [x] `account_ids: tuple[str, ...] | None`（None は全アカウント横断＝既定。D-10）
+  - [x] `folder_ids: tuple[int, ...] | None`
+  - [x] `date_from: datetime | None` / `date_to: datetime | None`
+  - [x] `has_attachment: bool | None`
+  - [x] `local_states: frozenset[str]`（既定 `{"active"}`。D-9）
+  - [x] `remote_states: frozenset[str] | None`（既定 None＝問わない。D-9）
+  - [x] `thread_key: str | None`
+- [x] `PageCursor`（frozen dataclass）を定義する: `sort_key: str` / `message_id: int`
+  - [x] 文字列化・復元（CLI の `--after` 用）を純粋関数として持たせる
+- [x] `MessageSummary`（frozen dataclass）を定義する: `id` / `account_id` / `folder_id` / `folder_raw_name` / `folder_display_name` / `subject` / `sender` / `date_sent` / `internal_date` / `size_bytes` / `has_attachment` / `remote_state` / `local_state` / `thread_key`
+  - [x] Phase 3 の一覧表示に必要な列だけを持たせる（本文は含めない）
+  - [x] `folders` を JOIN してフォルダの生名と表示名を取得し、CLI と Phase 3 が追加問い合わせなしで出所を表示できるようにする
+- [x] `MessageDetail`（frozen dataclass）を定義する: `MessageSummary` の項目に `recipient` / `cc` / `message_id` / `in_reply_to` / `references_ids` / `relative_path` / `file_hash` / `imap_flags` を加える
+- [x] `SearchPage`（frozen dataclass）を定義する: `items: tuple[MessageSummary, ...]` / `next_cursor: PageCursor | None` / `exhausted: bool`
+- [x] `SearchPlan`（frozen dataclass）を定義する: `match_terms` / `like_terms` / `exclude_match_terms` / `exclude_like_terms` / `mode: Literal["and", "or"]` / `has_slow_path: bool`
+  - [x] 各 term は**正規化済み**であることを docstring に明記する
+- [x] `BaseSearchRepository(ABC)` を定義する
+  - [x] `search_messages(plan, filters, *, cursor=None, limit=200, cancel=None) -> SearchPage`
+  - [x] `list_messages(filters, *, cursor=None, limit=200) -> SearchPage`
+  - [x] `count_messages(filters, plan=None, *, cancel=None) -> int`
+  - [x] `list_thread(thread_key, filters) -> Sequence[MessageSummary]`
+  - [x] `get_message(message_id) -> MessageDetail | None`
+- [x] モジュール docstring に「**読み取り専用。書き込みは `BaseMessageRepository`。両者を統合しない**（関心とライフサイクルが異なるため）」と明記する
+- [x] 外部依存が標準ライブラリと `domain` のデータ構造だけであることを維持する
 
 ---
 
