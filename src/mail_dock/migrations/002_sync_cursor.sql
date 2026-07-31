@@ -10,8 +10,8 @@ CREATE TABLE sync_failures_v2 (
 	error_class     TEXT NOT NULL,
 	error_message   TEXT,
 	attempt_count   INTEGER NOT NULL DEFAULT 1,
-	first_failed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-	last_failed_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+	first_failed_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+	last_failed_at  DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
 	UNIQUE(account_id, folder_id, uidvalidity, uid)
 );
 

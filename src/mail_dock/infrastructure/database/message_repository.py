@@ -432,7 +432,7 @@ class SqliteMessageRepository(BaseMessageRepository):
                     "ON CONFLICT(account_id, folder_id, uidvalidity, uid) DO UPDATE SET "
                     "error_class = excluded.error_class, error_message = excluded.error_message, "
                     "attempt_count = sync_failures.attempt_count + 1, "
-                    "last_failed_at = CURRENT_TIMESTAMP",
+                    "last_failed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
                     (account_id, folder_id, uidvalidity, uid, error_class, message),
                 )
             else:
@@ -443,7 +443,7 @@ class SqliteMessageRepository(BaseMessageRepository):
                     "ON CONFLICT(account_id, folder_id, uid) DO UPDATE SET "
                     "error_class = excluded.error_class, error_message = excluded.error_message, "
                     "attempt_count = sync_failures.attempt_count + 1, "
-                    "last_failed_at = CURRENT_TIMESTAMP",
+                    "last_failed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
                     (account_id, folder_id, uid, error_class, message),
                 )
 

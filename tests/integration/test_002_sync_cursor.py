@@ -39,7 +39,7 @@ def test_sync_cursor_migration_preserves_v1_data_and_adds_generation_keys(
     )
     db_conn.commit()
 
-    assert migrate(db_conn, tmp_path / "metadata.db") == 2
+    assert migrate(db_conn, tmp_path / "metadata.db") == 3
 
     folder_columns = {
         row[1]: (row[2], row[3], row[4], row[5])

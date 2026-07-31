@@ -269,7 +269,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     port          INTEGER DEFAULT 993,-- pst_import では NULL
     username      TEXT,               -- パスワードは keyring 側に保管（DBには保存しない）
     is_enabled    INTEGER NOT NULL DEFAULT 1,
-    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at    DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 ```
 
@@ -352,7 +352,7 @@ CREATE TABLE IF NOT EXISTS messages (
     thread_key     TEXT,              -- 会話ルートの Message-ID（同期時に算出）
 
     last_seen_at DATETIME,            -- 最後にサーバーで確認できた日時
-    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at   DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE INDEX idx_msg_key    ON messages(account_id, content_key);  -- 移動検知の横断照合用
@@ -457,15 +457,15 @@ CREATE TABLE IF NOT EXISTS sync_failures (
     error_class    TEXT NOT NULL,     -- 'transient' / 'permanent' / 'parse' / 'oversize'
     error_message  TEXT,
     attempt_count  INTEGER NOT NULL DEFAULT 1,
-    first_failed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    last_failed_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    first_failed_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    last_failed_at  DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     UNIQUE(account_id, folder_id, uid)
 );
 
 -- 破壊的操作の監査記録（★永久保存。purge対象にしない。永続マニフェストにも同じイベントを追記）
 CREATE TABLE IF NOT EXISTS audit_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    occurred_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    occurred_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     operation   TEXT NOT NULL,        -- remote_delete/remote_trash/local_purge/pst_import/
                                       -- pst_reimport/pst_supersede/pst_import_abandon
     account_id  TEXT,
@@ -502,7 +502,7 @@ CREATE TABLE IF NOT EXISTS pst_imports (
     ingested_count   INTEGER NOT NULL DEFAULT 0,
     failed_count     INTEGER NOT NULL DEFAULT 0,
     staging_path     TEXT,              -- ストレージルートからの相対パス（再開用。完了後 NULL）
-    started_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+    started_at       DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     finished_at      DATETIME,
     error_message    TEXT
 );

@@ -41,7 +41,7 @@
 | D-9 | 既定の状態フィルタ | 既定は **`local_state='active'` のみ**。`remote_state` は問わない（`deleted` / `moved` もヒットする）。呼び出し側がフィルタで明示的に広げられる |
 | D-10 | 既定のスコープ | **全アカウント横断**。`account_id` は任意フィルタとする（開発計画書 4.6-1 の「一覧にアカウント列を表示し、横断表示時も出所が分かるようにする」に合わせる） |
 | D-11 | 長時間クエリの中断 | LIKE スキャン経路は **`sqlite3.set_progress_handler`** で `CancelToken` を監視し、途中で中断できるようにする |
-| D-12 | スキーマ変更 | `001_init.sql` / `002_sync_cursor.sql` は変更しない。**A-5 の計測で索引が必要と判明した場合にだけ** `003_search_index.sql` を作る。不要と判明したら作らず、本書「7. Phase 3 への引き継ぎ事項」へその旨を記録する |
+| D-12 | 検索性能用スキーマ変更 | 検索性能用の `001_init.sql` / `002_sync_cursor.sql` は変更しない。**A-5 の計測で索引が必要と判明した場合にだけ** `003_search_index.sql` を作る。日時形式統一の `003_timestamp_format.sql` はこの制約の対象外とする。 |
 | D-13 | FTS 保守 | Phase 2 は **`integrity-check` による検査のみ**。external-content との乖離も検出するため `rank=1` を指定する。このコマンドは SQL 上 `INSERT` なので、通常検査の読み取り専用接続とは別に、検査時だけ書き込み可能な専用接続を開く。原本データの変更、`rebuild` / `optimize` の運用導線、再インデックスは Phase 4 |
 | D-14 | 合成コーパス生成 | `tests/support/eml_builder.py` を再利用する（重複実装を作らない）。`tools/` から `tests/support` を import する形とし、逆方向の依存は作らない |
 | D-15 | 正規化関数の配置 | `normalize_for_search()` は外部依存のない純粋関数として **`domain/normalize.py` へ移す**。投入側と検索側はこの同一関数を参照し、usecases → infrastructure の逆依存を作らない |
@@ -261,6 +261,13 @@
 - [ ] トークナイザ変更が必要になった場合のみ、`messages_fts` を再作成し `INSERT INTO messages_fts(messages_fts) VALUES('rebuild')` で再構築する
 - [ ] `001_init.sql` / `002_sync_cursor.sql` を変更しない（D-12）
 - [ ] 索引が不要と判明した場合は**本ファイルを作らず**、その判断を本書「7.」へ記録する
+
+#### **D-2a. `migrations/003_timestamp_format.sql` — 日時形式統一**
+
+- [x] SQLiteのDB生成日時をUTC ISO 8601（`YYYY-MM-DDTHH:MM:SSZ`）へ統一する
+- [x] 既存のスペース区切り日時を正規化し、旧スキーマの暗黙デフォルトにも移行後の形式を適用する
+- [x] `001_init.sql` / `002_sync_cursor.sql` の新規DB向けデフォルトと、失敗記録更新処理を同じ形式へ変更する
+- [x] 既存値の保持・移行後の新規値を統合テストで検証する
 
 #### **D-3. `infrastructure/database/fts_maintenance.py` — FTS 整合性検査**
 

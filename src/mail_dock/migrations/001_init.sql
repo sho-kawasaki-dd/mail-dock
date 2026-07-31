@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS accounts (
 	port          INTEGER DEFAULT 993,
 	username      TEXT,
 	is_enabled    INTEGER NOT NULL DEFAULT 1,
-	created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+	created_at    DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS folders (
@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS messages (
 	references_ids      TEXT,
 	thread_key          TEXT,
 	last_seen_at        DATETIME,
-	created_at          DATETIME DEFAULT CURRENT_TIMESTAMP
+	created_at          DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE INDEX idx_msg_key ON messages(account_id, content_key);
@@ -109,14 +109,14 @@ CREATE TABLE IF NOT EXISTS sync_failures (
 	error_class    TEXT NOT NULL,
 	error_message  TEXT,
 	attempt_count  INTEGER NOT NULL DEFAULT 1,
-	first_failed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-	last_failed_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+	first_failed_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+	last_failed_at  DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
 	UNIQUE(account_id, folder_id, uid)
 );
 
 CREATE TABLE IF NOT EXISTS audit_log (
 	id          INTEGER PRIMARY KEY AUTOINCREMENT,
-	occurred_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	occurred_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
 	operation   TEXT NOT NULL,
 	account_id  TEXT,
 	message_id  TEXT,
