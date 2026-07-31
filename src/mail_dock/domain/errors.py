@@ -10,6 +10,10 @@ class MailDockError(Exception):
     """Base class for all expected mail-dock errors."""
 
 
+class SearchQueryError(MailDockError):
+    """Raised when user input is invalid and cannot be executed as a query."""
+
+
 class ConfigError(MailDockError):
     """Raised when application configuration is invalid or cannot be read."""
 
