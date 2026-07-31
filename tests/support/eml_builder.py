@@ -70,7 +70,11 @@ def build_alternative_email(*, plain: str, html: str, **kwargs: object) -> bytes
 
 
 def build_related_email(
-    *, body_html: str, image: bytes = b"PNG fixture", cid: str = "image-1"
+    *,
+    body_html: str,
+    image: bytes = b"PNG fixture",
+    cid: str = "image-1",
+    filename: str | None = None,
 ) -> bytes:
     """Build a related HTML body with an inline Content-ID image."""
 
@@ -81,7 +85,14 @@ def build_related_email(
     message.set_content("Related fallback")
     message.add_alternative(body_html, subtype="html")
     html_part = cast(Any, message.get_payload())[-1]
-    html_part.add_related(image, maintype="image", subtype="png", cid=f"<{cid}>")
+    html_part.add_related(
+        image,
+        maintype="image",
+        subtype="png",
+        cid=f"<{cid}>",
+        filename=filename,
+        disposition="inline",
+    )
     return message.as_bytes()
 
 
