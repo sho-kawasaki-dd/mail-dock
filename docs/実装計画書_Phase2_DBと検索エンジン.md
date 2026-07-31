@@ -413,21 +413,21 @@
 
 各項目の完了を確認したうえで、対応するタスクのチェックボックスを埋めること。
 
-- [ ] V-1. `uv sync` → `uv run ruff format --check .` → `uv run ruff check .` → `uv run mypy` がすべて成功する
-- [ ] V-2. `uv run pytest -m "not docker"` が全緑になり、`domain` + `usecases` のカバレッジが 80% 以上である
+- [x] V-1. `uv sync` → `uv run ruff format --check .` → `uv run ruff check .` → `uv run mypy` がすべて成功する
+- [x] V-2. `uv run pytest -m "not docker"` が全緑になり、`domain` + `usecases` のカバレッジが 80% 以上である（243 passed、対象カバレッジ90%）
 - [x] V-3. PoC の計測結果が本書「7.」へ記録され、N-1（300ms）/ N-2（3秒）/ N-3（3〜5倍）の達成可否と、未達の場合の対応が明記されている
-- [ ] V-4. 2文字キーワードが `MATCH` 経路では0件になり、`LIKE` 経路では正しく発見できる。`has_slow_path` が立つ
-- [ ] V-5. keyset ページング検証: `next_cursor` は返却した最後の行から生成され、全ページを連結した結果が一括取得と**完全に一致**し、重複・欠損がゼロである。同一 `date_sent` が複数ある場合と `date_sent` が NULL の行が混在する場合の双方で成立する
-- [ ] V-6. 正規化一貫性: `normalize_for_search()` が `domain/normalize.py` に置かれ、投入時と検索時が同一関数を参照することがテストで固定され、片方だけを変更すると失敗する
-- [ ] V-7. 状態フィルタ: 既定で `local_state='purged'` / `'trashed'` がヒットせず、`remote_state='deleted'` / `'moved'` はヒットする
-- [ ] V-8. 層の隔離: `usecases/` 配下に `sqlite3` の import が無いことを静的に確認する。`domain/search.py` の外部依存がゼロである
-- [ ] V-9. キャンセル: LIKE スキャン中に `CancelToken` を立てると**クエリ実行中に**中断し、`SQLITE_INTERRUPT` が一般的なDB例外分類より先に `OperationCancelledError` へ変換される。progress handler が解除されている
-- [ ] V-10. エスケープと不正入力: `"` / `*` / `^` / `-` / `NEAR` / `%` / `_` / `\` を含む正当なクエリで Parse Error も SQL エラーも発生せず、未閉鎖の引用符・空フレーズ・単独 `-`・正規化後に空になる語は `SearchQueryError` になる
-- [ ] V-11. 日本語検索: ひらがなとカタカナが同一視されず、全角英数と半角英数が同一視され、大文字小文字が区別されない
-- [ ] V-12. マイグレーション（`003` を作る場合）: v2 の実データを保持して適用され、適用後に `integrity-check` が通る
+- [x] V-4. 2文字キーワードが `MATCH` 経路では0件になり、`LIKE` 経路では正しく発見できる。`has_slow_path` が立つ
+- [x] V-5. keyset ページング検証: `next_cursor` は返却した最後の行から生成され、全ページを連結した結果が一括取得と**完全に一致**し、重複・欠損がゼロである。同一 `date_sent` が複数ある場合と `date_sent` が NULL の行が混在する場合の双方で成立する
+- [x] V-6. 正規化一貫性: `normalize_for_search()` が `domain/normalize.py` に置かれ、投入時と検索時が同一関数を参照することがテストで固定され、片方だけを変更すると失敗する
+- [x] V-7. 状態フィルタ: 既定で `local_state='purged'` / `'trashed'` がヒットせず、`remote_state='deleted'` / `'moved'` はヒットする
+- [x] V-8. 層の隔離: `usecases/` 配下に `sqlite3` の import が無いことを静的に確認する。`domain/search.py` の外部依存がゼロである
+- [x] V-9. キャンセル: LIKE スキャン中に `CancelToken` を立てると**クエリ実行中に**中断し、`SQLITE_INTERRUPT` が一般的なDB例外分類より先に `OperationCancelledError` へ変換される。progress handler が解除されている
+- [x] V-10. エスケープと不正入力: `"` / `*` / `^` / `-` / `NEAR` / `%` / `_` / `\` を含む正当なクエリで Parse Error も SQL エラーも発生せず、未閉鎖の引用符・空フレーズ・単独 `-`・正規化後に空になる語は `SearchQueryError` になる
+- [x] V-11. 日本語検索: ひらがなとカタカナが同一視されず、全角英数と半角英数が同一視され、大文字小文字が区別されない
+- [x] V-12. マイグレーション（`003` を作る場合）: v2 の実データを保持して適用され、適用後に `integrity-check` が通る（検索用 `003_search_index.sql` は作成しないため非該当）
 - [x] V-13. FTS 追随・検証: `message_contents` の UPDATE / DELETE で `messages_fts` が追随し、`verify` が専用の書き込み可能接続で `rank=1` の `integrity-check` を実行してexternal-contentとの乖離を検出できる。通常検査は読み取り専用接続を維持し、両接続は確実に閉じられる
-- [ ] V-14. CLI: `mail-dock search` が Phase 1 で同期した実データに対して期待どおりヒットし、`--after` による継続取得が機能する
-- [ ] V-15. CI: プルリクエストで `lint` / `test-windows` / `test-linux` の3ジョブがすべて成功し、ベンチマークが実行されていない
+- [x] V-14. CLI: `mail-dock search` が Phase 1 で同期した実データに対して期待どおりヒットし、`--after` による継続取得が機能する（一時 DB の実データで2ページの継続取得を確認）
+- [ ] V-15. CI: プルリクエストで `lint` / `test-windows` / `test-linux` の3ジョブがすべて成功し、ベンチマークが実行されていない（ローカル相当実行は成功。公開 CI の直近実行では `lint` / `test-linux` が失敗）
 
 ---
 
