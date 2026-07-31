@@ -216,14 +216,14 @@
 
 #### **C-2. `usecases/search_messages.py` — 検索・一覧ユースケース**
 
-- [ ] `search_messages(search_repo, *, query, mode="and", filters=None, cursor=None, limit=200, cancel=None) -> SearchPage` を実装する
-- [ ] `list_messages(search_repo, *, filters=None, cursor=None, limit=200) -> SearchPage` を実装する（F-12）
-- [ ] `list_thread(search_repo, *, thread_key, filters=None) -> Sequence[MessageSummary]` を実装する（F-12）
-- [ ] `count_messages(search_repo, *, query=None, mode="and", filters=None, cancel=None) -> int` を実装する（F-12）
-- [ ] `get_message(search_repo, *, message_id) -> MessageDetail | None` を実装する（F-12）
-- [ ] `filters=None` のとき `MessageFilter()` の既定値（`local_state='active'` のみ・全アカウント横断）を使う（D-9 / D-10）
-- [ ] Phase 1 と同じ呼び出し規約に従う（ポートを位置引数、以降は keyword-only）
-- [ ] `sqlite3` / `keyring` / infrastructure の具象クラスを import しない（F-16）
+- [x] `search_messages(search_repo, *, query, mode="and", filters=None, cursor=None, limit=200, cancel=None) -> SearchPage` を実装する
+- [x] `list_messages(search_repo, *, filters=None, cursor=None, limit=200) -> SearchPage` を実装する（F-12）
+- [x] `list_thread(search_repo, *, thread_key, filters=None) -> Sequence[MessageSummary]` を実装する（F-12）
+- [x] `count_messages(search_repo, *, query=None, mode="and", filters=None, cancel=None) -> int` を実装する（F-12）
+- [x] `get_message(search_repo, *, message_id) -> MessageDetail | None` を実装する（F-12）
+- [x] `filters=None` のとき `MessageFilter()` の既定値（`local_state='active'` のみ・全アカウント横断）を使う（D-9 / D-10）
+- [x] Phase 1 と同じ呼び出し規約に従う（ポートを位置引数、以降は keyword-only）
+- [x] `sqlite3` / `keyring` / infrastructure の具象クラスを import しない（F-16）
 
 ---
 
