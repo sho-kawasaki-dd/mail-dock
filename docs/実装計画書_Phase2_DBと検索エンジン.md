@@ -312,34 +312,34 @@
 
 #### **F-1. 単体テスト（Docker不要）**
 
-- [ ] `test_search_query.py`
-  - [ ] 全角スペース／半角スペース／連続スペースでの分割
-  - [ ] 正規化が適用されること（全角英数の半角化、大文字小文字、連続空白圧縮）
-  - [ ] **3文字境界**: 正規化後3文字は MATCH、2文字は LIKE へ振り分けられること
-  - [ ] 正規化によって長さが変わるケース（全角3文字→半角3文字、`Ｔ Ｅ Ｓ Ｔ` のような空白混じり）
-  - [ ] フレーズ `"..."` が分割されないこと、内部の `"` が `""` にエスケープされること
-  - [ ] 除外 `-kw` / `-"..."` が exclude 側へ振り分けられること
-  - [ ] LIKE エスケープの順序（`\` を最初に処理すること）
-  - [ ] FTS5 の特殊文字（`*` `^` `:` `NEAR` `AND` `OR` `NOT`）が Parse Error にならないこと
-  - [ ] 空クエリ・空白のみ・除外のみ・未閉鎖の引用符・空フレーズ・単独 `-`・正規化後に空になる語で `SearchQueryError` になること
-  - [ ] `has_slow_path` の立ち方
-- [ ] `test_search_repository.py`（実SQLite・小規模データ）
-  - [ ] MATCH 経路のヒット、LIKE 経路のヒット、両経路混在
-  - [ ] AND / OR / 除外の合成結果
-  - [ ] 構造化フィルタ（アカウント・フォルダ・日付範囲・添付有無）
-  - [ ] **既定で `local_state='purged'` / `'trashed'` がヒットしないこと**、`remote_state='deleted'` / `'moved'` はヒットすること（F-11）
-  - [ ] 全アカウント横断が既定であること（D-10）
-  - [ ] **keyset ページング**: 同一 `date_sent` が複数ある場合の tie-break、`date_sent` NULL 混在、全ページ連結が一括取得と完全一致すること
-  - [ ] `limit + 1` 件取得時に `next_cursor` が返却した最後の行を指し、余剰行が次ページの先頭として欠落しないこと
-  - [ ] `folder_raw_name` / `folder_display_name` が正しいフォルダから取得されること
-  - [ ] `list_messages` / `list_thread` / `count_messages` / `get_message`
-  - [ ] `CancelToken` によるクエリ実行中の中断と、progress handler が解除されること
-  - [ ] キャンセル済みの `SQLITE_INTERRUPT` が `DatabaseError` ではなく `OperationCancelledError` になること
-  - [ ] SQL インジェクション耐性（`'; DROP TABLE messages; --` 等をクエリに渡しても実害がないこと）
-- [ ] `test_search_messages.py`（Fake ポートのみ）: usecase が `BaseSearchRepository` だけで動作し、既定フィルタが適用されること
-- [ ] `test_fts_triggers.py`（既存を拡張）: `message_contents` の UPDATE / DELETE に FTS が追随すること、`purged` 化で FTS から消えること（F-15）
+- [x] `test_search_query.py`
+  - [x] 全角スペース／半角スペース／連続スペースでの分割
+  - [x] 正規化が適用されること（全角英数の半角化、大文字小文字、連続空白圧縮）
+  - [x] **3文字境界**: 正規化後3文字は MATCH、2文字は LIKE へ振り分けられること
+  - [x] 正規化によって長さが変わるケース（全角3文字→半角3文字、`Ｔ Ｅ Ｓ Ｔ` のような空白混じり）
+  - [x] フレーズ `"..."` が分割されないこと、内部の `"` が `""` にエスケープされること
+  - [x] 除外 `-kw` / `-"..."` が exclude 側へ振り分けられること
+  - [x] LIKE エスケープの順序（`\` を最初に処理すること）
+  - [x] FTS5 の特殊文字（`*` `^` `:` `NEAR` `AND` `OR` `NOT`）が Parse Error にならないこと
+  - [x] 空クエリ・空白のみ・除外のみ・未閉鎖の引用符・空フレーズ・単独 `-`・正規化後に空になる語で `SearchQueryError` になること
+  - [x] `has_slow_path` の立ち方
+- [x] `test_search_repository.py`（実SQLite・小規模データ）
+  - [x] MATCH 経路のヒット、LIKE 経路のヒット、両経路混在
+  - [x] AND / OR / 除外の合成結果
+  - [x] 構造化フィルタ（アカウント・フォルダ・日付範囲・添付有無）
+  - [x] **既定で `local_state='purged'` / `'trashed'` がヒットしないこと**、`remote_state='deleted'` / `'moved'` はヒットすること（F-11）
+  - [x] 全アカウント横断が既定であること（D-10）
+  - [x] **keyset ページング**: 同一 `date_sent` が複数ある場合の tie-break、`date_sent` NULL 混在、全ページ連結が一括取得と完全一致すること
+  - [x] `limit + 1` 件取得時に `next_cursor` が返却した最後の行を指し、余剰行が次ページの先頭として欠落しないこと
+  - [x] `folder_raw_name` / `folder_display_name` が正しいフォルダから取得されること
+  - [x] `list_messages` / `list_thread` / `count_messages` / `get_message`
+  - [x] `CancelToken` によるクエリ実行中の中断と、progress handler が解除されること
+  - [x] キャンセル済みの `SQLITE_INTERRUPT` が `DatabaseError` ではなく `OperationCancelledError` になること
+  - [x] SQL インジェクション耐性（`'; DROP TABLE messages; --` 等をクエリに渡しても実害がないこと）
+- [x] `test_search_messages.py`（Fake ポートのみ）: usecase が `BaseSearchRepository` だけで動作し、既定フィルタが適用されること
+- [x] `test_fts_triggers.py`（既存を拡張）: `message_contents` の UPDATE / DELETE に FTS が追随すること、`purged` 化で FTS から消えること（F-15）
 - [ ] `test_003_search_index.py`（`003` を作る場合のみ）: v2 の実データを保持して適用され、`integrity-check` が通ること
-- [ ] `test_ports.py`（既存を拡張）: `usecases/` 配下に `sqlite3` と infrastructure の import が無いこと、投入側と検索側が `domain.normalize` を参照することを静的に確認する（F-3 / F-16）
+- [x] `test_ports.py`（既存を拡張）: `usecases/` 配下に `sqlite3` と infrastructure の import が無いこと、投入側と検索側が `domain.normalize` を参照することを静的に確認する（F-3 / F-16）
 - [x] `test_fts_maintenance.py`: 正常DBで `rank=1` の `integrity-check` が通り、external-content と意図的に乖離させたFTSで `DatabaseError` になること
 - [x] `test_main.py`（既存CLIテストを拡張）: 通常検査は読み取り専用接続、FTS検査は専用の書き込み可能接続で実行され、成功時・失敗時とも両接続が閉じられること
 

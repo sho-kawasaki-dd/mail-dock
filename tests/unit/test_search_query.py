@@ -50,6 +50,33 @@ def test_parse_query_rejects_invalid_queries(query: str) -> None:
 
 
 def test_parse_query_escapes_fts5_syntax_characters() -> None:
-    plan = parse_query("*^:NEAR")
+    plan = parse_query("x*y x^y x-y x(y x)y x:y NEARx ANDx ORx NOTx")
 
-    assert plan.match_terms == ('"*^:near"',)
+    assert plan.match_terms == (
+        '"x*y"',
+        '"x^y"',
+        '"x-y"',
+        '"x(y"',
+        '"x)y"',
+        '"x:y"',
+        '"nearx"',
+        '"andx"',
+        '"orx"',
+        '"notx"',
+    )
+
+
+@pytest.mark.parametrize(
+    "term", ["x*y", "x^y", "x-y", "x(y", "x)y", "x:y", "NEARx", "ANDx", "ORx", "NOTx"]
+)
+def test_each_fts5_special_term_is_quoted(term: str) -> None:
+    plan = parse_query(term)
+
+    assert len(plan.match_terms) == 1
+    assert plan.match_terms[0].startswith('"')
+    assert plan.match_terms[0].endswith('"')
+
+
+def test_parse_query_rejects_normalization_to_empty() -> None:
+    with pytest.raises(SearchQueryError):
+        parse_query('"   "')
