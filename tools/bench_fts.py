@@ -32,6 +32,7 @@ from tests.support.eml_builder import AttachmentSpec, build_eml  # noqa: E402
 SCHEMA_PATH: Final[Path] = REPOSITORY_ROOT / "src" / "mail_dock" / "migrations" / "001_init.sql"
 DEFAULT_OUTPUT: Final[Path] = REPOSITORY_ROOT / "tools" / ".bench_fts"
 DEFAULT_COUNTS: Final[tuple[int, ...]] = (1_000, 5_000, 10_000)
+MIN_TRIGRAM_SQLITE_VERSION: Final[tuple[int, int, int]] = (3, 34, 0)
 ACCOUNT_ID: Final[str] = "synthetic@example.test"
 FOLDER_NAME: Final[str] = "Synthetic"
 
@@ -88,6 +89,30 @@ def _positive_count(value: str) -> int:
     if count <= 0:
         raise argparse.ArgumentTypeError("count must be positive")
     return count
+
+
+def check_sqlite_environment() -> None:
+    """Verify the SQLite version and actual availability of the trigram tokenizer."""
+
+    print(f"sqlite3.sqlite_version={sqlite3.sqlite_version}")
+    if sqlite3.sqlite_version_info < MIN_TRIGRAM_SQLITE_VERSION:
+        required = ".".join(str(part) for part in MIN_TRIGRAM_SQLITE_VERSION)
+        raise RuntimeError(
+            f"SQLite {sqlite3.sqlite_version} is unsupported; trigram requires {required} or newer"
+        )
+
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.execute(
+            "CREATE VIRTUAL TABLE fts_environment_check USING fts5(content, tokenize='trigram')"
+        )
+    except sqlite3.Error as error:
+        raise RuntimeError(
+            f"SQLite {sqlite3.sqlite_version} does not provide the trigram tokenizer"
+        ) from error
+    finally:
+        connection.close()
+    print("trigram_tokenizer=available")
 
 
 def _body_target_bytes(generator: random.Random) -> int:
@@ -279,11 +304,20 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="remove the selected generated output before creating it",
     )
+    parser.add_argument(
+        "--check-environment",
+        action="store_true",
+        help="check SQLite trigram support without generating a dataset",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = _parse_args()
+    check_sqlite_environment()
+    if args.check_environment:
+        return
+
     output_root = args.output.resolve()
     if output_root.exists() and args.force:
         shutil.rmtree(output_root)
