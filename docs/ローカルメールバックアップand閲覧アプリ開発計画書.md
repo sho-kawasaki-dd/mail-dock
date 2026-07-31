@@ -876,11 +876,11 @@ JavaScriptの無効化だけでは外部画像によるトラッキングを防�
 
 1. **オフレコプロファイル:** `QWebEngineProfile` をオフレコで生成し、`NoCache` / `NoPersistentCookies` を設定。
 2. **属性の無効化:** `page.settings().setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, False)` を筆頭に、`LocalStorageEnabled` / `PluginsEnabled` / `LocalContentCanAccessRemoteUrls` / `LocalContentCanAccessFileUrls` / `AllowRunningInsecureContent` / `ScreenCaptureEnabled` 等をすべて `False` にする。
-3. **リクエストインターセプタ:** `QWebEngineUrlRequestInterceptor` で**既定は全リクエストをブロック**し、`cid:` スキームのみ通す。「外部画像を表示」はメール単位の明示操作で解除する。
+3. **リクエストインターセプタ:** `QWebEngineUrlRequestInterceptor` で**既定は全リクエストをブロック**し、インライン画像の `cid:` と本文配信の `maildock:` スキームのみ通す。「外部画像を表示」はメール単位の明示操作で解除する。
 4. **cid: カスタムスキームハンドラ:** EML内の `Content-ID` 付きパートをインライン画像として供給する。本文HTML自体も `setHtml()` の約2MB制限を避けるため、カスタムスキーム経由で配信する。
 5. **CSPの注入:** `default-src 'none'; img-src cid:; style-src 'unsafe-inline'; form-action 'none'; frame-src 'none'` を `<meta>` として挿入する。
 
-加えて、`acceptNavigationRequest` をオーバーライドし、リンククリックは**URLを提示した確認ダイアログを経て `QDesktopServices.openUrl()` で外部ブラウザへ**渡す。アプリ内では遷移させない。`<meta http-equiv="refresh">` は除去する。
+加えて、`acceptNavigationRequest` をオーバーライドし、リンククリックは**`https` / `http` のみを許可**する。許可URLはURLを提示した確認ダイアログを経て `QDesktopServices.openUrl()` で外部ブラウザへ渡し、`file:` / `javascript:` / `data:` / OS登録済みカスタムスキーム等は確認なしで拒否する。アプリ内では遷移させない。`<meta http-equiv="refresh">` は除去する。
 
 **4. 添付ファイル操作**
 
@@ -1419,7 +1419,7 @@ mail-dock本体は **GPL-3.0-or-later** で公開する。同梱する `readpst`
 | **Phase 0: 基盤整備** | 数日 | srcレイアウトへの移行、依存関係の確定、ロギング基盤、設定管理（platformdirs）、DBマイグレーション機構（`user_version`）、ruff/mypy/pytest とCIのセットアップ、**Docker（Dovecot / GreenMail）によるテスト用IMAP環境の構築** |
 | **Phase 1: 抽象化層 & IMAPコア** | 1〜2週間 | `BaseMailFetcher` と例外階層の定義、`OnamaeImapFetcher` 実装、EML解析（文字コード・RFC2231・スレッドヘッダ）、原子的なEML保存とDB登録。**小規模フォルダでのお名前.com実機検証をここで実施**（フォルダ区切り文字、modified UTF-7、同時接続数制限、タイムアウト挙動の確認） |
 | **Phase 2: DB & 検索エンジン** | 1週間 | **冒頭でFTS5+trigramの実測PoC**（1万通規模でインデックスサイズ・検索速度・2文字検索の挙動を計測し設計を確定）。その後 external content スキーマ・トリガー・正規化・AND/OR検索・構造化フィルタを実装 |
-| **Phase 3: GUI基礎構築 (PySide6)** | 2週間 | **冒頭で `QTextBrowser` 版を試作し QtWebEngine の採否を判断**。3ペインレイアウト、遅延ロード対応の一覧モデル、QThreadによる非同期同期、HTML表示の5層サンドボックス、添付保存 |
+| **Phase 3: GUI基礎構築 (PySide6)** | 2週間 | **QtWebEngine を採用する（確定）。`QTextBrowser` 版の比較試作は行わない**。`QTextBrowser` ではリクエストインターセプタ・カスタムスキーム・CSPを含む5層防御を満たせないため、3ペインレイアウト、遅延ロード対応の一覧モデル、QThreadによる非同期同期、HTML表示の5層サンドボックス、添付保存を実装する。QtWebEngineの起動時間・メモリ・配布サイズはPhase 3で実測し、Phase 4のパッケージング判断へ渡す |
 | **Phase 4: 統合 & 例外処理** | 1〜2週間 | サーバー削除の安全装置一式、ゴミ箱・purge、整合性チェック・再インデックス、mboxエクスポート、ドライブ非接続・移動の例外処理、**稼働中の物理切断対策一式（5.7.1）と VHDX detach による切断シナリオテスト**、**フルスケール（5万通/100GB）での実機同期テスト**（ここで `synchronous` の最終決定を行う） |
 | **Phase 4.5: PSTアーカイブ** | 1〜2週間 | **冒頭で readpst の実PST PoC（ブロッカー判定）**。その後マイグレーション002、PST永続マニフェスト、項目状態管理、Stage A/Bと世代交代、ウィザード、機能ガード、実PST検証、readpst同梱とGPL表記 |
 | **Phase 5: （将来拡張）Gmail/OAuth2** | 随時 | `GmailOAuthFetcher` 実装、OAuth2ブラウザ認証フロー、`message_folders` 中間テーブルへのマイグレーション（ラベル対応） |

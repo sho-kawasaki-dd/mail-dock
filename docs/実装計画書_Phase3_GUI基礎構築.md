@@ -30,19 +30,19 @@
 
 | # | 項目 | 決定内容 |
 | :--- | :---- | :---- |
-| D-1 | HTML表示エンジン | **QtWebEngine を採用する（確定）**。開発計画書が挙げる「Phase 3 冒頭の `QTextBrowser` 試作による比較」は行わず、5層防御の完全実装を優先する。`QTextBrowser` には `QWebEngineUrlRequestInterceptor` / CSP / カスタムスキームに相当する機構が無く、要件 4.6-3 を満たせないため。起動時間・パッケージサイズの実測値は本書「7.」へ記録し、Phase 4 のパッケージング判断へ渡す |
+| D-1 | HTML表示エンジン | **QtWebEngine を採用する（確定）**。`QTextBrowser` 試作による比較は行わず、5層防御の完全実装を優先する。`QTextBrowser` には `QWebEngineUrlRequestInterceptor` / CSP / カスタムスキームに相当する機構が無く、要件 4.6-3 を満たせないため。開発計画書6章もこの決定へ更新済み。起動時間・パッケージサイズの実測値は本書「7.」へ記録し、Phase 4 のパッケージング判断へ渡す |
 | D-2 | 依存関係 | **追加しない**。`PySide6>=6.8`（QtWebEngine を含む Addons 込み）・dev の `pytest-qt`・`gui` マーカー・mypy の `mail_dock.presentation.*` override は Phase 0 で宣言済み |
 | D-3 | UIアーキテクチャ | **QObject + Signal/Slot ベースの MVVM**。View は状態を持たず ViewModel の Signal に接続するだけとし、ViewModel を `pytest-qt` の `qtbot` でテストする |
 | D-4 | 層の隔離 | `presentation/views` / `viewmodels` / `models` は **`sqlite3` と `infrastructure` を import しない**。具象の組み立ては `presentation/app.py` と `presentation/context.py`（コンポジションルート）だけが行う。静的テストで固定する |
-| D-5 | スレッド構成 | **固定2本**（読み取り用 `QueryWorker` 1本 ＋ 書き込み用 `SyncWorker` 1本）。`QThreadPool` は使わない。SQLite接続の生成・破棄が増えるうえ、「書き込みは同期ワーカー1本に集約」という Phase 1 の不変条件が崩れるため。UIスレッドから `sqlite3` に触らない |
-| D-6 | 一覧のページ取得 | **常に非同期**。`fetchMore()` はリクエストを発行するだけで、結果 Signal の到着時に `beginInsertRows()` する。リクエストIDで世代管理し、古い結果は破棄する。LIKE 経路（Phase 2 の `has_slow_path`）が最大3秒かかり得るため同期実行にしない |
+| D-5 | スレッド構成 | **固定2本**（読み取り用 `QueryWorker` 1本 ＋ 書き込み用 `SyncWorker` 1本）。`QThreadPool` は使わない。SQLite接続の生成・破棄が増えるうえ、「書き込みは同期ワーカー1本に集約」という Phase 1 の不変条件が崩れるため。UIスレッドから `sqlite3` に触らない。実行中タスクの `CancelToken` はUI側コントローラが所有し、`cancel()` をスレッドセーフに直接呼ぶ（ワーカースレッド自身のイベントループへキャンセルSlotをqueuedしない） |
+| D-6 | 一覧のページ取得 | **常に非同期**。`fetchMore()` はリクエストを発行するだけで、結果 Signal の到着時に `beginInsertRows()` する。`list/search`・`detail/open`・`count/thread` の**要求チャネルごと**にリクエストIDと `CancelToken` を世代管理し、同じチャネルの古い結果だけを破棄する。本文を開いたことで一覧取得がキャンセルされる等、異なるチャネルを相互キャンセルしてはならない。LIKE 経路（Phase 2 の `has_slow_path`）が最大3秒かかり得るため同期実行にしない |
 | D-7 | GUI起動導線 | **`mail-dock gui` サブコマンドを追加**し、**サブコマンド無しの起動もGUI**とする。既存の CLI サブコマンドは変更しない |
 | D-8 | UI文言 | **`presentation/strings.py` の定数モジュールへ集約**する。`tr()` と翻訳ファイルは使わない（単一言語のため） |
 | D-9 | 外部画像の解除 | **メール単位・一時的**（別のメールを開くとリセット）。永続ホワイトリストは作らない。設定 `block_remote_images` は既定値のみを制御する |
-| D-10 | HTMLサニタイズの置き場所 | **Qt非依存の純粋関数**として `infrastructure/parsing/html_sanitizer.py` に置く（既存依存の BeautifulSoup を使う）。presentation はこれを呼ぶだけとし、サニタイズを Qt無しでテストできる状態にする |
+| D-10 | HTMLサニタイズの置き場所 | **Qt非依存の純粋関数**として `infrastructure/parsing/html_sanitizer.py` に置く（既存依存の BeautifulSoup を使う）。`AppContext` がCallableとして注入し、`views` / `viewmodels` / `models` は infrastructure をimportしない。サニタイズをQt無しでテストできる状態にする |
 | D-11 | 本文HTMLの配信 | `setHtml()` を使わず **`maildock:` カスタムスキーム経由**で配信する（`setHtml()` の約2MB制限を避けるため。開発計画書 4.6-3）。`cid:` と合わせて2スキームを登録する。`QWebEngineUrlScheme.registerScheme()` は **`QApplication` 生成前**に呼ぶ必要があるため、`presentation/app.py` の先頭で実行する |
 | D-12 | 表示用パート抽出 | 新規 `infrastructure/parsing/eml_render.py` を作り、既存の `parse_eml()` と**統合しない**。前者は表示のためにバイト列と `Content-ID` を保持し、後者は検索用の正規化テキストだけを返す。目的とメモリコストが異なるため |
-| D-13 | 保存機能 | 添付保存と **1通の `.eml` 保存**を含める。mbox エクスポートは Phase 4。保存は usecase 化し、**保存直前に必ず `resolve_within()`** を呼ぶ。GUI は `QFileDialog` で宛先を得るだけ |
+| D-13 | 保存機能 | 添付保存と **1通の `.eml` 保存**を含める。mbox エクスポートは Phase 4。添付保存は `prepare_attachment_save()`（最終候補名・警告・実行可能判定）と、確認後の `commit_attachment_save()`（再検証・書き込み）の**二段階usecase**にする。保存直前に `resolve_within()` を再実行し、一時ファイルは最終保存先の親ディレクトリへ作成して同一ボリューム上で `os.replace` する。GUI はdomainの準備結果だけを見て確認し、infrastructure の `SanitizedName` を参照しない |
 | D-14 | 左ペインの構成 | **「メールアカウント」ルートのみ描画**する。PST アーカイブルートは Phase 4.5。ツリーモデルは**ルートノードのリスト**を受け取る構造にし、Phase 4.5 で足せるようにする |
 | D-15 | 設定画面の範囲 | **Phase 3 で実際に効く項目だけ**を表示する。未実装機能（purge モード・ゴミ箱猶予日数・ハートビート間隔・サーバー削除モード）は表示しない |
 | D-16 | ストレージ切断 | **Signal 配線の骨組みのみ**。ワーカーが `StorageDetachedError` を受けたら Signal で MainWindow へ通知し、閲覧不可を表示する。状態機械・ハートビート・`WM_DEVICECHANGE` 監視は Phase 4 |
@@ -52,6 +52,12 @@
 | D-20 | GUIテストの実行 | **`gui` マーカーで環境変数によるオプトイン**とし、CI では実行しない（`-m "not docker and not gui"`）。`QWebEngineUrlScheme` の登録順序を再現するため、`QApplication` は**セッションスコープの共通フィクスチャ**で1つだけ生成する |
 | D-21 | 起動時の自動同期 | `sync_on_startup` を **Phase 3 で実際に動かす**（起動直後に `SyncWorker` を1回起動する）。`sync_interval_minutes` による `QTimer` 定期実行とシステムトレイ常駐は Phase 4 |
 | D-22 | 検索の実行タイミング | **Enter キー確定のみ**。入力停止デバウンスによる自動実行は行わない（LIKE 経路が重く、打鍵ごとにキャンセルと再実行が発生するため） |
+| D-23 | 一覧用読み取り契約 | `MessageSummary` に一覧描画に必要な `imap_flags` / `moved_to_folder_display_name` / `failure_class` を追加し、`SqliteSearchRepository` が `folders`（移動先）と `sync_failures` を一覧SQLでJOINして返す。Viewから1行ごとに `get_message()` するN+1取得は禁止する |
+| D-24 | EML表示・添付抽出の境界 | `domain/ports.py` に `BaseMessageRenderer` を追加し、`render(raw) -> RenderedMessage` を定義する。`infrastructure/parsing/eml_render.py` が具象実装を担い、`open_message` と添付保存usecaseへ注入する。`BaseEmlStorage` には完全ハッシュ検証と読み出しを一操作で行う `read_verified(relative_path, expected_hash) -> bytes` を追加し、検証後の差し替え（TOCTOU）を防ぐ。usecases から `infrastructure` の解析関数をimportしない。`part_index` は `RenderedMessage.parts` の0始まりインデックスとし、通常添付とインラインパートを含むMIME走査順を具象実装とテストで固定する |
+| D-25 | GUIブートストラップ | 起動を「ルート未確定でも実行できるGUIブートストラップ」と「ルート確定後の `StorageSession`」に分離する。`QApplication` と初回ウィザードを先に起動できるようにし、UUID照合・`StorageLock`・layout・cleanup・空き容量確認・migrate・接続生成・設定書き戻しはルート確定後だけ行う。ロックと接続の所有・解放は `StorageSession` 1箇所に集約する |
+| D-26 | 外部リンク許可 | 外部ブラウザへ渡せるURLは **`https` / `http` のみ**とする。`file` / `javascript` / `data` / OS登録済みカスタムスキーム、制御文字を含むURL、ユーザー情報を含むURL、**4096文字を超えるURL**は確認ダイアログを出さず拒否する。許可判定はQt非依存の純粋関数として通常CIでテストする |
+| D-27 | 起動時整合性チェック | `startup_verification` はPhase 3で実際に動かす。`quick` は `PRAGMA quick_check` と `foreign_key_check`、`full` はそれらにFTS `integrity-check(rank=1)` を加える。修復・孤児スキャン・マニフェスト全件検証・再インデックスと、それらの操作UIはPhase 4のままとする |
+| D-28 | セキュリティ判定のCI | URL許可、リクエスト許可、要求世代管理などQtに依存しない判定を純粋ロジックへ分離し、`gui` マーカー外の単体テストで固定する。QtWebEngine実体との結合だけをローカルGUIテストに残す |
 
 ### **2.2 機能要件**
 
@@ -72,10 +78,10 @@
 | F-13 | EML取得・解析・DB読み書き・検索・同期がすべてワーカースレッドで実行され、UIがフリーズしないこと。同期中も閲覧・検索が通常どおり動作すること | 5.4 |
 | F-14 | 同期の進捗（転送バイト数・件数・現在フォルダ・ETA）が表示され、キャンセルボタンで `CancelToken` により中断できること | 5.4 |
 | F-15 | 本文プレビューが HTML メールの5層防御をすべて実装していること: ①オフレコプロファイル ②危険な属性の無効化 ③リクエストインターセプタ ④`cid:` スキームハンドラ ⑤CSP注入 | 4.6-3 |
-| F-16 | リンククリックがアプリ内で遷移せず、確認のうえ `QDesktopServices.openUrl()` で外部ブラウザへ転送されること。`<meta http-equiv="refresh">` が事前に除去されること | 4.6-3 |
+| F-16 | リンククリックがアプリ内で遷移せず、許可判定を通った `https` / `http` URLだけが確認のうえ `QDesktopServices.openUrl()` で外部ブラウザへ転送されること。不許可スキームと危険なURLは常に拒否し、`<meta http-equiv="refresh">` が事前に除去されること | 4.6-3 / D-26 |
 | F-17 | 外部画像が既定でブロックされ、バナーの「画像を読み込む」で**そのメールだけ一時的に**解除できること。別のメールを開くと再びブロックされること | 4.6-3 / 5.11 / D-9 |
 | F-18 | 本文プレビュー上部に「この会話のN件を表示」があり、`list_thread()` の結果を一覧に表示できること | 4.5 |
-| F-19 | 添付ファイル一覧から任意の場所へ保存でき、`sanitize_attachment_name()` と `resolve_within()` を経由すること。実行可能拡張子の場合は保存前に警告を表示すること | 4.6-4 |
+| F-19 | 添付ファイル一覧から任意の場所へ保存でき、二段階保存usecaseで `sanitize_attachment_name()` と保存直前の `resolve_within()` を経由すること。実行可能拡張子の場合は準備結果に基づいて保存前に警告を表示すること | 4.6-4 / D-13 |
 | F-20 | 1通を `.eml` としてエクスポートでき、書き出し前に `file_hash` を検証すること | 4.6-4 |
 | F-21 | `local_state='purged'` のメッセージで本文プレビューが実体なし表示になり、EML 読み取りを試みないこと。`sync_failures.oversize` のメッセージにバッジが出ること | 4.6-2 / 4.4 |
 | F-22 | 設定画面から 1通サイズ上限・外部画像ブロック・起動時同期・起動時整合性チェックを変更でき、`config.save()` で永続化されること。ログフォルダを開く導線があること | 5.11 / 5.5 |
@@ -107,9 +113,11 @@
 
 ### **3.1 グループA: アプリ基盤とシェル（*本フェーズの前提。最優先*）**
 
-#### **A-1. `__main__.py` — コンポジションルートの共有化と `gui` 起動導線**
+#### **A-1. `__main__.py` — `StorageSession` の共有化と `gui` 起動導線**
 
-- [ ] ルート解決（`_select_root`）・`StorageLock` 取得・`ConnectionManager` 生成・`migrate` 実行・設定書き戻し・後始末を、CLI と GUI が共用できる関数（またはコンテキストマネージャ）へ抽出する
+- [ ] ルート確定後のUUID照合・`StorageLock` 取得・`ensure_layout`・`cleanup_tmp`・空き容量確認・`ConnectionManager` 生成・`migrate` 実行・設定書き戻し・後始末を、CLI と GUI が共用する `StorageSession` コンテキストマネージャへ抽出する
+- [ ] `StorageSession` がロックと接続の唯一の所有者となり、成功・例外・ウィンドウ終了の各経路でそれぞれ1回だけ解放する
+- [ ] ルート未設定時は `StorageSession` を開始せずGUIブートストラップへ渡し、ウィザード完了後に選択ルートで開始できるようにする（D-25）
 - [ ] 抽出により既存 CLI サブコマンドの挙動が変わらないことを既存テストで確認する（重複実装を作らない。D-19）
 - [ ] `gui` サブコマンドを追加する
 - [ ] サブコマンド無しで起動した場合に GUI を起動する（従来のヘルプ表示から変更する）
@@ -120,16 +128,19 @@
 
 - [ ] `run_gui(...) -> int` を実装する
 - [ ] **`QApplication` 生成の前に** `presentation/web/schemes.py` の `register_schemes()` を呼ぶ（`cid` / `maildock` の `QWebEngineUrlScheme` 登録。D-11）
-- [ ] ストレージルートが未設定・未解決の場合に初回セットアップウィザードを起動する
+- [ ] ストレージルートが未設定・未解決の場合も例外終了せず、`QApplication` 生成後に初回セットアップウィザードを起動する
+- [ ] ウィザードでルートが確定してから `StorageSession` を開始し、設定済みの場合も同じ経路で `AppContext` を構築する
 - [ ] `StorageLock` の取得に失敗した場合に `QMessageBox` を表示して終了コード 3 を返す（F-23）
 - [ ] `AppContext` を構築して `MainWindow` を表示し、`app.exec()` の戻り値を返す
-- [ ] 終了時にワーカースレッドを停止し、`ConnectionManager` を閉じ、`StorageLock` を解放する
+- [ ] 終了時にワーカースレッドを停止してから `StorageSession` を閉じる（`ConnectionManager` と `StorageLock` を個別に二重解放しない）
+- [ ] `startup_verification='quick'` なら `quick_check` / `foreign_key_check`、`'full'` なら加えてFTS integrity-checkをワーカーで実行し、完了までメイン画面のDB操作を開始しない。FTS検査はPhase 2と同じ短命な専用書き込み可能接続を使い、QueryWorkerの読み取り接続を流用しない（D-27）
 - [ ] `sync_on_startup` が真なら起動直後に同期を1回起動する（D-21）
 
 #### **A-3. `presentation/context.py` — GUI用コンポジションルート**
 
-- [ ] `AppContext`（storage_root / `StorageLock` / `ConnectionManager` / `AppConfig` / `KeyringCredentialStore` / `EmlStorage` / `ManifestWriter` / repo・fetcher のファクトリ）を実装する
+- [ ] `AppContext`（storage_root / `StorageLock` / `ConnectionManager` / `AppConfig` / `KeyringCredentialStore` / `EmlStorage` / `ManifestWriter` / repo・fetcher のファクトリ）を実装する。`StorageLock` と `ConnectionManager` は `StorageSession` から借用し、`AppContext` 自身は解放しない
 - [ ] repo とストレージの生成を**呼び出しスレッド側で行うファクトリ**として公開する（接続をスレッド間で共有しない）
+- [ ] `BaseMessageRenderer` の具象ファクトリを公開し、閲覧・添付保存usecaseへポートとして注入する（D-24）
 - [ ] 設定変更を `config.save()` で永続化するメソッドを持たせる
 - [ ] `views` / `viewmodels` / `models` は `AppContext` を通してのみ具象へ到達することを docstring に明記する（D-4）
 
@@ -144,21 +155,25 @@
 - [ ] タスクを Signal で受け、結果／エラーを Signal で返す（例外はスレッドを越えて raise しない）
 - [ ] 例外は `MailDockError` に正規化して `failed` Signal で返す
 - [ ] スレッド終了時に、そのスレッドが開いた SQLite 接続を必ず閉じる
-- [ ] `stop()` で `CancelToken` を立ててからスレッドを終了する（`quit()` + `wait()`）
+- [ ] UI側コントローラが実行中タスクの `CancelToken` を所有し、ワーカーのSlot実行中でも `cancel()` を直接呼べる構造にする。キャンセル要求を同じワーカースレッドのqueued Slotだけに依存させない
+- [ ] `stop()` はUI側から全チャネルの `CancelToken` を立て、タスク終了後に `quit()` + `wait()` する
 
 #### **A-6. `presentation/threads/query_worker.py` — 読み取り専用ワーカー**
 
 - [ ] `list_messages` / `search_messages` / `count_messages` / `list_thread` / `get_message` / `open_message` の要求を受ける
-- [ ] 要求ごとに **リクエストID** を採番し、結果 Signal に含める（D-6 の世代管理用）
-- [ ] 新しい要求を受けたら実行中の要求の `CancelToken` を立てる
+- [ ] `list/search`・`detail/open`・`count/thread` の要求チャネルごとに **リクエストID** と `CancelToken` を採番し、結果 Signal にチャネルとIDを含める（D-6）
+- [ ] UI側コントローラは同じチャネルの新要求を発行する直前に旧トークンを直接キャンセルする。異なるチャネルの要求は相互キャンセルしない
+- [ ] ワーカー内は要求を直列実行し、queuedされた未開始要求は世代IDを確認して古ければDB・EMLへ触れず破棄する
+- [ ] チャネル別ID・トークン・最新世代判定を `presentation/threads/request_state.py` のQt非依存クラスへ分離し、通常CIでテストする（D-28）
 - [ ] `OperationCancelledError` は失敗ではなく「キャンセル済み」として扱い、UIにエラーを出さない
-- [ ] `sqlite3` を直接使わず、`usecases/search_messages.py` 経由でのみ呼ぶ
+- [ ] `sqlite3` と解析具象を直接使わず、検索・一覧は `usecases/search_messages.py`、閲覧は `usecases/open_message.py` 経由で呼ぶ
 
 #### **A-7. `presentation/threads/sync_worker.py` — 書き込みワーカー**
 
 - [ ] `sync_account()` と `refresh_folders()` を実行する（書き込みはこの1本に集約。D-5）
 - [ ] `on_progress` の `SyncProgress` を **100ms間引き**して Signal へ中継する（毎通 Signal を出さない）
 - [ ] `CancelToken` によるキャンセルを受け付け、`SyncResult.cancelled` を UI へ返す
+- [ ] 同期トークンはUI側コントローラが所有し、実行中Slotのイベントループ復帰を待たずにキャンセルできること
 - [ ] `StorageDetachedError` を専用 Signal で通知する（F-24）
 - [ ] `AuthenticationError` / `FetchError` を対応表経由の文言で通知する
 
@@ -171,6 +186,14 @@
 ---
 
 ### **3.2 グループB: 一覧（左ペイン・中央ペイン）**
+
+#### **B-0. `domain/search.py` / `infrastructure/database/search_repository.py` — 一覧表示契約の拡張**
+
+- [ ] `MessageSummary` に `imap_flags: str | None` / `moved_to_folder_display_name: str | None` / `failure_class: str | None` を追加する（D-23）
+- [ ] 一覧・検索・スレッド取得SQLが移動先 `folders` と現在UID世代の `sync_failures` をLEFT JOINし、1回の問い合わせで表示情報を返す
+- [ ] `sync_failures` は `(account_id, folder_id, uidvalidity, uid)` でJOINし、旧UIDVALIDITY世代の失敗を現在行へ誤表示しない
+- [ ] 一覧描画から `get_message()` を行ごとに呼ばないことをリポジトリのクエリ回数テストで固定する
+- [ ] `BaseSearchRepository` は引き続き読み取り専用とし、書き込みメソッドを追加しない
 
 #### **B-1. `presentation/models/message_table_model.py`**
 
@@ -192,6 +215,7 @@
 - [ ] `imap_flags` に `\Seen` が無い: 未読アイコン ＋ 「同期時点のスナップショット」ツールチップ
 - [ ] `imap_flags` に `\Flagged`: スターアイコン
 - [ ] `sync_failures` の `oversize`: 「未取得（サイズ上限超過）」バッジ
+- [ ] 上記情報をすべて `MessageSummary` から描画し、行ごとの追加DB問い合わせを行わない（B-0）
 - [ ] フラグを変更する導線を作らない（D-17）
 
 #### **B-3. `presentation/models/folder_tree_model.py`**
@@ -234,14 +258,24 @@
 - [ ] `RenderedMessage`（frozen dataclass）を追加する: `html_body: str | None` / `text_body: str` / `parts: tuple[MessagePart, ...]`
 - [ ] 外部依存がゼロであることを維持する
 
-#### **C-2. `infrastructure/parsing/eml_render.py` — 表示用パート抽出**
+#### **C-1a. `domain/ports.py` — 表示・添付抽出ポート**
+
+- [ ] `BaseMessageRenderer(ABC)` を追加し、`render(raw: bytes) -> RenderedMessage` を定義する（D-24）
+- [ ] `BaseEmlStorage.read_verified(relative_path: str, expected_hash: str) -> bytes` を追加し、同じ読み出し操作で完全SHA-256を検証して一致したバイト列だけを返す。不一致は `StorageError` 系で拒否する
+- [ ] `infrastructure/storage/eml_storage.py` の `EmlStorage.read_verified()` は境界検証後にファイルを1回だけ開き、読み出しながら完全SHA-256を計算し、一致した場合だけそのバイト列を返す。検証後に別の `read()` を行う二段階実装は禁止する
+- [ ] `part_index` は `RenderedMessage.parts` 内の0始まりインデックスとし、通常添付・インラインを含むMIME走査順で安定することを契約に明記する
+- [ ] usecases がMIME解析の具象や BeautifulSoup / PySide6 をimportせずに単体テストできる境界とする
+
+#### **C-2. `infrastructure/parsing/eml_render.py` — `BaseMessageRenderer` の具象実装**
 
 - [ ] `extract_render_parts(raw: bytes) -> RenderedMessage` を実装する
+- [ ] `EmlMessageRenderer(BaseMessageRenderer)` を実装し、`render()` を `extract_render_parts()` へ委譲する
 - [ ] `text/html` パートを（デコードして）`html_body` に、`text/plain` を `text_body` に格納する
 - [ ] `Content-ID` の山括弧を除去して `MessagePart.content_id` に格納する
 - [ ] 添付・インラインの判定は `eml_parser.py` と同じ規則（`Content-Disposition` と `Content-ID`）に揃える
 - [ ] 文字コードのデコードは既存の `charset.decode_text()` を使う（フォールバック順序を崩さない）
 - [ ] `parse_eml()` と統合しない理由（表示用はバイト列を保持し、検索用は正規化テキストのみ）を docstring に明記する（D-12）
+- [ ] `parts` の順序を `email.message.Message.walk()` によるMIME走査順で固定し、同じEMLから常に同じ `part_index` が得られることをテストする
 
 #### **C-3. `infrastructure/parsing/html_sanitizer.py` — CSP注入とタグ除去（*Qt非依存*）**
 
@@ -259,9 +293,10 @@
 #### **C-4. `usecases/open_message.py` — 閲覧ユースケース**
 
 - [ ] `OpenedMessage`（frozen dataclass）を定義する: `detail: MessageDetail` / `rendered: RenderedMessage`
-- [ ] `open_message(search_repo, storage, *, message_id) -> OpenedMessage` を実装する
+- [ ] `open_message(search_repo, storage, renderer, *, message_id) -> OpenedMessage` を実装する
 - [ ] `local_state='purged'` または `relative_path` が無い場合は明示的なドメイン例外で拒否し、EML の読み取りを試みない（F-21）
 - [ ] `file_hash` を検証し、不一致は `StorageError` 系で拒否する
+- [ ] `BaseEmlStorage.read_verified()` が返したEMLバイト列だけを `BaseMessageRenderer.render()` へ渡す
 - [ ] Phase 1 と同じ呼び出し規約（ポートを位置引数、以降 keyword-only）
 - [ ] `sqlite3` / PySide6 / infrastructure の具象を import しない
 
@@ -291,9 +326,11 @@
 
 #### **C-8. `presentation/web/page.py` — 層6（ナビゲーション制御）**
 
+- [ ] `presentation/web/url_policy.py` にQt非依存の `is_allowed_external_url(url: str) -> bool` を実装する（D-26 / D-28）
+- [ ] `https` / `http` のみ許可し、`file` / `javascript` / `data` / カスタムスキーム、制御文字、ユーザー情報を含むURL、4096文字超を拒否する
 - [ ] `MailPage(QWebEnginePage)` で `acceptNavigationRequest()` をオーバーライドする
 - [ ] 初回の本文表示（`maildock:` へのナビゲーション）のみ許可する
-- [ ] リンククリックは URL を提示する確認ダイアログを経て `QDesktopServices.openUrl()` へ渡し、**アプリ内では遷移させない**（F-16）
+- [ ] 許可されたリンククリックだけをURL提示の確認ダイアログへ渡し、承認後に `QDesktopServices.openUrl()` で開く。拒否URLは確認ダイアログも外部起動も行わず、**アプリ内では常に遷移させない**（F-16）
 - [ ] `javaScriptAlert` 等のダイアログ系を無効化する
 - [ ] 証明書エラー・認証要求を拒否する
 
@@ -373,7 +410,7 @@
 - [ ] 1通あたりサイズ上限（`max_message_bytes`、既定 50MB）
 - [ ] 外部画像の読み込み（`block_remote_images`、既定ブロック）
 - [ ] 起動時に同期する（`sync_on_startup`）
-- [ ] 起動時の整合性チェック（`startup_verification`: quick / full）
+- [ ] 起動時の整合性チェック（`startup_verification`: quick / full）。選択値が次回起動時にA-2の検証処理へ実際に反映されること
 - [ ] ログフォルダを開く（`QDesktopServices.openUrl()`）
 - [ ] アカウント一覧の表示・追加、同期対象フォルダの再編集
 - [ ] Phase 4 / 4.5 の設定項目（purge モード・ゴミ箱猶予日数・ハートビート間隔・サーバー削除モード・PST取込設定）は**表示しない**
@@ -388,27 +425,30 @@
 
 ### **3.6 グループF: 保存機能**
 
-#### **F-1. `usecases/save_attachment.py`**
+#### **F-1. `usecases/save_attachment.py` — 二段階添付保存**
 
-- [ ] `SavedFile`（frozen dataclass）を定義する: `path: Path` / `warnings: tuple[str, ...]` / `is_executable: bool`
-- [ ] `save_attachment(storage, *, relative_path, part_index, dest_dir, filename=None) -> SavedFile` を実装する
-- [ ] `sanitize_attachment_name()` を必ず経由する
-- [ ] **保存直前に `resolve_within(dest_dir, name)` を呼び**、宛先が指定ディレクトリ配下であることを再検証する（F-19）
-- [ ] 同名ファイルが存在する場合は連番を付ける（呼び出し側で上書き確認済みの場合を除く）
-- [ ] 一時ファイルへ書き込んでから `os.replace` で配置する
-- [ ] `sqlite3` / PySide6 を import しない
+- [ ] domain側に `AttachmentSavePlan`（`relative_path` / `expected_hash` / `part_index` / `dest_dir` / `filename` / `warnings` / `is_executable`）と `SavedFile`（`path` / `warnings` / `is_executable`）を frozen dataclass として定義する
+- [ ] `prepare_attachment_save(storage, renderer, *, relative_path, expected_hash, part_index, dest_dir, filename=None) -> AttachmentSavePlan` を実装する
+- [ ] prepareは `BaseEmlStorage.read_verified()` でEMLを読み、`BaseMessageRenderer` で対象パートを取得して `sanitize_attachment_name()` と同名連番候補の決定を行うが、**ファイルは一切作成しない**
+- [ ] `part_index` が範囲外、または対象がインラインパートである場合はドメイン例外で拒否する
+- [ ] `commit_attachment_save(storage, renderer, *, plan, overwrite=False) -> SavedFile` を実装する
+- [ ] commitは `read_verified()` でEMLハッシュを再検証し、対象パート・サニタイズ結果も再検証して、**保存直前に `resolve_within(plan.dest_dir, name)` を再実行**する（F-19）
+- [ ] commit時に同名競合が発生した場合、`overwrite=False` なら再度連番を決定して既存ファイルを上書きしない。`overwrite=True` はUIで明示確認済みの場合だけ指定する
+- [ ] 一時ファイルは最終保存先の親ディレクトリに作成し、`flush()` + `fsync()` 後に同一ボリューム上で `os.replace` する。失敗時は一時ファイルを除去する
+- [ ] usecaseは `BaseEmlStorage` / `BaseMessageRenderer` にのみ依存し、`sqlite3` / PySide6 / infrastructure の具象をimportしない
 
 #### **F-2. `usecases/export_message.py`**
 
 - [ ] `export_eml(storage, *, relative_path, expected_hash, dest_path) -> Path` を実装する
 - [ ] 書き出し前に `file_hash` を検証する（F-20）
-- [ ] 一時ファイル ＋ `os.replace` で配置する
+- [ ] 一時ファイルは `dest_path.parent` に作成し、`flush()` + `fsync()` 後に同一ボリューム上で `os.replace` する。失敗時は一時ファイルを除去する
+- [ ] 宛先親ディレクトリがシンボリックリンク等で意図しない場所へ変化していないことを保存直前に再検証する
 
 #### **F-3. UI 配線**
 
 - [ ] 添付一覧のコンテキストメニュー／ボタンから `QFileDialog.getExistingDirectory()` で保存先を選ぶ
-- [ ] `SanitizedName.is_executable` が真なら**保存前に**警告ダイアログを出す（`.exe .scr .js .vbs .lnk .bat .cmd .ps1`）
-- [ ] サニタイズで名前が変わった場合にその旨を通知する
+- [ ] `prepare_attachment_save()` の `AttachmentSavePlan.is_executable` が真なら**commit前に**警告ダイアログを出す（`.exe .scr .js .vbs .lnk .bat .cmd .ps1`）。UIから infrastructure の `SanitizedName` をimportしない
+- [ ] planの `warnings` によりサニタイズで名前が変わった旨を通知し、ユーザー承認後だけ `commit_attachment_save()` を呼ぶ
 - [ ] 「.eml として保存」を `QFileDialog.getSaveFileName()` から実行する
 - [ ] 保存処理をワーカーで実行し、UIをブロックしない
 
@@ -433,12 +473,20 @@
 - [ ] `tests/unit/test_open_message.py`（Fake ポートのみ）
   - [ ] `purged` と `relative_path` 欠如で拒否され、EML を読まないこと
   - [ ] `file_hash` 不一致で拒否されること
+  - [ ] `read_verified()` が返したバイト列だけがFake `BaseMessageRenderer` へ渡ること
+- [ ] `tests/unit/test_eml_storage.py`（既存を拡張）: `read_verified()` が完全ハッシュ一致時だけバイト列を返し、不一致・読み出し中の差し替えを拒否すること
 - [ ] `tests/unit/test_save_attachment.py`
   - [ ] パストラバーサル名・NTFS禁止文字・予約名・末尾ドットがサニタイズされること
   - [ ] 実行可能拡張子で `is_executable` が真になること
   - [ ] `resolve_within` により宛先ディレクトリ外へ書けないこと
   - [ ] 同名ファイルの連番付与
+  - [ ] prepare時点ではファイルが作成されず、警告確認後のcommitでだけ保存されること
+  - [ ] prepare後に宛先・EML・同名ファイルの状態が変化してもcommitが再検証し、未確認の上書きやディレクトリ外保存を行わないこと
+  - [ ] 一時ファイルが最終保存先と同じ親ディレクトリに作られ、失敗時に残らないこと
 - [ ] `tests/unit/test_export_message.py`: ハッシュ不一致で拒否、正常時に原本と同一バイト列
+- [ ] `tests/unit/test_url_policy.py`: `https` / `http` のみ許可し、不許可スキーム・制御文字・ユーザー情報・4096文字超を拒否すること
+- [ ] `tests/unit/test_request_generation.py`: チャネル別世代管理で同一チャネルの旧要求だけが無効化され、一覧・本文・件数要求が相互キャンセルされないこと
+- [ ] `tests/unit/test_search_repository.py`（既存を拡張）: 一覧1回のSQLでフラグ・移動先・現在UID世代のfailureを取得し、旧世代failureを混入させないこと
 - [ ] `tests/unit/test_presentation_errors.py`: 例外階層の全クラスが対応表に存在し、未知例外がフォールバックすること
 - [ ] `tests/unit/test_ports.py`（既存を拡張）: `presentation/views` / `viewmodels` / `models` に `sqlite3` と `mail_dock.infrastructure` の import が無いことを静的に確認する（F-26）
 - [ ] `tests/unit/test_main.py`（既存を拡張）: `gui` サブコマンドとサブコマンド無しが GUI 起動を呼ぶこと（`run_gui` をモックし、PySide6 を import せずに検証する）。既存サブコマンドの挙動が変わらないこと
@@ -454,8 +502,8 @@
   - [ ] 古いリクエストIDの結果が破棄されること
   - [ ] フィルタ変更でモデルがリセットされ、カーソルが捨てられること
 - [ ] `tests/gui/test_folder_tree_model.py`: ツリー構造と選択→`MessageFilter` 変換
-- [ ] `tests/gui/test_query_worker.py`: 新規要求で前要求がキャンセルされること、`OperationCancelledError` がエラー通知されないこと
-- [ ] `tests/gui/test_sync_worker.py`: 進捗の間引き、キャンセル、`StorageDetachedError` の Signal 伝播
+- [ ] `tests/gui/test_query_worker.py`: UI側から実行中トークンを直接キャンセルできること、同一チャネルの前要求だけがキャンセルされること、`OperationCancelledError` がエラー通知されないこと
+- [ ] `tests/gui/test_sync_worker.py`: 進捗の間引き、実行中Slotのイベントループ復帰を待たないキャンセル、`StorageDetachedError` の Signal 伝播
 - [ ] `tests/gui/test_web_sandbox.py`
   - [ ] プロファイルがオフレコで、キャッシュ・永続クッキーが無効なこと
   - [ ] JavaScript ほか危険な属性がすべて無効なこと
@@ -463,11 +511,13 @@
   - [ ] 外部画像を解除すると画像リクエストのみ通り、メールを切り替えると再びブロックされること
   - [ ] `cid:` ハンドラがインライン画像を返し、未知の `cid` を失敗させること
   - [ ] 2MB を超える本文HTMLが `maildock:` 経由で表示できること
-  - [ ] リンククリックがアプリ内遷移せず外部ブラウザ導線へ渡ること（`QDesktopServices` をモック）
+  - [ ] 許可URLのリンククリックだけがアプリ内遷移せず外部ブラウザ導線へ渡り、不許可URLは確認・外部起動とも行わないこと（`QDesktopServices` をモック）
 - [ ] `tests/gui/test_detail_view.py`: `purged` の代替表示、添付一覧、「この会話のN件を表示」
 - [ ] `tests/gui/test_main_window.py`: 3ペイン構成、同期ボタンの多重起動防止、終了時のワーカー停止
 - [ ] `tests/gui/test_setup_wizard.py`: 3ページの遷移とバリデーション（`FakeFetcher` と一時ルートを使用）
 - [ ] `tests/gui/test_settings_dialog.py`: 変更が `config.save()` へ反映されること、Phase 4 項目が表示されないこと
+- [ ] `tests/gui/test_app_bootstrap.py`: ルート未設定でもウィザードが起動し、確定後だけ `StorageSession` が開始され、ロックと接続が各終了経路で1回だけ解放されること
+- [ ] `tests/gui/test_startup_verification.py`: quick/fullの各設定が対応する検証を起動し、完了前にメイン画面のDB操作を開始しないこと
 
 #### **G-3. CI**
 
@@ -493,16 +543,21 @@
 | `src/mail_dock/presentation/strings.py` | UI文言定数 | A-4 |
 | `src/mail_dock/presentation/errors.py` | 例外→UI文言の対応表 | A-8 |
 | `src/mail_dock/presentation/threads/` | ワーカー基盤・読み取りワーカー・同期ワーカー | A-5 〜 A-7 |
+| `src/mail_dock/presentation/threads/request_state.py` | チャネル別要求世代・キャンセルトークン管理（Qt非依存） | A-6 |
 | `src/mail_dock/presentation/models/` | 一覧テーブルモデル・フォルダツリーモデル | B-1 / B-3 |
 | `src/mail_dock/presentation/viewmodels/` | 一覧・詳細・同期・セットアップの ViewModel | B-4 |
 | `src/mail_dock/presentation/views/` | メイン画面・一覧・詳細・ウィザード・ダイアログ | B-6 / C-9 / D-1 / E-1 〜 E-3 |
 | `src/mail_dock/presentation/web/` | プロファイル・インターセプタ・スキームハンドラ・ページ | C-5 〜 C-8 |
 | `src/mail_dock/domain/messages.py` | `MessagePart` / `RenderedMessage` の追加 | C-1 |
+| `src/mail_dock/domain/ports.py` | `BaseMessageRenderer` と添付保存準備結果の追加 | C-1a / F-1 |
+| `src/mail_dock/domain/search.py` | 一覧ステータス描画用の読み取り契約拡張 | B-0 |
 | `src/mail_dock/infrastructure/parsing/eml_render.py` | 表示用パート抽出 | C-2 |
+| `src/mail_dock/infrastructure/storage/eml_storage.py` | 完全ハッシュ検証と読み出しを一操作で行う `read_verified()` | C-1a |
 | `src/mail_dock/infrastructure/parsing/html_sanitizer.py` | CSP注入・危険タグ除去（Qt非依存） | C-3 |
 | `src/mail_dock/usecases/open_message.py` | 閲覧ユースケース | C-4 |
 | `src/mail_dock/usecases/save_attachment.py` | 添付保存ユースケース | F-1 |
 | `src/mail_dock/usecases/export_message.py` | `.eml` エクスポートユースケース | F-2 |
+| `src/mail_dock/presentation/web/url_policy.py` | 外部リンクの許可判定（Qt非依存） | C-8 |
 | `tests/unit/test_html_sanitizer.py` 他 | 単体テスト（CI実行） | G-1 |
 | `tests/gui/` | GUIテスト（`gui` マーカー・ローカル手動） | G-2 |
 
@@ -521,7 +576,7 @@
 | `QTextBrowser` による軽量HTML表示版の試作・比較 | 実施しない（D-1） |
 | ローカルゴミ箱・30日purge・墓標化・「実体なし」への遷移処理 | Phase 4 |
 | サーバーからの削除（ドライラン・件数手入力確認・監査ログ・レート制限） | Phase 4 |
-| 整合性チェック全般（クイック・フル・孤児スキャン・マニフェスト検証・再インデックス）のUI | Phase 4 |
+| 整合性チェックの操作UI・修復（孤児スキャン・マニフェスト全件検証・再インデックスを含む） | Phase 4（Phase 3はD-27の起動時quick/full自動検証のみ） |
 | 切断の状態機械・`WM_DEVICECHANGE` 監視（`native/device_watcher.py`）・ハートビート・「安全な取り外し」 | Phase 4 |
 | `QTimer` による定期自動同期・システムトレイ常駐・トレイステータス表示 | Phase 4 |
 | `sync_failures` の「要確認」一覧・「それでも取得」の個別再取得UI・再解析UI | Phase 4 |
@@ -548,12 +603,12 @@
 - [ ] V-4. 起動導線: `mail-dock gui` とサブコマンド無しの `mail-dock` で GUI が起動し、既存の CLI サブコマンド（`migrate` / `verify` / `account` / `folders` / `sync` / `reparse` / `search`）の挙動が変わらない
 - [ ] V-5. ウィザード一周: 空のディレクトリから GUI だけでルート初期化 → アカウント登録 → フォルダ選択 → 同期 → 検索 → 本文表示 → 添付保存 まで完了できる
 - [ ] V-6. HTML 5層防御: ①プロファイルがオフレコでキャッシュ・永続クッキーが無効 ②JavaScript ほか危険な属性がすべて無効 ③`http` / `https` / `file` がブロックされ `cid` / `maildock` のみ通る ④`cid:` ハンドラがインライン画像を返し未知の `cid` は失敗する ⑤CSP `<meta>` が本文へ注入されている — の5点が個別テストで固定されている
-- [ ] V-7. ナビゲーション: リンククリックがアプリ内で遷移せず、確認のうえ外部ブラウザへ転送される。`<meta http-equiv="refresh">` が除去されている
+- [ ] V-7. ナビゲーション: 許可された `https` / `http` リンクだけがアプリ内で遷移せず、確認のうえ外部ブラウザへ転送される。不許可URLは確認も外部起動も行われず、`<meta http-equiv="refresh">` が除去されている
 - [ ] V-8. 外部画像: 既定でブロックされ、「画像を読み込む」で画像リクエストのみ許可され、別のメールを開くと再びブロックされる
 - [ ] V-9. 遅延ロード: `fetchMore` で全ページを連結した結果が `list_messages` の一括取得と**完全に一致**し、重複・欠損がゼロである。同一 `date_sent` と `date_sent` NULL の混在でも成立する。`next_cursor` を加工していない
-- [ ] V-10. UI応答: 同期中も一覧のスクロール・検索・本文表示が可能である。2文字語を含む検索で警告バナーが表示され、キャンセルが実際に効く
+- [ ] V-10. UI応答: 同期中も一覧のスクロール・検索・本文表示が可能である。2文字語を含む検索で警告バナーが表示され、実行中Slotのイベントループ復帰を待たずキャンセルが効く。本文・件数要求が一覧取得を誤ってキャンセルしない
 - [ ] V-11. 層の隔離: `presentation/views` / `viewmodels` / `models` に `sqlite3` と `mail_dock.infrastructure` の import が無いことを静的に確認する。`domain` / `usecases` に PySide6 の import が無い
-- [ ] V-12. 保存の安全性: パストラバーサル・NTFS禁止文字・予約名・実行可能拡張子が期待どおり処理され、保存先が指定ディレクトリ外へ出ない。実行可能拡張子で保存前に警告が出る
+- [ ] V-12. 保存の安全性: パストラバーサル・NTFS禁止文字・予約名・実行可能拡張子が期待どおり処理され、保存先が指定ディレクトリ外へ出ない。prepareでは書き込まず実行可能拡張子でcommit前に警告が出る。一時ファイルと最終ファイルが同一ボリュームにあり、TOCTOU再検証が働く
 - [ ] V-13. 状態表示: `deleted` グレーアウト・`moved` ツールチップ・`purged` の実体なし表示・未読／スターアイコン・`oversize` バッジが正しく出る。フラグを変更する導線が存在しない
 - [ ] V-14. エラー表示: `StorageLockedError`（他インスタンス使用中）・`AuthenticationError`・`StorageDetachedError` がそれぞれ専用の文言で表示され、トレースバックが画面に出ない
 - [ ] V-15. 性能: 起動時間が 3秒以内（N-2）、1万件規模の一覧スクロールが 60fps（N-1）、同期中のメモリが 600MB 以下（N-3）であることを実測し、本書「7.」へ記録する
