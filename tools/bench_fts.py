@@ -1215,7 +1215,9 @@ def _build_extrapolation(reports: Sequence[dict[str, object]]) -> dict[str, obje
             "match_under_300ms": match_p95 <= 300,
             "like_p95_ms_max": like_p95,
             "like_under_3s": like_p95 <= 3_000,
-            "fts_ratio_3_to_5": payload_ratio is not None and 3 <= payload_ratio <= 5,
+            # external-content FTS can be smaller than the source payload; the
+            # requirement is an upper bound, not a minimum duplication factor.
+            "fts_ratio_at_most_5": payload_ratio is not None and 0 <= payload_ratio <= 5,
         },
     }
 
@@ -1477,7 +1479,7 @@ def main() -> None:
             f"({'PASS' if targets['match_under_300ms'] else 'FAIL'} <= 300 ms), "
             f"LIKE p95 max={targets['like_p95_ms_max']:.3f} ms "
             f"({'PASS' if targets['like_under_3s'] else 'FAIL'} <= 3 s), "
-            f"FTS ratio {'PASS' if targets['fts_ratio_3_to_5'] else 'FAIL'} (3-5x)"  # type: ignore[index]
+            f"FTS ratio {'PASS' if targets['fts_ratio_at_most_5'] else 'FAIL'} (<= 5x)"  # type: ignore[index]
         )
         results = {
             "sqlite_version": sqlite3.sqlite_version,

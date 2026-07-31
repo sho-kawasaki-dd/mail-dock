@@ -50,6 +50,28 @@ planned corpora and run the A-3 measurements with:
 uv run python tools/bench_fts.py --measure --results tools/.bench_fts/a3.json
 ```
 
+The default measurement covers 1,000, 5,000, and 10,000 messages. It reports
+the database and FTS sizes, MATCH cases for 3/5/10-character terms (single,
+AND, OR, and exclusion), the two-character LIKE scan, insert throughput with
+and without FTS triggers, first-page and deep keyset paging, and structured
+filters. The final section linearly extrapolates p95 latency and FTS size to
+50,000 messages. `PASS` means MATCH p95 is at most 300 ms, LIKE p95 is at most
+3 seconds, and the FTS-to-search-payload ratio is at most 5x; a ratio below 1x
+is valid for the external-content schema because the source text is not
+duplicated in the FTS table.
+
+Use `--warmups N` and `--iterations N` to control the timing sample. The full
+per-dataset measurements and extrapolation are written to the JSON path passed
+with `--results`; the `queries`, `sorting`, `structured_filter`, and
+`insert_throughput` objects contain the individual p50/p95 values and hit
+counts. A clean rerun can remove previously generated corpora with `--force`:
+
+```sh
+uv run python tools/bench_fts.py --measure --force \
+	--warmups 2 --iterations 7 \
+	--output tools/.bench_fts --results tools/.bench_fts/a3.json
+```
+
 Run the A-4 trigram behavior checks, including short-term MATCH behavior,
 escaping, LIKE reuse, and `detail=` comparisons, with:
 
