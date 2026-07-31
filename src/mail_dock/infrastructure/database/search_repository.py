@@ -33,9 +33,7 @@ class SqliteSearchRepository(BaseSearchRepository):
 
     def __init__(self, connection: sqlite3.Connection | ConnectionManager) -> None:
         self._connection = connection if isinstance(connection, sqlite3.Connection) else None
-        self._connection_manager = (
-            connection if isinstance(connection, ConnectionManager) else None
-        )
+        self._connection_manager = connection if isinstance(connection, ConnectionManager) else None
         if self._connection is None and self._connection_manager is None:
             raise TypeError("connection must be sqlite3.Connection or ConnectionManager")
 
@@ -140,9 +138,7 @@ class SqliteSearchRepository(BaseSearchRepository):
             if not filters.remote_states:
                 return ["0"], []
             clauses.append(
-                "m.remote_state IN ("
-                + ", ".join("?" for _ in filters.remote_states)
-                + ")"
+                "m.remote_state IN (" + ", ".join("?" for _ in filters.remote_states) + ")"
             )
             parameters.extend(sorted(filters.remote_states))
         if filters.thread_key is not None:
@@ -191,9 +187,7 @@ class SqliteSearchRepository(BaseSearchRepository):
     ) -> SearchPage:
         if limit <= 0:
             raise ValueError("limit must be positive")
-        match_expression, match_parameters = (
-            self._matching_expression(plan) if plan else ("", [])
-        )
+        match_expression, match_parameters = self._matching_expression(plan) if plan else ("", [])
         clauses, filter_parameters = self._filter_clause(filters)
         parameters: list[Any] = []
         if match_expression:
@@ -270,10 +264,14 @@ class SqliteSearchRepository(BaseSearchRepository):
             where = " AND ".join(clauses) if clauses else "1"
             self._install_progress_handler(cancel)
             try:
-                row = self._conn().execute(
-                    "SELECT COUNT(*) FROM messages AS m WHERE " + where,
-                    parameters,
-                ).fetchone()
+                row = (
+                    self._conn()
+                    .execute(
+                        "SELECT COUNT(*) FROM messages AS m WHERE " + where,
+                        parameters,
+                    )
+                    .fetchone()
+                )
             finally:
                 self._clear_progress_handler(cancel)
         return int(row[0]) if row is not None else 0
@@ -300,15 +298,19 @@ class SqliteSearchRepository(BaseSearchRepository):
 
     def get_message(self, message_id: int) -> MessageDetail | None:
         with self._db_io("get message"):
-            row = self._conn().execute(
-                "SELECT m.id, m.account_id, m.folder_id, f.raw_name, f.display_name, "
-                "m.subject, m.sender, m.date_sent, m.internal_date, m.size_bytes, "
-                "m.has_attachment, m.remote_state, m.local_state, m.thread_key, "
-                "m.recipient, m.cc, m.message_id, m.in_reply_to, m.references_ids, "
-                "m.relative_path, m.file_hash, m.imap_flags "
-                "FROM messages AS m JOIN folders AS f ON f.id = m.folder_id WHERE m.id = ?",
-                (message_id,),
-            ).fetchone()
+            row = (
+                self._conn()
+                .execute(
+                    "SELECT m.id, m.account_id, m.folder_id, f.raw_name, f.display_name, "
+                    "m.subject, m.sender, m.date_sent, m.internal_date, m.size_bytes, "
+                    "m.has_attachment, m.remote_state, m.local_state, m.thread_key, "
+                    "m.recipient, m.cc, m.message_id, m.in_reply_to, m.references_ids, "
+                    "m.relative_path, m.file_hash, m.imap_flags "
+                    "FROM messages AS m JOIN folders AS f ON f.id = m.folder_id WHERE m.id = ?",
+                    (message_id,),
+                )
+                .fetchone()
+            )
         if row is None:
             return None
         summary = self._summary(row)

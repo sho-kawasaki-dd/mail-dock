@@ -134,9 +134,7 @@ def test_sync_then_search_handles_normalization_charsets_and_attachments(
         search,
         FULLWIDTH_SEARCH,
         filters=MessageFilter(account_ids=(account_id,)),
-    ) == {
-        SEARCHABLE_SUBJECT
-    }
+    ) == {SEARCHABLE_SUBJECT}
 
 
 def _subjects(
