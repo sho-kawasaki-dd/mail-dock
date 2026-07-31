@@ -40,3 +40,21 @@ mailboxes plus the Japanese `受信トレイ.請求書` hierarchy with `.` as th
 folder delimiter.
 
 Use the application CLI with `uv run mail-dock`. The `--storage-root` option selects an archive root; `migrate` applies database migrations and `verify` performs read-only integrity checks.
+
+## FTS PoC checks
+
+The FTS benchmark is manual and is not included in pytest. Generate the
+planned corpora and run the A-3 measurements with:
+
+```sh
+uv run python tools/bench_fts.py --measure --results tools/.bench_fts/a3.json
+```
+
+Run the A-4 trigram behavior checks, including short-term MATCH behavior,
+escaping, LIKE reuse, and `detail=` comparisons, with:
+
+```sh
+uv run python tools/bench_fts.py --check-a4 --counts 1000 --results tools/.bench_fts/a4.json
+```
+
+Generated EML files, databases, and JSON reports are local benchmark output.

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
 from pathlib import Path
-from typing import Final
+from typing import Final, cast
 
 REPOSITORY_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 for import_root in (REPOSITORY_ROOT, REPOSITORY_ROOT / "src"):
@@ -111,6 +111,20 @@ DEFAULT_WARMUPS: Final[int] = 2
 DEFAULT_ITERATIONS: Final[int] = 7
 DEEP_PAGE_OFFSET: Final[int] = 10_000
 PAGE_SIZE: Final[int] = 200
+A4_SYNTAX_TOKENS: Final[tuple[str, ...]] = (
+    '"',
+    "*",
+    "^",
+    "-",
+    "(",
+    ")",
+    ":",
+    "NEAR",
+    "AND",
+    "OR",
+    "NOT",
+)
+A4_DETAIL_MODES: Final[tuple[str, ...]] = ("full", "column", "none")
 
 
 def _positive_count(value: str) -> int:
@@ -286,6 +300,10 @@ def _time_query(
     return TimingStats(_percentile(durations, 0.50), _percentile(durations, 0.95)), hit_count
 
 
+def _quote_fts_term(term: str) -> str:
+    return f'"{term.replace(chr(34), chr(34) * 2)}"'
+
+
 def _fts_match_sql(spec: QuerySpec) -> tuple[str, tuple[str, ...]]:
     ctes: list[str] = []
     parameters: list[str] = []
@@ -294,7 +312,7 @@ def _fts_match_sql(spec: QuerySpec) -> tuple[str, tuple[str, ...]]:
         name = f"include_{index}"
         include_names.append(name)
         ctes.append(f"{name} AS (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?)")
-        parameters.append(f'"{term.replace(chr(34), chr(34) * 2)}"')
+        parameters.append(_quote_fts_term(term))
 
     included_sql = f" SELECT rowid FROM {include_names[0]}"
     operator = " INTERSECT " if spec.mode == "and" else " UNION "
@@ -306,7 +324,7 @@ def _fts_match_sql(spec: QuerySpec) -> tuple[str, tuple[str, ...]]:
         name = f"exclude_{index}"
         excluded_names.append(name)
         ctes.append(f"{name} AS (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?)")
-        parameters.append(f'"{term.replace(chr(34), chr(34) * 2)}"')
+        parameters.append(_quote_fts_term(term))
     if excluded_names:
         excluded_sql = " SELECT rowid FROM " + excluded_names[0]
         excluded_sql += " UNION ".join(f" SELECT rowid FROM {name}" for name in excluded_names[1:])
@@ -339,11 +357,325 @@ def _like_sql(term: str) -> tuple[str, tuple[str, ...]]:
 
 def _count_match(connection: sqlite3.Connection, term: str) -> int:
     sql = "SELECT count(*) FROM messages_fts WHERE messages_fts MATCH ?"
-    parameter = f'"{term.replace(chr(34), chr(34) * 2)}"'
+    parameter = _quote_fts_term(term)
     row = connection.execute(sql, (parameter,)).fetchone()
     if row is None:
         raise RuntimeError("SQLite did not return a MATCH count")
     return int(row[0])
+
+
+def _query_plan(
+    connection: sqlite3.Connection,
+    sql: str,
+    parameters: Sequence[object] = (),
+) -> tuple[str, ...]:
+    return tuple(
+        " | ".join(str(value) for value in row)
+        for row in connection.execute(f"EXPLAIN QUERY PLAN {sql}", parameters).fetchall()
+    )
+
+
+def _probe_short_match(connection: sqlite3.Connection) -> dict[str, object]:
+    term, _ = _find_rare_terms(connection, 2, use_like=True)
+    match_count = _count_match(connection, term)
+    like_count = _count_like(connection, term)
+    return {
+        "term": term,
+        "match_count": match_count,
+        "like_count": like_count,
+        "match_returns_zero": match_count == 0,
+        "like_finds_rows": like_count > 0,
+    }
+
+
+def _probe_syntax_escaping() -> dict[str, object]:
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.execute(
+            "CREATE VIRTUAL TABLE a4_syntax_fts USING fts5(content, tokenize='trigram')"
+        )
+        connection.execute(
+            "INSERT INTO a4_syntax_fts(content) VALUES (?)",
+            ('literal * ^ - ( ) : NEAR AND OR NOT "',),
+        )
+        cases: list[dict[str, object]] = []
+        for raw_term in A4_SYNTAX_TOKENS:
+            quoted_term = _quote_fts_term(raw_term)
+            raw_error: str | None = None
+            quoted_error: str | None = None
+            try:
+                connection.execute(
+                    "SELECT rowid FROM a4_syntax_fts WHERE a4_syntax_fts MATCH ?",
+                    (raw_term,),
+                ).fetchall()
+            except sqlite3.Error as error:
+                raw_error = str(error)
+            try:
+                connection.execute(
+                    "SELECT rowid FROM a4_syntax_fts WHERE a4_syntax_fts MATCH ?",
+                    (quoted_term,),
+                ).fetchall()
+            except sqlite3.Error as error:
+                quoted_error = str(error)
+            cases.append(
+                {
+                    "raw_term": raw_term,
+                    "quoted_term": quoted_term,
+                    "raw_error": raw_error,
+                    "quoted_error": quoted_error,
+                }
+            )
+    finally:
+        connection.close()
+
+    return {
+        "cases": cases,
+        "raw_parse_error_count": sum(case["raw_error"] is not None for case in cases),
+        "quoted_parse_error_count": sum(case["quoted_error"] is not None for case in cases),
+        "all_quoted_terms_safe": all(case["quoted_error"] is None for case in cases),
+    }
+
+
+def _measure_like_target(
+    connection: sqlite3.Connection,
+    sql: str,
+    pattern: str,
+    *,
+    warmups: int,
+    iterations: int,
+) -> dict[str, object]:
+    timing, hit_count = _time_query(
+        connection,
+        sql,
+        (pattern,),
+        warmups=warmups,
+        iterations=iterations,
+    )
+    return {
+        "hit_count": hit_count,
+        "p50_ms": timing.p50_ms,
+        "p95_ms": timing.p95_ms,
+        "query_plan": _query_plan(connection, sql, (pattern,)),
+    }
+
+
+def _probe_like_reuse(
+    connection: sqlite3.Connection,
+    *,
+    warmups: int,
+    iterations: int,
+) -> dict[str, object]:
+    short_term, _ = _find_rare_terms(connection, 2, use_like=True)
+    long_term, _ = _find_rare_terms(connection, 3, use_like=True)
+    measurements: dict[str, object] = {}
+    for label, term in (("2_characters", short_term), ("3_characters", long_term)):
+        pattern = _escape_like(term)
+        fts_sql = "SELECT rowid FROM messages_fts WHERE body_text LIKE ?"
+        content_sql = "SELECT message_id FROM message_contents WHERE body_text LIKE ?"
+        fts_measurement = _measure_like_target(
+            connection,
+            fts_sql,
+            pattern,
+            warmups=warmups,
+            iterations=iterations,
+        )
+        content_measurement = _measure_like_target(
+            connection,
+            content_sql,
+            pattern,
+            warmups=warmups,
+            iterations=iterations,
+        )
+        measurements[label] = {
+            "term": term,
+            "fts_table": fts_measurement,
+            "message_contents": content_measurement,
+            "trigram_candidate_length": len(term) >= 3,
+            "fts_like_plan_mentions_virtual_index": any(
+                "VIRTUAL TABLE INDEX" in plan
+                for plan in cast(tuple[str, ...], fts_measurement["query_plan"])
+            ),
+        }
+    return {
+        "measurements": measurements,
+        "two_character_reusable": False,
+        "decision": (
+            "Do not reuse the trigram index for two-character search: "
+            "the two-character MATCH probe returns zero rows and trigram has no "
+            "two-character token."
+        ),
+    }
+
+
+def _detail_variant_connection(
+    rows: Sequence[tuple[object, ...]],
+    detail: str,
+) -> sqlite3.Connection:
+    connection = sqlite3.connect(":memory:")
+    connection.execute(
+        """
+        CREATE TABLE a4_detail_contents(
+            message_id INTEGER PRIMARY KEY,
+            subject_norm TEXT,
+            sender_norm TEXT,
+            body_text TEXT,
+            attachment_names TEXT
+        )
+        """
+    )
+    connection.execute(
+        f"""
+        CREATE VIRTUAL TABLE a4_detail_fts USING fts5(
+            subject_norm,
+            sender_norm,
+            body_text,
+            attachment_names,
+            content='a4_detail_contents',
+            content_rowid='message_id',
+            tokenize='trigram',
+            detail='{detail}'
+        )
+        """
+    )
+    connection.executemany(
+        "INSERT INTO a4_detail_contents VALUES (?, ?, ?, ?, ?)",
+        rows,
+    )
+    connection.execute("INSERT INTO a4_detail_fts(a4_detail_fts) VALUES ('rebuild')")
+    connection.commit()
+    return connection
+
+
+def _measure_detail_variants(
+    connection: sqlite3.Connection,
+    *,
+    warmups: int,
+    iterations: int,
+) -> dict[str, object]:
+    rows = [
+        tuple(row)
+        for row in connection.execute(
+            """
+            SELECT message_id, subject_norm, sender_norm, body_text, attachment_names
+            FROM message_contents
+            ORDER BY message_id
+            """
+        ).fetchall()
+    ]
+    if not rows:
+        raise RuntimeError("Synthetic database has no message contents")
+    phrase_term = str(rows[0][1] or "")
+    if not phrase_term:
+        raise RuntimeError("Synthetic database has no subject for phrase probe")
+
+    measurements: dict[str, object] = {}
+    for detail in A4_DETAIL_MODES:
+        variant = _detail_variant_connection(rows, detail)
+        try:
+            match_sql = "SELECT rowid FROM a4_detail_fts WHERE a4_detail_fts MATCH ?"
+            match_3, match_3_hits = _time_query(
+                variant,
+                match_sql,
+                ("sen",),
+                warmups=warmups,
+                iterations=iterations,
+            )
+            match_10_timing: TimingStats | None = None
+            match_10_hits = 0
+            match_10_error: str | None = None
+            try:
+                match_10_timing, match_10_hits = _time_query(
+                    variant,
+                    match_sql,
+                    ("sender0000",),
+                    warmups=warmups,
+                    iterations=iterations,
+                )
+            except sqlite3.Error as error:
+                match_10_error = str(error)
+            phrase_query = _quote_fts_term(phrase_term)
+            phrase_error: str | None = None
+            phrase_supported = True
+            phrase_timing: TimingStats | None = None
+            phrase_hits = 0
+            try:
+                phrase_timing, phrase_hits = _time_query(
+                    variant,
+                    match_sql,
+                    (phrase_query,),
+                    warmups=warmups,
+                    iterations=iterations,
+                )
+            except sqlite3.Error as error:
+                phrase_supported = False
+                phrase_error = str(error)
+            measurements[detail] = {
+                "fts_page_bytes": _dbstat_bytes(variant, "a4_detail_fts*"),
+                "match_3": {
+                    "hit_count": match_3_hits,
+                    "p50_ms": match_3.p50_ms,
+                    "p95_ms": match_3.p95_ms,
+                },
+                "match_10": {
+                    "supported": match_10_error is None,
+                    "hit_count": match_10_hits,
+                    "p50_ms": match_10_timing.p50_ms if match_10_timing else None,
+                    "p95_ms": match_10_timing.p95_ms if match_10_timing else None,
+                    "error": match_10_error,
+                },
+                "phrase": {
+                    "query": phrase_query,
+                    "supported": phrase_supported,
+                    "error": phrase_error,
+                    "hit_count": phrase_hits,
+                    "p50_ms": phrase_timing.p50_ms if phrase_timing else None,
+                    "p95_ms": phrase_timing.p95_ms if phrase_timing else None,
+                },
+            }
+        finally:
+            variant.close()
+    return {
+        "source_rows": len(rows),
+        "phrase_probe": phrase_term,
+        "variants": measurements,
+        "phrase_requires_detail_full": all(
+            bool(measurements[detail]["phrase"]["supported"]) == (detail == "full")  # type: ignore[index]
+            for detail in A4_DETAIL_MODES
+        ),
+    }
+
+
+def check_a4_dataset(
+    count: int,
+    output_root: Path,
+    *,
+    warmups: int,
+    iterations: int,
+) -> dict[str, object]:
+    """Run the manual A-4 behavior and tokenizer probes against one dataset."""
+
+    database_path = output_root / str(count) / "messages.db"
+    if not database_path.exists():
+        raise FileNotFoundError(f"generated database does not exist: {database_path}")
+    connection = sqlite3.connect(database_path)
+    try:
+        return {
+            "count": count,
+            "short_match": _probe_short_match(connection),
+            "syntax_escaping": _probe_syntax_escaping(),
+            "like_index_reuse": _probe_like_reuse(
+                connection,
+                warmups=warmups,
+                iterations=iterations,
+            ),
+            "detail_comparison": _measure_detail_variants(
+                connection,
+                warmups=warmups,
+                iterations=iterations,
+            ),
+        }
+    finally:
+        connection.close()
 
 
 def _count_like(connection: sqlite3.Connection, term: str) -> int:
@@ -936,6 +1268,51 @@ def _print_report(results: dict[str, object]) -> None:
         )
 
 
+def _print_a4_report(results: dict[str, object]) -> None:
+    print(f"\n=== A-4 behavior checks: {results['count']} messages ===")
+    short_match = results["short_match"]
+    print(
+        f"2-character MATCH term={short_match['term']!r}: "  # type: ignore[index]
+        f"MATCH hits={short_match['match_count']}, "  # type: ignore[index]
+        f"LIKE hits={short_match['like_count']} "  # type: ignore[index]
+        f"({'PASS' if short_match['match_returns_zero'] else 'FAIL'} MATCH=0)"  # type: ignore[index]
+    )
+    escaping = results["syntax_escaping"]
+    print(
+        f"FTS escaping: raw errors={escaping['raw_parse_error_count']}, "  # type: ignore[index]
+        f"quoted errors={escaping['quoted_parse_error_count']} "  # type: ignore[index]
+        f"({'PASS' if escaping['all_quoted_terms_safe'] else 'FAIL'} quoted)"  # type: ignore[index]
+    )
+    reuse = results["like_index_reuse"]
+    print(
+        f"LIKE reuse decision: {'REUSE' if reuse['two_character_reusable'] else 'DO NOT REUSE'} "  # type: ignore[index]
+        "trigram index for 2-character terms"
+    )
+    for label, measurement in reuse["measurements"].items():  # type: ignore[union-attr]
+        print(
+            f"  {label:14} term={measurement['term']!r}, "  # type: ignore[index]
+            f"FTS p95={measurement['fts_table']['p95_ms']:.3f} ms, "  # type: ignore[index]
+            f"message_contents p95={measurement['message_contents']['p95_ms']:.3f} ms"  # type: ignore[index]
+        )
+    details = results["detail_comparison"]
+    print(
+        f"detail phrase support: "
+        f"({'PASS' if details['phrase_requires_detail_full'] else 'FAIL'} full only)"  # type: ignore[index]
+    )
+    for detail, measurement in details["variants"].items():  # type: ignore[union-attr]
+        match_10 = measurement["match_10"]  # type: ignore[index]
+        match_10_text = (
+            f"MATCH10 {match_10['p95_ms']:.3f} ms"
+            if match_10["supported"]
+            else f"MATCH10 unsupported ({match_10['error']})"
+        )
+        print(
+            f"  detail={detail:6} FTS={measurement['fts_page_bytes']} B, "  # type: ignore[index]
+            f"MATCH3 p95={measurement['match_3']['p95_ms']:.3f} ms, "  # type: ignore[index]
+            f"{match_10_text}"
+        )
+
+
 def generate_dataset(count: int, output_root: Path, seed: int) -> DatasetStats:
     """Generate one EML directory and SQLite database for ``count`` messages."""
 
@@ -1028,6 +1405,11 @@ def _parse_args() -> argparse.Namespace:
         help="measure A-3 size, query, insert, sort, and filter benchmarks",
     )
     parser.add_argument(
+        "--check-a4",
+        action="store_true",
+        help="run A-4 short MATCH, escaping, LIKE reuse, and detail probes",
+    )
+    parser.add_argument(
         "--warmups",
         type=_nonnegative_count,
         default=DEFAULT_WARMUPS,
@@ -1109,6 +1491,46 @@ def main() -> None:
             results_path.parent.mkdir(parents=True, exist_ok=True)
             results_path.write_text(
                 json.dumps(results, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            print(f"results_json={results_path}")
+        return
+
+    if args.check_a4:
+        reports: list[dict[str, object]] = []
+        for count in args.counts:
+            dataset_root = output_root / str(count)
+            if not dataset_root.exists():
+                stats = generate_dataset(count, output_root, args.seed)
+                print(
+                    f"generated {stats.count} messages | "
+                    f"EML {stats.eml_bytes / 1024 / 1024:8.1f} MiB | "
+                    f"median body {stats.median_body_bytes:>6} bytes | "
+                    f"long messages {stats.long_message_count:>4}"
+                )
+            report = check_a4_dataset(
+                count,
+                output_root,
+                warmups=args.warmups,
+                iterations=args.iterations,
+            )
+            reports.append(report)
+            _print_a4_report(report)
+        if args.results is not None:
+            results_path = args.results.resolve()
+            results_path.parent.mkdir(parents=True, exist_ok=True)
+            results_path.write_text(
+                json.dumps(
+                    {
+                        "sqlite_version": sqlite3.sqlite_version,
+                        "warmups": args.warmups,
+                        "iterations": args.iterations,
+                        "a4": reports,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
                 encoding="utf-8",
             )
             print(f"results_json={results_path}")
