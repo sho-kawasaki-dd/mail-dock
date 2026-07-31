@@ -35,15 +35,16 @@
 | D-3 | ソートとページング | **`date_sent` 降順固定 + keyset（seek）ページング**。`bm25()` による関連度順は採用しない（trigram のスコアは日本語で直感に合わないため） |
 | D-4 | スニペット・ハイライト | **Phase 2 では実装しない**。検索結果は `messages` 側の表示用原文だけを返す。必要性は Phase 3 の UI 設計時に判断する |
 | D-5 | PoC の計測データ | **合成EML 1万通**を生成して計測する。スクリプトは `tools/bench_fts.py` に置き、**通常の `pytest` では実行しない**（手動実行） |
-| D-6 | PoC が目標未達の場合 | 代替案（`unicode61` + アプリ側 2-gram 分割 等）を**同一スクリプトで比較**し、必要なら FTS 再構築マイグレーションを作る。判断は A-5 で行う |
+| D-6 | PoC が目標未達の場合 | 代替案（`unicode61` + アプリ側 2-gram 分割 等）を**同一スクリプトで比較**し、必要なら FTS 再構築マイグレーションを作る。`trigram` の `detail=column` / `detail=none` は性能比較だけを行い、3文字超の検索とフレーズ検索を満たせないため**採用不可**とする。判断は A-5 で行う |
 | D-7 | 検索なしの一覧クエリ | フォルダ内一覧・スレッド一覧・件数取得・1件詳細取得も **Phase 2 に含める**（検索と同じフィルタ／ページング基盤の上に実装する） |
 | D-8 | 検証導線 | **CLI に `search` サブコマンドを追加**する（Phase 1 と同じヘッドレス方針）。GUI は Phase 3 |
 | D-9 | 既定の状態フィルタ | 既定は **`local_state='active'` のみ**。`remote_state` は問わない（`deleted` / `moved` もヒットする）。呼び出し側がフィルタで明示的に広げられる |
 | D-10 | 既定のスコープ | **全アカウント横断**。`account_id` は任意フィルタとする（開発計画書 4.6-1 の「一覧にアカウント列を表示し、横断表示時も出所が分かるようにする」に合わせる） |
 | D-11 | 長時間クエリの中断 | LIKE スキャン経路は **`sqlite3.set_progress_handler`** で `CancelToken` を監視し、途中で中断できるようにする |
 | D-12 | スキーマ変更 | `001_init.sql` / `002_sync_cursor.sql` は変更しない。**A-5 の計測で索引が必要と判明した場合にだけ** `003_search_index.sql` を作る。不要と判明したら作らず、本書「7. Phase 3 への引き継ぎ事項」へその旨を記録する |
-| D-13 | FTS 保守 | Phase 2 は **`integrity-check` の読み取りのみ**。`rebuild` / `optimize` の運用導線と再インデックスは Phase 4 |
+| D-13 | FTS 保守 | Phase 2 は **`integrity-check` による検査のみ**。external-content との乖離も検出するため `rank=1` を指定する。このコマンドは SQL 上 `INSERT` なので、通常検査の読み取り専用接続とは別に、検査時だけ書き込み可能な専用接続を開く。原本データの変更、`rebuild` / `optimize` の運用導線、再インデックスは Phase 4 |
 | D-14 | 合成コーパス生成 | `tests/support/eml_builder.py` を再利用する（重複実装を作らない）。`tools/` から `tests/support` を import する形とし、逆方向の依存は作らない |
+| D-15 | 正規化関数の配置 | `normalize_for_search()` は外部依存のない純粋関数として **`domain/normalize.py` へ移す**。投入側と検索側はこの同一関数を参照し、usecases → infrastructure の逆依存を作らない |
 
 ### **2.2 機能要件**
 
@@ -51,7 +52,7 @@
 | :--- | :---- | :---- |
 | F-1 | Phase 2 冒頭で FTS5 + trigram の実測 PoC を行い、**インデックスサイズ倍率・検索応答時間・2文字検索の挙動**を計測してから設計を確定すること | 6章 |
 | F-2 | `domain/search.py` に読み取り専用ポート `BaseSearchRepository` と、`MessageFilter` / `PageCursor` / `MessageSummary` / `SearchPage` / `SearchPlan` が定義され、外部依存がゼロであること | 2.2 / D-1 |
-| F-3 | ユーザー入力が**全角／半角スペース**で分割され、各キーワードに `normalize_for_search()` が適用されること。**投入時と検索時で同一関数**であること | 4.5 |
+| F-3 | ユーザー入力が**全角／半角スペース**で分割され、各キーワードに `domain.normalize.normalize_for_search()` が適用されること。投入時と検索時がこの**同一関数**を参照すること | 4.5 / D-15 |
 | F-4 | 正規化後の長さが **3文字以上**のキーワードは FTS5 `MATCH` 経路、**2文字以下**は `message_contents` に対する `LIKE '%kw%' ESCAPE '\'` 経路へ**明示的に分岐**すること。`MATCH` への自動フォールバックに頼らないこと | 4.5 |
 | F-5 | フレーズは `"` で囲み、内部の `"` は `""` にエスケープして FTS5 の Parse Error を防ぐこと。LIKE 経路では `\` / `%` / `_` をエスケープすること | 4.5 |
 | F-6 | AND 検索は結果ID集合を `INTERSECT`、OR 検索は `UNION`、除外（`-kw`）は `EXCEPT` で合成し、その後に構造化フィルタで絞り込むこと | 4.5 |
@@ -62,13 +63,13 @@
 | F-11 | 既定の状態フィルタが `local_state='active'` のみであり、`remote_state` を問わないこと。`purged` の墓標レコードが既定で結果に混ざらないこと | 4.4 / D-9 |
 | F-12 | 検索なしの一覧（フォルダ内一覧）、スレッド一覧（`thread_key` 絞り込み）、件数取得、1件詳細取得が、検索と同一のフィルタ／ページング基盤の上で提供されること | 4.5 / 4.6-1 / D-7 |
 | F-13 | 2文字以下のキーワードを含む場合に `has_slow_path` が立ち、呼び出し側が「短い語を含むため時間がかかる場合があります」を提示できること | 4.5 |
-| F-14 | LIKE スキャン経路が `CancelToken` により**クエリ実行中に**中断できること。progress handler は `finally` で必ず解除されること | 5.4 / D-11 |
+| F-14 | LIKE スキャン経路が `CancelToken` により**クエリ実行中に**中断できること。progress handler は `finally` で必ず解除され、キャンセル済みの `SQLITE_INTERRUPT` は一般的なDB例外分類より先に `OperationCancelledError` へ変換されること | 5.4 / D-11 |
 | F-15 | `message_contents` の INSERT / UPDATE / DELETE に対して `messages_fts` がトリガー経由で追随すること。`local_state='purged'` 化で `message_contents` を削除すると FTS からも消えること | 3.4 / 4.4 |
 | F-16 | 検索ユースケースが `sqlite3` を import せず、`BaseSearchRepository` のみに依存すること | 2.2 / 5章 |
 | F-17 | `sqlite3.Error` が `detach.classify_sqlite_error()` 経由でドメイン例外へラップされ、上位層へ生の例外を漏らさないこと | 5.7 |
-| F-18 | 不正なクエリ（空文字・除外のみ）が `SearchQueryError` として拒否され、SQL エラーとして表面化しないこと | — |
+| F-18 | 不正なクエリ（空文字・除外のみ・未閉鎖の引用符・空フレーズ・単独 `-`・正規化後に空になる語）が `SearchQueryError` として拒否され、SQL エラーとして表面化しないこと | — |
 | F-19 | CLI `search` で Phase 1 の実データに対する検索が実行でき、結果と `next_cursor` を確認できること | D-8 |
-| F-20 | `verify` サブコマンドが FTS の `integrity-check` を実行し、`message_contents` と `messages_fts` の乖離を検出できること | 4.8 / D-13 |
+| F-20 | `verify` サブコマンドが専用の書き込み可能接続で `INSERT INTO messages_fts(messages_fts, rank) VALUES('integrity-check', 1)` を実行し、`message_contents` と `messages_fts` の乖離を検出できること。通常の `quick_check` / `foreign_key_check` は読み取り専用接続を維持すること | 4.8 / D-13 |
 
 ### **2.3 非機能要件・制約**
 
@@ -83,6 +84,7 @@
 * レイヤーの依存方向を厳守する（`domain` ← `usecases`、`infrastructure` は `domain` にのみ依存）。`domain` に `sqlite3` を import しない。
 * `BaseSearchRepository` は**読み取り専用**とする。書き込みメソッドを足さない。`BaseMessageRepository` と統合しない。
 * 検索リポジトリは**トランザクションを開かない**（読み取りのみ）。同期中の書き込みをブロックしない。
+* `verify` の FTS `integrity-check` は検索リポジトリとは別の保守処理である。StorageLock 保持中に専用の書き込み可能接続を短時間だけ開き、マイグレーションやデータ更新は行わず、検査後すぐ閉じる。
 * 検索クエリ文字列・件名をログへ出力する場合は Phase 0 の `MaskingFilter` を通す。本文テキストはログに出力しない。
 * SQL は必ずプレースホルダで組み立てる。ユーザー入力を SQL 文字列へ連結しない（キーワード数に応じた `?` の展開は可）。
 
@@ -133,14 +135,16 @@
 - [ ] 全キーワードを `"` で囲むエスケープにより、上記すべてが Parse Error にならないことを確認する
 - [ ] trigram インデックスが `messages_fts` に対する `LIKE` を高速化するか確認し、2文字経路に流用できるかを判断する
 - [ ] `detail=` オプション（`full` / `column` / `none`）がインデックスサイズと検索速度に与える影響を測る
+  - [ ] `detail=column` / `detail=none` は性能比較だけに使用し、3文字超の検索とフレーズ検索を満たせないため採用候補にしない
 
 #### **A-5. 判定と設計確定（*A-3 / A-4 完了後。以降のグループの前提*）**
 
 - [ ] N-1 / N-2 / N-3 の達成可否を判定する
 - [ ] 未達の場合は代替案を**同一スクリプトで比較**する
   - [ ] `unicode61` + アプリ側での 2-gram 分割（投入時・検索時の両方で分割する）
-  - [ ] `trigram` + `detail=none` などのオプション変更
+  - [ ] `trigram` の `detail=column` / `detail=none` は参考値として比較するが採用しない
 - [ ] 採用するトークナイザ構成を確定する
+- [ ] `trigram` を採用する場合は、3文字超の検索とフレーズ検索を維持するため `detail=full` とする
 - [ ] **`003_search_index.sql` の要否と内容を確定する**（式インデックス／フィルタ用索引／FTS 再構築）
 - [ ] 索引が不要と判明した場合は `003` を作らず、その旨を本書「7. Phase 3 への引き継ぎ事項」へ記録する（D-12）
 - [ ] 計測結果（環境・件数・実測値・外挿値）を本書「7.」へ表形式で記録する
@@ -148,6 +152,13 @@
 ---
 
 ### **3.2 グループB: domain 層（*A と並行可*）**
+
+#### **B-0. `domain/normalize.py` — 検索正規化の純粋関数**
+
+- [ ] `infrastructure/parsing/normalize.py` の `normalize_for_search()` を `domain/normalize.py` へ移す
+- [ ] 標準ライブラリ以外への依存を持たせない
+- [ ] `SqliteMessageRepository` と `usecases/search_query.py` の双方が `domain.normalize` から同じ関数を import する
+- [ ] 旧モジュールを残して正規化経路を二重化しない
 
 #### **B-1. `domain/errors.py` — 例外の追加**
 
@@ -167,8 +178,9 @@
   - [ ] `thread_key: str | None`
 - [ ] `PageCursor`（frozen dataclass）を定義する: `sort_key: str` / `message_id: int`
   - [ ] 文字列化・復元（CLI の `--after` 用）を純粋関数として持たせる
-- [ ] `MessageSummary`（frozen dataclass）を定義する: `id` / `account_id` / `folder_id` / `subject` / `sender` / `date_sent` / `internal_date` / `size_bytes` / `has_attachment` / `remote_state` / `local_state` / `thread_key`
+- [ ] `MessageSummary`（frozen dataclass）を定義する: `id` / `account_id` / `folder_id` / `folder_raw_name` / `folder_display_name` / `subject` / `sender` / `date_sent` / `internal_date` / `size_bytes` / `has_attachment` / `remote_state` / `local_state` / `thread_key`
   - [ ] Phase 3 の一覧表示に必要な列だけを持たせる（本文は含めない）
+  - [ ] `folders` を JOIN してフォルダの生名と表示名を取得し、CLI と Phase 3 が追加問い合わせなしで出所を表示できるようにする
 - [ ] `MessageDetail`（frozen dataclass）を定義する: `MessageSummary` の項目に `recipient` / `cc` / `message_id` / `in_reply_to` / `references_ids` / `relative_path` / `file_hash` / `imap_flags` を加える
 - [ ] `SearchPage`（frozen dataclass）を定義する: `items: tuple[MessageSummary, ...]` / `next_cursor: PageCursor | None` / `exhausted: bool`
 - [ ] `SearchPlan`（frozen dataclass）を定義する: `match_terms` / `like_terms` / `exclude_match_terms` / `exclude_like_terms` / `mode: Literal["and", "or"]` / `has_slow_path: bool`
@@ -198,8 +210,9 @@
 - [ ] FTS5 用エスケープ: 全トークンを `"` で囲み、内部の `"` を `""` に置換する（F-5）
 - [ ] LIKE 用エスケープ: `\` → `\\`、`%` → `\%`、`_` → `\_` の順で置換する（**`\` を最初に処理する**）
 - [ ] `like_terms` または `exclude_like_terms` が非空なら `has_slow_path=True` とする（F-13）
-- [ ] 空文字・空白のみ・除外トークンのみのクエリは `SearchQueryError` を送出する（F-18）
+- [ ] 空文字・空白のみ・除外トークンのみ・未閉鎖の引用符・空フレーズ `""`・単独 `-`・正規化後に空になる語は `SearchQueryError` を送出する（F-18）
 - [ ] 外部依存を持たず、`sqlite3` を import しない
+- [ ] `normalize_for_search()` は `domain.normalize` から import し、infrastructure を import しない
 
 #### **C-2. `usecases/search_messages.py` — 検索・一覧ユースケース**
 
@@ -225,15 +238,17 @@
 - [ ] **LIKE 経路**: `SELECT message_id FROM message_contents WHERE subject_norm LIKE ? ESCAPE '\' OR sender_norm LIKE ? ESCAPE '\' OR body_text LIKE ? ESCAPE '\' OR attachment_names LIKE ? ESCAPE '\'`
 - [ ] 両経路の結果を `mode` に従って合成し、`messages` と JOIN する
 - [ ] 構造化フィルタを `WHERE` で適用する（アカウント・フォルダ・日付範囲・添付有無・`local_state` / `remote_state`）（F-7）
+- [ ] `folders` を JOIN し、`folder_raw_name` / `folder_display_name` を `MessageSummary` に格納する
 - [ ] **ソートとページング**（F-9 / F-10）
   - [ ] ソートキーを `COALESCE(date_sent, internal_date, '')` とし、`ORDER BY sort_key DESC, id DESC` で全順序を確定させる
   - [ ] keyset の継続条件を行値比較 `(sort_key, id) < (?, ?)` で表現する
-  - [ ] `LIMIT ? + 1` を取得して `exhausted` を判定し、余剰行から `next_cursor` を組み立てる
+  - [ ] `limit + 1` 件を取得し、余剰行は次ページの存在判定にだけ使って返却対象から除外する
+  - [ ] `next_cursor` は**今回返した最後の行**の `(sort_key, id)` から組み立てる（余剰行から作ると次回の `<` 条件で1件欠落するため）
   - [ ] `date_sent` が NULL の行が脱落しないことをコメントで明記する
 - [ ] **キャンセル**（F-14 / D-11）
   - [ ] `set_progress_handler` を設定し、`CancelToken` が立っていたら中断させる
   - [ ] `finally` で必ずハンドラを解除する（他のクエリに影響を残さない）
-  - [ ] 中断時に `OperationCancelledError` を送出する
+  - [ ] `sqlite3.Error` の一般分類より先に、キャンセル済みトークンに伴う `SQLITE_INTERRUPT` を `OperationCancelledError` へ変換する
 - [ ] Phase 1 の `_db_io()` パターンで `sqlite3.Error` を `classify_sqlite_error()` 経由でドメイン例外へラップする（F-17）
 - [ ] **トランザクションを開かない**（読み取り専用。同期中の書き込みをブロックしない）ことをモジュール docstring に明記する
 - [ ] SQL をプレースホルダで組み立てる（キーワード数に応じた `?` の展開のみ許可し、値を文字列連結しない）
@@ -247,11 +262,13 @@
 - [ ] `001_init.sql` / `002_sync_cursor.sql` を変更しない（D-12）
 - [ ] 索引が不要と判明した場合は**本ファイルを作らず**、その判断を本書「7.」へ記録する
 
-#### **D-3. `infrastructure/database/fts_maintenance.py` — FTS 整合性の読み取り**
+#### **D-3. `infrastructure/database/fts_maintenance.py` — FTS 整合性検査**
 
-- [ ] `integrity_check(conn) -> None` を実装する（`INSERT INTO messages_fts(messages_fts) VALUES('integrity-check')`）
+- [ ] `integrity_check(conn) -> None` を実装する（`INSERT INTO messages_fts(messages_fts, rank) VALUES('integrity-check', 1)`）
+- [ ] external-content テーブルでは `rank=1` が `message_contents` との照合に必須であることをテストとdocstringで固定する
 - [ ] 失敗時は `DatabaseError` へラップする
 - [ ] `rebuild` / `optimize` の**運用導線は Phase 4** である旨をモジュール docstring に明記する（D-13）
+- [ ] 検査コマンドは SQL 上 `INSERT` だが、原本データを変更する保守処理ではないことを明記する
 
 ---
 
@@ -267,6 +284,7 @@
   - [ ] `--limit N`（既定 50）/ `--after CURSOR`（前回出力の `next_cursor` を渡して継続）
   - [ ] `--json`（機械可読出力）
 - [ ] 結果を「日付 / アカウント / フォルダ / 差出人 / 件名 / サイズ」で整形表示し、末尾に `next_cursor` を出す
+  - [ ] フォルダ欄には `folder_display_name` を表示し、`--json` には `folder_raw_name` / `folder_display_name` の両方を含める
 - [ ] `has_slow_path` が立っている場合に「短い語を含むため時間がかかる場合があります」を表示する（F-13）
 - [ ] `SIGINT` ハンドラで `CancelToken` をセットする（2回目の Ctrl+C で即時終了。Phase 1 と同じ）
 - [ ] `SqliteSearchRepository` をコンポジションルートで注入する（Phase 1 の `_run_application_command` と同じ形）
@@ -276,7 +294,10 @@
 #### **E-2. `verify` の拡張**
 
 - [ ] 既存の `PRAGMA quick_check` / `foreign_key_check` に加えて FTS の `integrity-check` を実行する（F-20）
-- [ ] 読み取り専用接続で実行できることを確認する
+- [ ] `quick_check` / `foreign_key_check` は従来どおり読み取り専用接続で実行する
+- [ ] 通常検査の接続を閉じた後、StorageLock を保持したまま FTS 検査専用の書き込み可能接続を開く
+- [ ] 専用接続ではマイグレーションを実行せず、`integrity_check()` だけを実行して直ちに閉じる
+- [ ] FTS検査専用接続の開始・終了と、例外発生時にも接続が閉じられることをテストする
 
 ---
 
@@ -293,7 +314,7 @@
   - [ ] 除外 `-kw` / `-"..."` が exclude 側へ振り分けられること
   - [ ] LIKE エスケープの順序（`\` を最初に処理すること）
   - [ ] FTS5 の特殊文字（`*` `^` `:` `NEAR` `AND` `OR` `NOT`）が Parse Error にならないこと
-  - [ ] 空クエリ・空白のみ・除外のみで `SearchQueryError` になること
+  - [ ] 空クエリ・空白のみ・除外のみ・未閉鎖の引用符・空フレーズ・単独 `-`・正規化後に空になる語で `SearchQueryError` になること
   - [ ] `has_slow_path` の立ち方
 - [ ] `test_search_repository.py`（実SQLite・小規模データ）
   - [ ] MATCH 経路のヒット、LIKE 経路のヒット、両経路混在
@@ -302,14 +323,18 @@
   - [ ] **既定で `local_state='purged'` / `'trashed'` がヒットしないこと**、`remote_state='deleted'` / `'moved'` はヒットすること（F-11）
   - [ ] 全アカウント横断が既定であること（D-10）
   - [ ] **keyset ページング**: 同一 `date_sent` が複数ある場合の tie-break、`date_sent` NULL 混在、全ページ連結が一括取得と完全一致すること
+  - [ ] `limit + 1` 件取得時に `next_cursor` が返却した最後の行を指し、余剰行が次ページの先頭として欠落しないこと
+  - [ ] `folder_raw_name` / `folder_display_name` が正しいフォルダから取得されること
   - [ ] `list_messages` / `list_thread` / `count_messages` / `get_message`
   - [ ] `CancelToken` によるクエリ実行中の中断と、progress handler が解除されること
+  - [ ] キャンセル済みの `SQLITE_INTERRUPT` が `DatabaseError` ではなく `OperationCancelledError` になること
   - [ ] SQL インジェクション耐性（`'; DROP TABLE messages; --` 等をクエリに渡しても実害がないこと）
 - [ ] `test_search_messages.py`（Fake ポートのみ）: usecase が `BaseSearchRepository` だけで動作し、既定フィルタが適用されること
 - [ ] `test_fts_triggers.py`（既存を拡張）: `message_contents` の UPDATE / DELETE に FTS が追随すること、`purged` 化で FTS から消えること（F-15）
 - [ ] `test_003_search_index.py`（`003` を作る場合のみ）: v2 の実データを保持して適用され、`integrity-check` が通ること
-- [ ] `test_ports.py`（既存を拡張）: `usecases/` 配下に `sqlite3` の import が無いことを静的に確認する（F-16）
-- [ ] `test_fts_maintenance.py`: 正常DBで `integrity-check` が通り、意図的に壊したFTSで `DatabaseError` になること
+- [ ] `test_ports.py`（既存を拡張）: `usecases/` 配下に `sqlite3` と infrastructure の import が無いこと、投入側と検索側が `domain.normalize` を参照することを静的に確認する（F-3 / F-16）
+- [ ] `test_fts_maintenance.py`: 正常DBで `rank=1` の `integrity-check` が通り、external-content と意図的に乖離させたFTSで `DatabaseError` になること
+- [ ] `test_main.py`（既存CLIテストを拡張）: 通常検査は読み取り専用接続、FTS検査は専用の書き込み可能接続で実行され、成功時・失敗時とも両接続が閉じられること
 
 #### **F-2. 結合テスト（`docker` マーカー / WSL）**
 
@@ -341,6 +366,7 @@
 | パス | 内容 | タスク |
 | :---- | :---- | :---- |
 | `tools/bench_fts.py` | 合成コーパス生成とFTS性能計測（手動実行） | A-1 / A-3 |
+| `src/mail_dock/domain/normalize.py` | 投入・検索で共有する検索正規化の純粋関数 | B-0 |
 | `src/mail_dock/domain/errors.py` | `SearchQueryError` の追加 | B-1 |
 | `src/mail_dock/domain/search.py` | 検索モデルと `BaseSearchRepository`（読み取り専用ポート） | B-2 |
 | `src/mail_dock/usecases/search_query.py` | クエリ文字列パーサ（正規化・経路振り分け・エスケープ） | C-1 |
@@ -384,15 +410,15 @@
 - [ ] V-2. `uv run pytest -m "not docker"` が全緑になり、`domain` + `usecases` のカバレッジが 80% 以上である
 - [ ] V-3. PoC の計測結果が本書「7.」へ記録され、N-1（300ms）/ N-2（3秒）/ N-3（3〜5倍）の達成可否と、未達の場合の対応が明記されている
 - [ ] V-4. 2文字キーワードが `MATCH` 経路では0件になり、`LIKE` 経路では正しく発見できる。`has_slow_path` が立つ
-- [ ] V-5. keyset ページング検証: 全ページを連結した結果が一括取得と**完全に一致**し、重複・欠損がゼロである。同一 `date_sent` が複数ある場合と `date_sent` が NULL の行が混在する場合の双方で成立する
-- [ ] V-6. 正規化一貫性: 投入時と検索時が同一関数を経由していることがテストで固定され、片方だけを変更すると失敗する
+- [ ] V-5. keyset ページング検証: `next_cursor` は返却した最後の行から生成され、全ページを連結した結果が一括取得と**完全に一致**し、重複・欠損がゼロである。同一 `date_sent` が複数ある場合と `date_sent` が NULL の行が混在する場合の双方で成立する
+- [ ] V-6. 正規化一貫性: `normalize_for_search()` が `domain/normalize.py` に置かれ、投入時と検索時が同一関数を参照することがテストで固定され、片方だけを変更すると失敗する
 - [ ] V-7. 状態フィルタ: 既定で `local_state='purged'` / `'trashed'` がヒットせず、`remote_state='deleted'` / `'moved'` はヒットする
 - [ ] V-8. 層の隔離: `usecases/` 配下に `sqlite3` の import が無いことを静的に確認する。`domain/search.py` の外部依存がゼロである
-- [ ] V-9. キャンセル: LIKE スキャン中に `CancelToken` を立てると**クエリ実行中に**中断し、`OperationCancelledError` になる。progress handler が解除されている
-- [ ] V-10. エスケープ: `"` / `*` / `^` / `-` / `NEAR` / `%` / `_` / `\` を含むクエリで Parse Error も SQL エラーも発生しない
+- [ ] V-9. キャンセル: LIKE スキャン中に `CancelToken` を立てると**クエリ実行中に**中断し、`SQLITE_INTERRUPT` が一般的なDB例外分類より先に `OperationCancelledError` へ変換される。progress handler が解除されている
+- [ ] V-10. エスケープと不正入力: `"` / `*` / `^` / `-` / `NEAR` / `%` / `_` / `\` を含む正当なクエリで Parse Error も SQL エラーも発生せず、未閉鎖の引用符・空フレーズ・単独 `-`・正規化後に空になる語は `SearchQueryError` になる
 - [ ] V-11. 日本語検索: ひらがなとカタカナが同一視されず、全角英数と半角英数が同一視され、大文字小文字が区別されない
 - [ ] V-12. マイグレーション（`003` を作る場合）: v2 の実データを保持して適用され、適用後に `integrity-check` が通る
-- [ ] V-13. FTS 追随: `message_contents` の UPDATE / DELETE で `messages_fts` が追随し、`verify` の `integrity-check` が乖離を検出できる
+- [ ] V-13. FTS 追随・検証: `message_contents` の UPDATE / DELETE で `messages_fts` が追随し、`verify` が専用の書き込み可能接続で `rank=1` の `integrity-check` を実行してexternal-contentとの乖離を検出できる。通常検査は読み取り専用接続を維持し、両接続は確実に閉じられる
 - [ ] V-14. CLI: `mail-dock search` が Phase 1 で同期した実データに対して期待どおりヒットし、`--after` による継続取得が機能する
 - [ ] V-15. CI: プルリクエストで `lint` / `test-windows` / `test-linux` の3ジョブがすべて成功し、ベンチマークが実行されていない
 
@@ -407,10 +433,11 @@
 * `003_search_index.sql` の要否と、作らなかった場合はその判断根拠: **A-5 完了後に記録する**
 * `normalize_for_search()` は Phase 3 の検索ボックスでも**必ず `parse_query()` 経由**で適用すること。UI 側で別の正規化を挟まない。
 * `SearchPage.next_cursor` は Phase 3 の `canFetchMore` / `fetchMore` にそのまま使える形にしてある。`limit=200` を既定とし、UI 側でオフセット計算をしない。
+* `next_cursor` は返却済みの最後の行を指す。Phase 3 はカーソルを加工せず、そのまま次の `fetchMore` に渡すこと。
 * `has_slow_path` が立っている場合、Phase 3 の UI は「短い語を含むため時間がかかる場合があります」を表示し、キャンセルボタンを有効にすること（開発計画書 4.5-3 / 5.4）。
 * 検索とスレッド一覧は同じ `MessageFilter` を共有する。Phase 3 の「この会話のN件を表示」は `list_thread()` を呼ぶだけでよい。
 * 一覧は**フラット表示が既定**。`thread_key` によるグルーピング表示は将来拡張であり、Phase 3 では実装しない。
 * スニペット・ハイライトは Phase 2 で未実装（D-4）。必要と判断した場合、MATCH 経路は FTS5 の `snippet()` が使えるが LIKE 経路では自前実装が必要であり、かつ**正規化済みテキストからの抽出になるため表示原文と一致しない**点に注意すること。
 * `BaseSearchRepository` は読み取り専用。Phase 3 の ViewModel から書き込みを行う必要が生じた場合も、このポートに書き込みメソッドを足さず `BaseMessageRepository` 側で扱うこと。
-* FTS の `rebuild` / `optimize` は Phase 4 の再インデックス機能で扱う。Phase 2 が提供するのは `integrity_check()` の読み取りのみ。
+* FTS の `rebuild` / `optimize` は Phase 4 の再インデックス機能で扱う。Phase 2 が提供するのは `rank=1` の `integrity_check()` による検査のみ。この検査は SQL 上 `INSERT` のため専用の書き込み可能接続を使うが、原本データは変更しない。
 * PST アーカイブ（Phase 4.5）は検索基盤を共有するが、`messages.uid IS NULL` で区別される。検索フィルタに「由来」の軸が必要になった場合は `MessageFilter` へ追加する。
