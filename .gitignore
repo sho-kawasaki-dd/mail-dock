@@ -36,6 +36,7 @@ test-storage/
 *.db-wal
 *.db-shm
 *.db.bak*
+/tools/.bench_fts/
 
 # Bundled readpst binaries (Phase 4.5)
 vendor/readpst/
