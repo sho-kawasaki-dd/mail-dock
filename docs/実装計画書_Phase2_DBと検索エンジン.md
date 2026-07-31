@@ -200,19 +200,19 @@
 
 #### **C-1. `usecases/search_query.py` — クエリ文字列パーサ（*純粋関数*）**
 
-- [ ] `parse_query(text: str, *, mode: Literal["and", "or"] = "and") -> SearchPlan` を実装する
-- [ ] **全角スペース（U+3000）と半角スペース**の両方で分割する
-- [ ] `"..."` で囲まれた部分を1つのフレーズトークンとして扱う（内部のスペースで分割しない）
-- [ ] 先頭 `-` のトークンを除外条件として扱う（`-"..."` にも対応）
-- [ ] 各トークンに `normalize_for_search()` を適用する（**F-3。投入時と同一関数を必ず使う**）
-- [ ] 正規化後の長さで経路を振り分ける: **3文字以上 → `match_terms`**、**2文字以下 → `like_terms`**
-- [ ] 長さ判定は `len(str)` で行う（trigram の単位に合わせる）ことをコメントで残す
-- [ ] FTS5 用エスケープ: 全トークンを `"` で囲み、内部の `"` を `""` に置換する（F-5）
-- [ ] LIKE 用エスケープ: `\` → `\\`、`%` → `\%`、`_` → `\_` の順で置換する（**`\` を最初に処理する**）
-- [ ] `like_terms` または `exclude_like_terms` が非空なら `has_slow_path=True` とする（F-13）
-- [ ] 空文字・空白のみ・除外トークンのみ・未閉鎖の引用符・空フレーズ `""`・単独 `-`・正規化後に空になる語は `SearchQueryError` を送出する（F-18）
-- [ ] 外部依存を持たず、`sqlite3` を import しない
-- [ ] `normalize_for_search()` は `domain.normalize` から import し、infrastructure を import しない
+- [x] `parse_query(text: str, *, mode: Literal["and", "or"] = "and") -> SearchPlan` を実装する
+- [x] **全角スペース（U+3000）と半角スペース**の両方で分割する
+- [x] `"..."` で囲まれた部分を1つのフレーズトークンとして扱う（内部のスペースで分割しない）
+- [x] 先頭 `-` のトークンを除外条件として扱う（`-"..."` にも対応）
+- [x] 各トークンに `normalize_for_search()` を適用する（**F-3。投入側と同一関数を必ず使う**）
+- [x] 正規化後の長さで経路を振り分ける: **3文字以上 → `match_terms`**、**2文字以下 → `like_terms`**
+- [x] 長さ判定は `len(str)` で行う（trigram の単位に合わせる）ことをコメントで残す
+- [x] FTS5 用エスケープ: 全トークンを `"` で囲み、内部の `"` を `""` に置換する（F-5）
+- [x] LIKE 用エスケープ: `\` → `\\`、`%` → `\%`、`_` → `\_` の順で置換する（**`\` を最初に処理する**）
+- [x] `like_terms` または `exclude_like_terms` が非空なら `has_slow_path=True` とする（F-13）
+- [x] 空文字・空白のみ・除外トークンのみ・未閉鎖の引用符・空フレーズ `""`・単独 `-`・正規化後に空になる語は `SearchQueryError` を送出する（F-18）
+- [x] 外部依存を持たず、`sqlite3` を import しない
+- [x] `normalize_for_search()` は `domain.normalize` から import し、infrastructure を import しない
 
 #### **C-2. `usecases/search_messages.py` — 検索・一覧ユースケース**
 
