@@ -271,11 +271,11 @@
 
 #### **D-3. `infrastructure/database/fts_maintenance.py` — FTS 整合性検査**
 
-- [ ] `integrity_check(conn) -> None` を実装する（`INSERT INTO messages_fts(messages_fts, rank) VALUES('integrity-check', 1)`）
-- [ ] external-content テーブルでは `rank=1` が `message_contents` との照合に必須であることをテストとdocstringで固定する
-- [ ] 失敗時は `DatabaseError` へラップする
-- [ ] `rebuild` / `optimize` の**運用導線は Phase 4** である旨をモジュール docstring に明記する（D-13）
-- [ ] 検査コマンドは SQL 上 `INSERT` だが、原本データを変更する保守処理ではないことを明記する
+- [x] `integrity_check(conn) -> None` を実装する（`INSERT INTO messages_fts(messages_fts, rank) VALUES('integrity-check', 1)`）
+- [x] external-content テーブルでは `rank=1` が `message_contents` との照合に必須であることをテストとdocstringで固定する
+- [x] 失敗時は `DatabaseError` へラップする
+- [x] `rebuild` / `optimize` の**運用導線は Phase 4** である旨をモジュール docstring に明記する（D-13）
+- [x] 検査コマンドは SQL 上 `INSERT` だが、原本データを変更する保守処理ではないことを明記する
 
 ---
 
@@ -340,7 +340,7 @@
 - [ ] `test_fts_triggers.py`（既存を拡張）: `message_contents` の UPDATE / DELETE に FTS が追随すること、`purged` 化で FTS から消えること（F-15）
 - [ ] `test_003_search_index.py`（`003` を作る場合のみ）: v2 の実データを保持して適用され、`integrity-check` が通ること
 - [ ] `test_ports.py`（既存を拡張）: `usecases/` 配下に `sqlite3` と infrastructure の import が無いこと、投入側と検索側が `domain.normalize` を参照することを静的に確認する（F-3 / F-16）
-- [ ] `test_fts_maintenance.py`: 正常DBで `rank=1` の `integrity-check` が通り、external-content と意図的に乖離させたFTSで `DatabaseError` になること
+- [x] `test_fts_maintenance.py`: 正常DBで `rank=1` の `integrity-check` が通り、external-content と意図的に乖離させたFTSで `DatabaseError` になること
 - [ ] `test_main.py`（既存CLIテストを拡張）: 通常検査は読み取り専用接続、FTS検査は専用の書き込み可能接続で実行され、成功時・失敗時とも両接続が閉じられること
 
 #### **F-2. 結合テスト（`docker` マーカー / WSL）**
