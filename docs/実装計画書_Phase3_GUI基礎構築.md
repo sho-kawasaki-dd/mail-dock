@@ -170,12 +170,12 @@
 
 #### **A-7. `presentation/threads/sync_worker.py` — 書き込みワーカー**
 
-- [ ] `sync_account()` と `refresh_folders()` を実行する（書き込みはこの1本に集約。D-5）
-- [ ] `on_progress` の `SyncProgress` を **100ms間引き**して Signal へ中継する（毎通 Signal を出さない）
-- [ ] `CancelToken` によるキャンセルを受け付け、`SyncResult.cancelled` を UI へ返す
-- [ ] 同期トークンはUI側コントローラが所有し、実行中Slotのイベントループ復帰を待たずにキャンセルできること
-- [ ] `StorageDetachedError` を専用 Signal で通知する（F-24）
-- [ ] `AuthenticationError` / `FetchError` を対応表経由の文言で通知する
+- [x] `sync_account()` と `refresh_folders()` を実行する（書き込みはこの1本に集約。D-5）
+- [x] `on_progress` の `SyncProgress` を **100ms間引き**して Signal へ中継する（毎通 Signal を出さない）
+- [x] `CancelToken` によるキャンセルを受け付け、`SyncResult.cancelled` を UI へ返す
+- [x] 同期トークンはUI側コントローラが所有し、実行中Slotのイベントループ復帰を待たずにキャンセルできること
+- [x] `StorageDetachedError` を専用 Signal で通知する（F-24）
+- [x] `AuthenticationError` / `FetchError` を対応表経由の文言で通知する
 
 #### **A-8. `presentation/errors.py` — 例外→UI文言の対応表**
 
