@@ -458,38 +458,38 @@
 
 #### **G-1. 単体テスト（Qt不要・CIで実行）**
 
-- [ ] `tests/unit/test_html_sanitizer.py`
-  - [ ] CSP `<meta>` が `<head>` へ挿入されること、既存の CSP `<meta>` が除去されること
-  - [ ] `allow_remote_images` で `img-src` が切り替わること
-  - [ ] `<meta http-equiv="refresh">` が除去されること
-  - [ ] `<script>` / `<iframe>` / `<object>` / `<embed>` / `<form>` / `<link>` / `<base>` が除去されること
-  - [ ] `on*` 属性と `javascript:` / `data:` の `href` / `src` が除去されること
-  - [ ] `<head>` の無い断片・空文字・不正なHTMLでも例外にならないこと
-- [ ] `tests/unit/test_eml_render.py`
-  - [ ] `text/html` と `text/plain` の両方を持つメールで両方が取得できること
-  - [ ] `Content-ID` の山括弧が除去されること
-  - [ ] インライン画像と通常添付が区別されること（`eml_parser` と同じ規則）
-  - [ ] ISO-2022-JP / CP932 のHTML本文が正しくデコードされること
-- [ ] `tests/unit/test_open_message.py`（Fake ポートのみ）
-  - [ ] `purged` と `relative_path` 欠如で拒否され、EML を読まないこと
-  - [ ] `file_hash` 不一致で拒否されること
-  - [ ] `read_verified()` が返したバイト列だけがFake `BaseMessageRenderer` へ渡ること
-- [ ] `tests/unit/test_eml_storage.py`（既存を拡張）: `read_verified()` が完全ハッシュ一致時だけバイト列を返し、不一致・読み出し中の差し替えを拒否すること
-- [ ] `tests/unit/test_save_attachment.py`
-  - [ ] パストラバーサル名・NTFS禁止文字・予約名・末尾ドットがサニタイズされること
-  - [ ] 実行可能拡張子で `is_executable` が真になること
-  - [ ] `resolve_within` により宛先ディレクトリ外へ書けないこと
-  - [ ] 同名ファイルの連番付与
-  - [ ] prepare時点ではファイルが作成されず、警告確認後のcommitでだけ保存されること
-  - [ ] prepare後に宛先・EML・同名ファイルの状態が変化してもcommitが再検証し、未確認の上書きやディレクトリ外保存を行わないこと
-  - [ ] 一時ファイルが最終保存先と同じ親ディレクトリに作られ、失敗時に残らないこと
-- [ ] `tests/unit/test_export_message.py`: ハッシュ不一致で拒否、正常時に原本と同一バイト列
-- [ ] `tests/unit/test_url_policy.py`: `https` / `http` のみ許可し、不許可スキーム・制御文字・ユーザー情報・4096文字超を拒否すること
-- [ ] `tests/unit/test_request_generation.py`: チャネル別世代管理で同一チャネルの旧要求だけが無効化され、一覧・本文・件数要求が相互キャンセルされないこと
-- [ ] `tests/unit/test_search_repository.py`（既存を拡張）: 一覧1回のSQLでフラグ・移動先・現在UID世代のfailureを取得し、旧世代failureを混入させないこと
-- [ ] `tests/unit/test_presentation_errors.py`: 例外階層の全クラスが対応表に存在し、未知例外がフォールバックすること
-- [ ] `tests/unit/test_ports.py`（既存を拡張）: `presentation/views` / `viewmodels` / `models` に `sqlite3` と `mail_dock.infrastructure` の import が無いことを静的に確認する（F-26）
-- [ ] `tests/unit/test_main.py`（既存を拡張）: `gui` サブコマンドとサブコマンド無しが GUI 起動を呼ぶこと（`run_gui` をモックし、PySide6 を import せずに検証する）。既存サブコマンドの挙動が変わらないこと
+- [x] `tests/unit/test_html_sanitizer.py`
+  - [x] CSP `<meta>` が `<head>` へ挿入されること、既存の CSP `<meta>` が除去されること
+  - [x] `allow_remote_images` で `img-src` が切り替わること
+  - [x] `<meta http-equiv="refresh">` が除去されること
+  - [x] `<script>` / `<iframe>` / `<object>` / `<embed>` / `<form>` / `<link>` / `<base>` が除去されること
+  - [x] `on*` 属性と `javascript:` / `data:` の `href` / `src` が除去されること
+  - [x] `<head>` の無い断片・空文字・不正なHTMLでも例外にならないこと
+- [x] `tests/unit/test_eml_render.py`
+  - [x] `text/html` と `text/plain` の両方を持つメールで両方が取得できること
+  - [x] `Content-ID` の山括弧が除去されること
+  - [x] インライン画像と通常添付が区別されること（`eml_parser` と同じ規則）
+  - [x] ISO-2022-JP / CP932 のHTML本文が正しくデコードされること
+- [x] `tests/unit/test_open_message.py`（Fake ポートのみ）
+  - [x] `purged` と `relative_path` 欠如で拒否され、EML を読まないこと
+  - [x] `file_hash` 不一致で拒否されること
+  - [x] `read_verified()` が返したバイト列だけがFake `BaseMessageRenderer` へ渡ること
+- [x] `tests/unit/test_eml_storage.py`（既存を拡張）: `read_verified()` が完全ハッシュ一致時だけバイト列を返し、不一致・読み出し中の差し替えを拒否すること
+- [x] `tests/unit/test_save_attachment.py`
+  - [x] パストラバーサル名・NTFS禁止文字・予約名・末尾ドットがサニタイズされること
+  - [x] 実行可能拡張子で `is_executable` が真になること
+  - [x] `resolve_within` により宛先ディレクトリ外へ書けないこと
+  - [x] 同名ファイルの連番付与
+  - [x] prepare時点ではファイルが作成されず、警告確認後のcommitでだけ保存されること
+  - [x] prepare後に宛先・EML・同名ファイルの状態が変化してもcommitが再検証し、未確認の上書きやディレクトリ外保存を行わないこと
+  - [x] 一時ファイルが最終保存先と同じ親ディレクトリに作られ、失敗時に残らないこと
+- [x] `tests/unit/test_export_message.py`: ハッシュ不一致で拒否、正常時に原本と同一バイト列
+- [x] `tests/unit/test_url_policy.py`: `https` / `http` のみ許可し、不許可スキーム・制御文字・ユーザー情報・4096文字超を拒否すること
+- [x] `tests/unit/test_request_generation.py`: チャネル別世代管理で同一チャネルの旧要求だけが無効化され、一覧・本文・件数要求が相互キャンセルされないこと
+- [x] `tests/unit/test_search_repository.py`（既存を拡張）: 一覧1回のSQLでフラグ・移動先・現在UID世代のfailureを取得し、旧世代failureを混入させないこと
+- [x] `tests/unit/test_presentation_errors.py`: 例外階層の全クラスが対応表に存在し、未知例外がフォールバックすること
+- [x] `tests/unit/test_ports.py`（既存を拡張）: `presentation/views` / `viewmodels` / `models` に `sqlite3` と `mail_dock.infrastructure` の import が無いことを静的に確認する（F-26）
+- [x] `tests/unit/test_main.py`（既存を拡張）: `gui` サブコマンドとサブコマンド無しが GUI 起動を呼ぶこと（`run_gui` をモックし、PySide6 を import せずに検証する）。既存サブコマンドの挙動が変わらないこと
 
 #### **G-2. GUIテスト（`gui` マーカー／ローカル手動）**
 

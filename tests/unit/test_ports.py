@@ -78,3 +78,20 @@ def test_usecases_do_not_import_provider_database_or_filesystem_apis() -> None:
             if isinstance(node, ast.ImportFrom) and node.module is not None
         )
         assert imports.isdisjoint(forbidden), source_path
+
+
+def test_presentation_views_viewmodels_and_models_do_not_import_infrastructure() -> None:
+    presentation_root = Path(__file__).parents[2] / "src" / "mail_dock" / "presentation"
+    forbidden = {"sqlite3", "infrastructure"}
+
+    for package_name in ("views", "viewmodels", "models"):
+        package_dir = presentation_root / package_name
+        for source_path in package_dir.rglob("*.py"):
+            tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+            imports: set[str] = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imports.update(alias.name.split(".")[0] for alias in node.names)
+                elif isinstance(node, ast.ImportFrom) and node.module is not None:
+                    imports.add(node.module.split(".")[0])
+            assert imports.isdisjoint(forbidden), source_path

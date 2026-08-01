@@ -202,9 +202,19 @@ class EmlStorage(BaseEmlStorage):
             digest = hashlib.sha256()
             payload = bytearray()
             with path.open("rb") as file:
+                opened_stat = os.fstat(file.fileno())
                 for chunk in iter(lambda: file.read(1024 * 1024), b""):
                     digest.update(chunk)
                     payload.extend(chunk)
+            try:
+                current_stat = path.stat()
+            except OSError as error:
+                raise StorageError("EML file changed while reading") from error
+            if (opened_stat.st_dev, opened_stat.st_ino) != (
+                current_stat.st_dev,
+                current_stat.st_ino,
+            ):
+                raise StorageError("EML file changed while reading")
 
         actual_hash = digest.hexdigest()
         if actual_hash != expected_hash.casefold():

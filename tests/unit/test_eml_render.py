@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from mail_dock.domain.messages import RenderedMessage
 from mail_dock.infrastructure.parsing.eml_render import (
     EmlMessageRenderer,
@@ -41,6 +43,20 @@ def test_renderer_decodes_declared_japanese_charset() -> None:
     rendered = _render_fixture("02_cp932_machine_chars.eml")
 
     assert "機種依存文字" in rendered.text_body
+
+
+@pytest.mark.parametrize("charset", ["iso-2022-jp", "cp932"])
+def test_renderer_decodes_html_in_declared_japanese_charsets(charset: str) -> None:
+    body = "<p>日本語の本文</p>"
+    raw = (
+        f"Content-Type: text/html; charset={charset}\r\n"
+        "Content-Transfer-Encoding: 8bit\r\n"
+        "\r\n"
+    ).encode("ascii") + body.encode(charset)
+
+    rendered = extract_render_parts(raw)
+
+    assert rendered.html_body == body
 
 
 def test_renderer_class_implements_renderer_port() -> None:

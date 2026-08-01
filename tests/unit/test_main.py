@@ -138,6 +138,33 @@ def test_main_routes_gui_and_no_command_without_starting_storage_session(
     assert calls == [None, Path("/tmp/mail-dock-test")]
 
 
+def test_main_keeps_existing_cli_commands_on_the_cli_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = config.AppConfig()
+    calls: list[tuple[str | None, object]] = []
+
+    monkeypatch.setattr(config, "load", lambda: settings)
+    monkeypatch.setattr(main, "setup_logging", lambda *args, **kwargs: None)
+
+    def fake_run_command(
+        received_settings: config.AppConfig,
+        requested_root: Path | None,
+        command: str | None,
+        args: object,
+    ) -> int:
+        assert received_settings is settings
+        calls.append((command, args))
+        return 17
+
+    monkeypatch.setattr(main, "_run_command", fake_run_command)
+
+    assert main.main(["migrate"]) == 17
+    assert main.main(["verify", "--storage-root", "/tmp/mail-dock-test"]) == 17
+
+    assert [command for command, _ in calls] == ["migrate", "verify"]
+
+
 def test_storage_session_migrates_saves_settings_and_releases_lock(
     tmp_storage_root: Path,
     monkeypatch: pytest.MonkeyPatch,

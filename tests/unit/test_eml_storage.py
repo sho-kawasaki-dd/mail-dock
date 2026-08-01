@@ -1,6 +1,8 @@
 import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
+from types import TracebackType
+from typing import Any, BinaryIO, cast
 
 import pytest
 
@@ -119,6 +121,59 @@ def test_read_verified_returns_bytes_only_for_a_matching_complete_hash(
 
     with pytest.raises(StorageError, match="hash"):
         storage.read_verified(stored.relative_path, "0" * 64)
+
+
+def test_read_verified_rejects_path_replacement_during_read(
+    tmp_storage_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = EmlStorage(tmp_storage_root)
+    raw = b"original EML content"
+    stored = storage.save("account", None, raw)
+    target = tmp_storage_root / stored.relative_path
+    original_open = cast(Any, Path.open)
+
+    class ReplacingReader:
+        def __init__(self, file: BinaryIO) -> None:
+            self._file = file
+            self._replaced = False
+
+        def __enter__(self) -> object:
+            self._file.__enter__()
+            return self
+
+        def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_value: BaseException | None,
+            traceback: TracebackType | None,
+        ) -> None:
+            self._file.__exit__(exc_type, exc_value, traceback)
+
+        def fileno(self) -> int:
+            return self._file.fileno()
+
+        def read(self, size: int = -1) -> bytes:
+            payload = self._file.read(size)
+            if not self._replaced:
+                replacement = target.with_suffix(".replacement")
+                replacement.write_bytes(b"replacement EML content")
+                replacement.replace(target)
+                self._replaced = True
+            return payload
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._file, name)
+
+    def open_with_replacement(
+        path: Path, *args: Any, **kwargs: Any
+    ) -> BinaryIO | ReplacingReader:
+        file = original_open(path, *args, **kwargs)
+        return ReplacingReader(file) if path == target else file
+
+    monkeypatch.setattr(Path, "open", open_with_replacement)
+
+    with pytest.raises(StorageError, match="changed"):
+        storage.read_verified(stored.relative_path, stored.file_hash)
 
 
 def test_detached_storage_error_is_classified(
