@@ -292,13 +292,13 @@
 
 #### **C-4. `usecases/open_message.py` — 閲覧ユースケース**
 
-- [ ] `OpenedMessage`（frozen dataclass）を定義する: `detail: MessageDetail` / `rendered: RenderedMessage`
-- [ ] `open_message(search_repo, storage, renderer, *, message_id) -> OpenedMessage` を実装する
-- [ ] `local_state='purged'` または `relative_path` が無い場合は明示的なドメイン例外で拒否し、EML の読み取りを試みない（F-21）
-- [ ] `file_hash` を検証し、不一致は `StorageError` 系で拒否する
-- [ ] `BaseEmlStorage.read_verified()` が返したEMLバイト列だけを `BaseMessageRenderer.render()` へ渡す
-- [ ] Phase 1 と同じ呼び出し規約（ポートを位置引数、以降 keyword-only）
-- [ ] `sqlite3` / PySide6 / infrastructure の具象を import しない
+- [x] `OpenedMessage`（frozen dataclass）を定義する: `detail: MessageDetail` / `rendered: RenderedMessage`
+- [x] `open_message(search_repo, storage, renderer, *, message_id) -> OpenedMessage` を実装する
+- [x] `local_state='purged'` または `relative_path` が無い場合は明示的なドメイン例外で拒否し、EML の読み取りを試みない（F-21）
+- [x] `file_hash` を検証し、不一致は `StorageError` 系で拒否する
+- [x] `BaseEmlStorage.read_verified()` が返したEMLバイト列だけを `BaseMessageRenderer.render()` へ渡す
+- [x] Phase 1 と同じ呼び出し規約（ポートを位置引数、以降 keyword-only）
+- [x] `sqlite3` / PySide6 / infrastructure の具象を import しない
 
 #### **C-5. `presentation/web/profile.py` — 層1・層2**
 
