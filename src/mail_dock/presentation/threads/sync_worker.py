@@ -1,15 +1,11 @@
-"""Asynchronous synchronization worker for the GUI.
-
-The worker creates repositories, fetchers, storage adapters, and manifest
-writers inside its dedicated thread.  The GUI owns the ``CancelToken``
-returned by each request and can therefore cancel a blocking fetch directly.
-"""
+"""Asynchronous synchronization and file-save worker for the GUI."""
 
 from __future__ import annotations
 
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal, cast
 
 from PySide6.QtCore import Signal
@@ -22,17 +18,30 @@ from mail_dock.domain.errors import (
     StorageDetachedError,
 )
 from mail_dock.domain.fetcher import BaseMailFetcher, CancelToken
-from mail_dock.domain.ports import BaseEmlStorage, BaseManifestWriter
+from mail_dock.domain.messages import AttachmentSavePlan, SavedFile
+from mail_dock.domain.ports import BaseEmlStorage, BaseManifestWriter, BaseMessageRenderer
 from mail_dock.domain.repository import BaseMessageRepository, MessageRecord
 from mail_dock.presentation.errors import user_message
 from mail_dock.presentation.threads.worker import Worker, _Task
+from mail_dock.usecases.export_message import export_eml
+from mail_dock.usecases.save_attachment import (
+    commit_attachment_save,
+    prepare_attachment_save,
+)
 from mail_dock.usecases.sync_folders import FolderRefreshResult, refresh_folders
 from mail_dock.usecases.sync_mail import SyncOptions, SyncProgress, SyncResult, sync_account
 
-SyncOperation = Literal["sync", "refresh_folders"]
+SyncOperation = Literal[
+    "sync",
+    "refresh_folders",
+    "prepare_attachment",
+    "save_attachment",
+    "export_eml",
+]
 RepositoryFactory = Callable[[], BaseMessageRepository]
 FetcherFactory = Callable[[MessageRecord], BaseMailFetcher]
 StorageFactory = Callable[[], BaseEmlStorage]
+RendererFactory = Callable[[], BaseMessageRenderer]
 ManifestFactory = Callable[[str], BaseManifestWriter]
 SyncAccountUseCase = Callable[..., SyncResult]
 RefreshFoldersUseCase = Callable[..., FolderRefreshResult]
@@ -58,22 +67,25 @@ class FolderTreeSnapshot:
 
 @dataclass(frozen=True)
 class _FolderRefreshTaskResult:
-    """Refresh counts plus the post-refresh folder tree snapshot."""
-
     result: FolderRefreshResult
     snapshot: FolderTreeSnapshot
 
 
 @dataclass(frozen=True)
 class _SyncTaskResult:
-    """Internal result envelope used to route results to typed signals."""
-
     operation: SyncOperation
-    value: SyncResult | _FolderRefreshTaskResult | FolderTreeSnapshot
+    value: (
+        SyncResult
+        | _FolderRefreshTaskResult
+        | FolderTreeSnapshot
+        | AttachmentSavePlan
+        | SavedFile
+        | Path
+    )
 
 
 class SyncWorker(Worker):
-    """Run account synchronization and folder refreshes on one QThread."""
+    """Run synchronization and user-file writes on one dedicated QThread."""
 
     sync_progress = Signal(object)
     progress = Signal(object)
@@ -84,6 +96,7 @@ class SyncWorker(Worker):
     authentication_failed = Signal(object)
     fetch_failed = Signal(object)
     storage_detached = Signal(object)
+    file_result = Signal(object)
 
     def __init__(
         self,
@@ -92,6 +105,7 @@ class SyncWorker(Worker):
         storage_factory: StorageFactory,
         manifest_factory: ManifestFactory,
         *,
+        renderer_factory: RendererFactory | None = None,
         sync_account_usecase: SyncAccountUseCase = sync_account,
         refresh_folders_usecase: RefreshFoldersUseCase = refresh_folders,
         sync_options: SyncOptions | None = None,
@@ -102,6 +116,7 @@ class SyncWorker(Worker):
         self._repository_factory = _as_repository_factory(repository)
         self._fetcher_factory = fetcher_factory
         self._storage_factory = storage_factory
+        self._renderer_factory = renderer_factory
         self._manifest_factory = manifest_factory
         self._sync_account_usecase = sync_account_usecase
         self._refresh_folders_usecase = refresh_folders_usecase
@@ -219,6 +234,84 @@ class SyncWorker(Worker):
 
         return self._submit_operation("refresh_folders", operation)
 
+    def prepare_attachment_save(
+        self,
+        *,
+        relative_path: str,
+        expected_hash: str,
+        part_index: int,
+        dest_dir: Path,
+        filename: str | None = None,
+    ) -> CancelToken:
+        """Prepare an attachment without creating a destination file."""
+
+        def operation(token: CancelToken) -> _SyncTaskResult:
+            token.raise_if_cancelled()
+            return _SyncTaskResult(
+                "prepare_attachment",
+                prepare_attachment_save(
+                    self._storage_factory(),
+                    self._message_renderer(),
+                    relative_path=relative_path,
+                    expected_hash=expected_hash,
+                    part_index=part_index,
+                    dest_dir=dest_dir,
+                    filename=filename,
+                ),
+            )
+
+        return self._submit_operation("prepare_attachment", operation)
+
+    def commit_attachment_save(
+        self,
+        plan: AttachmentSavePlan,
+        *,
+        overwrite: bool = False,
+    ) -> CancelToken:
+        """Commit a reviewed attachment plan on the write worker."""
+
+        def operation(token: CancelToken) -> _SyncTaskResult:
+            token.raise_if_cancelled()
+            return _SyncTaskResult(
+                "save_attachment",
+                commit_attachment_save(
+                    self._storage_factory(),
+                    self._message_renderer(),
+                    plan=plan,
+                    overwrite=overwrite,
+                ),
+            )
+
+        return self._submit_operation("save_attachment", operation)
+
+    def export_eml(
+        self,
+        *,
+        relative_path: str,
+        expected_hash: str,
+        dest_path: Path,
+    ) -> CancelToken:
+        """Export one verified EML on the write worker."""
+
+        def operation(token: CancelToken) -> _SyncTaskResult:
+            token.raise_if_cancelled()
+            return _SyncTaskResult(
+                "export_eml",
+                export_eml(
+                    self._storage_factory(),
+                    relative_path=relative_path,
+                    expected_hash=expected_hash,
+                    dest_path=dest_path,
+                ),
+            )
+
+        return self._submit_operation("export_eml", operation)
+
+    def _message_renderer(self) -> BaseMessageRenderer:
+        if self._renderer_factory is None:
+            raise RuntimeError("file operations require a message renderer factory")
+        return self._renderer_factory()
+
     def _submit_operation(
         self,
         operation_kind: SyncOperation,
@@ -261,6 +354,8 @@ class SyncWorker(Worker):
             return
         if value.operation == "sync":
             self.sync_result.emit(value.value)
+        elif value.operation in {"prepare_attachment", "save_attachment", "export_eml"}:
+            self.file_result.emit(value.value)
         elif isinstance(value.value, _FolderRefreshTaskResult):
             self.folders_refreshed.emit(value.value.result)
             self.folder_tree_updated.emit(value.value.snapshot)

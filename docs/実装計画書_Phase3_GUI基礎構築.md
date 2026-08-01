@@ -446,11 +446,11 @@
 
 #### **F-3. UI 配線**
 
-- [ ] 添付一覧のコンテキストメニュー／ボタンから `QFileDialog.getExistingDirectory()` で保存先を選ぶ
-- [ ] `prepare_attachment_save()` の `AttachmentSavePlan.is_executable` が真なら**commit前に**警告ダイアログを出す（`.exe .scr .js .vbs .lnk .bat .cmd .ps1`）。UIから infrastructure の `SanitizedName` をimportしない
-- [ ] planの `warnings` によりサニタイズで名前が変わった旨を通知し、ユーザー承認後だけ `commit_attachment_save()` を呼ぶ
-- [ ] 「.eml として保存」を `QFileDialog.getSaveFileName()` から実行する
-- [ ] 保存処理をワーカーで実行し、UIをブロックしない
+- [x] 添付一覧のコンテキストメニュー／ボタンから `QFileDialog.getExistingDirectory()` で保存先を選ぶ
+- [x] `prepare_attachment_save()` の `AttachmentSavePlan.is_executable` が真なら**commit前に**警告ダイアログを出す（`.exe .scr .js .vbs .lnk .bat .cmd .ps1`）。UIから infrastructure の `SanitizedName` をimportしない
+- [x] planの `warnings` によりサニタイズで名前が変わった旨を通知し、ユーザー承認後だけ `commit_attachment_save()` を呼ぶ
+- [x] 「.eml として保存」を `QFileDialog.getSaveFileName()` から実行する
+- [x] 保存処理をワーカーで実行し、UIをブロックしない
 
 ---
 

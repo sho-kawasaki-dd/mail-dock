@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from html import escape
 from typing import Literal, Protocol, cast
@@ -38,6 +39,15 @@ from ..web.schemes import CidSchemeHandler, MailBodySchemeHandler
 HtmlSanitizer = Callable[..., str]
 DetailChannel = Literal["detail/open"]
 ThreadChannel = Literal["count/thread"]
+
+
+@dataclass(frozen=True)
+class AttachmentSaveRequest:
+    """The selected message part requested by the user for saving."""
+
+    detail: MessageDetail
+    part_index: int
+    filename: str | None
 
 
 class _RequestHandle(Protocol):
@@ -78,6 +88,7 @@ class DetailView(QWidget):
 
     message_loaded = Signal(object)
     thread_loaded = Signal(object)
+    attachment_save_requested = Signal(object)
     error_changed = Signal(str)
 
     def __init__(
@@ -138,6 +149,18 @@ class DetailView(QWidget):
         """Return the button that requests the current conversation."""
 
         return self._thread_button
+
+    @property
+    def attachment_save_button(self) -> QPushButton:
+        """Return the attachment save button."""
+
+        return self._attachment_save_button
+
+    @property
+    def current_detail(self) -> MessageDetail | None:
+        """Return the currently loaded message detail, if any."""
+
+        return self._current_detail
 
     @property
     def state_label(self) -> QLabel:
@@ -260,9 +283,16 @@ class DetailView(QWidget):
 
         self._attachment_list = QListWidget(self)
         self._attachment_list.setMinimumHeight(80)
+        self._attachment_list.itemSelectionChanged.connect(
+            self._update_attachment_save_button
+        )
+        self._attachment_save_button = QPushButton(strings.DETAIL_ATTACHMENT_SAVE, self)
+        self._attachment_save_button.setEnabled(False)
+        self._attachment_save_button.clicked.connect(self._request_attachment_save)
         attachment_box = QGroupBox(strings.DETAIL_ATTACHMENT_LIST, self)
         attachment_layout = QVBoxLayout(attachment_box)
         attachment_layout.addWidget(self._attachment_list)
+        attachment_layout.addWidget(self._attachment_save_button)
 
         layout = QVBoxLayout(self)
         layout.addLayout(header_form)
@@ -290,6 +320,7 @@ class DetailView(QWidget):
         self._state_label.setVisible(False)
         self._body_stack.setCurrentWidget(self._state_label)
         self._attachment_list.clear()
+        self._attachment_save_button.setEnabled(False)
         self._set_error("")
 
     def _set_header(self, message: MessageSummary | MessageDetail) -> None:
@@ -394,6 +425,30 @@ class DetailView(QWidget):
             )
             item.setData(256, part_index)
             self._attachment_list.addItem(item)
+
+    def _update_attachment_save_button(self) -> None:
+        self._attachment_save_button.setEnabled(
+            self._current_detail is not None
+            and self._attachment_list.currentItem() is not None
+        )
+
+    def _request_attachment_save(self) -> None:
+        detail = self._current_detail
+        item = self._attachment_list.currentItem()
+        if detail is None or item is None:
+            return
+        part_index = item.data(256)
+        if not isinstance(part_index, int):
+            return
+        filename = None
+        if (
+            self._current_rendered is not None
+            and 0 <= part_index < len(self._current_rendered.parts)
+        ):
+            filename = self._current_rendered.parts[part_index].filename
+        self.attachment_save_requested.emit(
+            AttachmentSaveRequest(detail, part_index, filename)
+        )
 
     def _show_state(self, message: str) -> None:
         self._state_label.setText(message)

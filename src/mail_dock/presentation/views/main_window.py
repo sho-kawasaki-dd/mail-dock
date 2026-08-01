@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any, cast
 
 from PySide6.QtCore import QSettings, Qt, QUrl, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
+    QFileDialog,
     QLabel,
     QMainWindow,
     QProgressBar,
@@ -22,6 +24,8 @@ from PySide6.QtWidgets import (
 
 from mail_dock import config
 from mail_dock.domain.fetcher import CancelToken
+from mail_dock.domain.messages import AttachmentSavePlan, SavedFile
+from mail_dock.domain.search import MessageDetail
 from mail_dock.presentation import strings
 from mail_dock.presentation.context import AppContext
 from mail_dock.presentation.models.folder_tree_model import (
@@ -36,7 +40,12 @@ from mail_dock.presentation.threads.sync_worker import (
     SyncWorker,
 )
 from mail_dock.presentation.viewmodels.message_list_viewmodel import MessageListViewModel
-from mail_dock.presentation.views.detail_view import DetailView
+from mail_dock.presentation.views.detail_view import AttachmentSaveRequest, DetailView
+from mail_dock.presentation.views.dialogs.confirmation_dialog import (
+    ConfirmationDialog,
+    confirm_overwrite,
+    confirm_save_executable,
+)
 from mail_dock.presentation.views.dialogs.settings_dialog import SettingsDialog
 from mail_dock.presentation.views.message_list import MessageListSearchBar, MessageListView
 from mail_dock.usecases.sync_folders import FolderRefreshResult
@@ -59,6 +68,9 @@ class MainWindow(QMainWindow):
         self._workers_stopped = False
         self._sync_token: CancelToken | None = None
         self._folder_refresh_token: CancelToken | None = None
+        self._file_token: CancelToken | None = None
+        self._pending_attachment_request: AttachmentSaveRequest | None = None
+        self._pending_attachment_plan: AttachmentSavePlan | None = None
         self._ui_settings = QSettings("mail-dock", "mail-dock")
 
         self.query_worker = QueryWorker(
@@ -72,6 +84,7 @@ class MainWindow(QMainWindow):
             context.create_fetcher,
             context.create_eml_storage,
             context.create_manifest_writer,
+            renderer_factory=context.create_message_renderer,
             sync_options=SyncOptions(max_message_bytes=context.settings.max_message_bytes),
             connection_manager=context.connection_manager,
         )
@@ -201,7 +214,7 @@ class MainWindow(QMainWindow):
         self.sync_action.triggered.connect(self._sync_selected_account)
         self.refresh_folders_action.triggered.connect(self._refresh_selected_account)
         self.settings_action.triggered.connect(self.settings_requested)
-        self.export_eml_action.triggered.connect(self.export_requested)
+        self.export_eml_action.triggered.connect(self._export_current_message)
         self.thread_view_action.triggered.connect(self.detail_view.request_thread)
         self.exit_action.triggered.connect(self.close)
         self.settings_requested.connect(self._show_settings)
@@ -236,6 +249,7 @@ class MainWindow(QMainWindow):
         self.message_table_model.rowsInserted.connect(self._update_message_count)
         self.message_table_model.modelReset.connect(self._update_message_count)
         self.detail_view.thread_loaded.connect(self.message_table_model.show_thread)
+        self.detail_view.attachment_save_requested.connect(self._prepare_attachment_save)
         self.folder_tree_view.selectionModel().currentChanged.connect(
             self._folder_selection_changed
         )
@@ -245,6 +259,7 @@ class MainWindow(QMainWindow):
         self.sync_worker.folder_tree_updated.connect(self._update_folder_tree)
         self.sync_worker.error_reported.connect(self._show_sync_error)
         self.sync_worker.storage_detached.connect(self._show_storage_detached)
+        self.sync_worker.file_result.connect(self._show_file_result)
         self.query_worker.storage_detached.connect(self._show_storage_detached)
 
         self._cancel_button.clicked.connect(self._cancel_current_operation)
@@ -382,6 +397,98 @@ class MainWindow(QMainWindow):
             self._folder_refresh_token = None
             self.refresh_folders_action.setEnabled(True)
             self._status_label.setText(notification.message)
+        elif notification.operation in {
+            "prepare_attachment",
+            "save_attachment",
+            "export_eml",
+        }:
+            self._file_token = None
+            self._pending_attachment_request = None
+            self._pending_attachment_plan = None
+            self._status_label.setText(notification.message)
+
+    def _prepare_attachment_save(self, request: object) -> None:
+        if not isinstance(request, AttachmentSaveRequest):
+            return
+        detail = request.detail
+        if detail.relative_path is None or detail.file_hash is None:
+            self._status_label.setText(strings.ERROR_STORAGE)
+            return
+        selected = QFileDialog.getExistingDirectory(self, strings.SAVE_DIALOG_TITLE)
+        if not selected:
+            return
+        self._pending_attachment_request = request
+        self._pending_attachment_plan = None
+        self._file_token = self.sync_worker.prepare_attachment_save(
+            relative_path=detail.relative_path,
+            expected_hash=detail.file_hash,
+            part_index=request.part_index,
+            dest_dir=Path(selected),
+            filename=request.filename,
+        )
+        self._status_label.setText(strings.STATUS_LOADING)
+
+    def _show_file_result(self, result: object) -> None:
+        if isinstance(result, AttachmentSavePlan):
+            self._handle_attachment_plan(result)
+        elif isinstance(result, SavedFile):
+            self._file_token = None
+            self._pending_attachment_request = None
+            self._pending_attachment_plan = None
+            self._status_label.setText(strings.SAVE_SUCCESS.format(filename=result.path.name))
+        elif isinstance(result, Path):
+            self._file_token = None
+            self._status_label.setText(strings.SAVE_SUCCESS.format(filename=result.name))
+
+    def _handle_attachment_plan(self, plan: AttachmentSavePlan) -> None:
+        request = self._pending_attachment_request
+        if request is None:
+            return
+        self._pending_attachment_plan = plan
+        name_was_changed = any(warning != "executable_extension" for warning in plan.warnings)
+        if name_was_changed and not ConfirmationDialog(
+            strings.SAVE_ATTACHMENT_SANITIZED.format(
+                original=request.filename or "attachment",
+                sanitized=plan.filename,
+            ),
+            self,
+        ).confirmed():
+            self._pending_attachment_request = None
+            self._pending_attachment_plan = None
+            self._file_token = None
+            return
+        if plan.is_executable and not confirm_save_executable(plan.filename, self):
+            self._pending_attachment_request = None
+            self._pending_attachment_plan = None
+            self._file_token = None
+            return
+        self._file_token = self.sync_worker.commit_attachment_save(plan)
+
+    def _export_current_message(self) -> None:
+        detail = self.detail_view.current_detail
+        if not isinstance(detail, MessageDetail):
+            self._status_label.setText(strings.ERROR_STORAGE)
+            return
+        if detail.relative_path is None or detail.file_hash is None:
+            self._status_label.setText(strings.ERROR_STORAGE)
+            return
+        selected, _filter = QFileDialog.getSaveFileName(
+            self,
+            strings.SAVE_DIALOG_TITLE,
+            strings.EXPORT_DEFAULT_FILENAME,
+            "EML files (*.eml)",
+        )
+        if not selected:
+            return
+        destination = Path(selected)
+        if destination.exists() and not confirm_overwrite(destination.name, self):
+            return
+        self._file_token = self.sync_worker.export_eml(
+            relative_path=detail.relative_path,
+            expected_hash=detail.file_hash,
+            dest_path=destination,
+        )
+        self._status_label.setText(strings.STATUS_LOADING)
 
     def _show_storage_detached(self, _error: object) -> None:
         """Show the detached banner; recovery state handling remains Phase 4."""
