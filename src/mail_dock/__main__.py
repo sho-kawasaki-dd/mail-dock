@@ -417,6 +417,14 @@ class StorageSession:
             raise RuntimeError("StorageSession is not active")
         return self.manager
 
+    @property
+    def storage_lock(self) -> StorageLock:
+        """Return the active lock borrowed by the GUI composition context."""
+
+        if self._lock is None or not self._entered or self._closed:
+            raise RuntimeError("StorageSession is not active")
+        return self._lock
+
 
 def _account_by_id(repo: SqliteMessageRepository, account_id: str) -> MessageRecord:
     for account in repo.list_accounts():

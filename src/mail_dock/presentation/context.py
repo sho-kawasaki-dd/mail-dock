@@ -7,29 +7,126 @@ this context only exposes their active lifetime to the presentation layer.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from mail_dock import config
+from mail_dock.domain.errors import ConfigError
+from mail_dock.domain.fetcher import BaseMailFetcher
+from mail_dock.domain.ports import BaseCredentialStore, BaseEmlStorage, BaseManifestWriter
+from mail_dock.domain.repository import MessageRecord
+from mail_dock.domain.search import BaseSearchRepository
+from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
+from mail_dock.infrastructure.database.search_repository import SqliteSearchRepository
+from mail_dock.infrastructure.fetchers.onamae_imap import OnamaeImapFetcher
+from mail_dock.infrastructure.security.keyring_store import KeyringCredentialStore
+from mail_dock.infrastructure.storage.eml_storage import EmlStorage
+from mail_dock.infrastructure.storage.manifest import ManifestWriter
+from mail_dock.usecases.register_account import load_credentials
 
 if TYPE_CHECKING:
     from mail_dock.__main__ import StorageSession
 
 
-class AppContext:
-    """Objects shared by the GUI after a storage session has started."""
+MessageRendererFactory = Callable[[], Any]
 
-    def __init__(self, session: StorageSession, settings: config.AppConfig) -> None:
+
+class AppContext:
+    """Composition root for the GUI after a storage session has started.
+
+    Views, view models, and presentation models must reach infrastructure
+    implementations through this object.  The context borrows the lock and
+    connection manager from ``StorageSession``; it never closes either one.
+    Every factory creates its object in the thread that calls it, so no
+    SQLite connection or live IMAP connection is shared between workers.
+    """
+
+    def __init__(
+        self,
+        session: StorageSession,
+        settings: config.AppConfig,
+        *,
+        renderer_factory: MessageRendererFactory | None = None,
+    ) -> None:
         self.storage_root = session.root
         self.settings = settings
+        self.storage_lock = session.storage_lock
         self.connection_manager = session.connection_manager
         self._session = session
+        self._credential_store: KeyringCredentialStore | None = None
+        self._renderer_factory = renderer_factory
 
     @property
     def database_path(self) -> Path:
         """Return the active metadata database path."""
 
         return self.storage_root / "metadata.db"
+
+    @property
+    def credential_store(self) -> BaseCredentialStore:
+        """Return the shared credential-store adapter."""
+
+        if self._credential_store is None:
+            self._credential_store = KeyringCredentialStore()
+        return self._credential_store
+
+    def create_message_repository(self) -> SqliteMessageRepository:
+        """Create a message repository for the calling thread."""
+
+        return SqliteMessageRepository(self.connection_manager)
+
+    def create_search_repository(self) -> BaseSearchRepository:
+        """Create a read-only search repository for the calling thread."""
+
+        return SqliteSearchRepository(self.connection_manager)
+
+    def create_eml_storage(self) -> BaseEmlStorage:
+        """Create an EML storage adapter bound to this root."""
+
+        return EmlStorage(self.storage_root)
+
+    def create_manifest_writer(self, account_id: str) -> BaseManifestWriter:
+        """Create an account-scoped manifest writer.
+
+        The caller owns the returned writer and must close it after the sync
+        operation.  Keeping it out of ``AppContext`` prevents cross-account
+        and cross-thread file handles from being shared.
+        """
+
+        return ManifestWriter(self.storage_root, account_id)
+
+    def create_fetcher(self, account: MessageRecord) -> BaseMailFetcher:
+        """Create an authenticated fetcher for the calling worker thread."""
+
+        account_id = account.get("id")
+        host = account.get("host")
+        username = account.get("username")
+        port = account.get("port", 993)
+        if not isinstance(account_id, str) or not account_id:
+            raise ConfigError("Account must contain a valid id")
+        if not isinstance(host, str) or not host:
+            raise ConfigError(f"Account has no valid host: {account_id}")
+        if not isinstance(username, str) or not username:
+            raise ConfigError(f"Account has no valid username: {account_id}")
+        if isinstance(port, bool) or not isinstance(port, int) or port <= 0:
+            raise ConfigError(f"Account has no valid port: {account_id}")
+        return OnamaeImapFetcher(
+            host,
+            username,
+            load_credentials(self.credential_store, account_id),
+            port=port,
+            remote_trash_folder=self.settings.remote_trash_folder,
+        )
+
+    def create_message_renderer(self) -> Any:
+        """Create the renderer used by the open-message and save use cases."""
+
+        if self._renderer_factory is not None:
+            return self._renderer_factory()
+        renderer_module = import_module("mail_dock.infrastructure.parsing.eml_render")
+        return renderer_module.EmlMessageRenderer()
 
     def stop_workers(self) -> None:
         """Stop presentation workers before the owning session is released."""
@@ -39,6 +136,7 @@ class AppContext:
 
         config.save(settings)
         self.settings = settings
+        self._session.settings = settings
 
     def build_main_window(self) -> Any:
         """Construct the main window through the presentation composition root."""

@@ -138,11 +138,11 @@
 
 #### **A-3. `presentation/context.py` — GUI用コンポジションルート**
 
-- [ ] `AppContext`（storage_root / `StorageLock` / `ConnectionManager` / `AppConfig` / `KeyringCredentialStore` / `EmlStorage` / `ManifestWriter` / repo・fetcher のファクトリ）を実装する。`StorageLock` と `ConnectionManager` は `StorageSession` から借用し、`AppContext` 自身は解放しない
-- [ ] repo とストレージの生成を**呼び出しスレッド側で行うファクトリ**として公開する（接続をスレッド間で共有しない）
-- [ ] `BaseMessageRenderer` の具象ファクトリを公開し、閲覧・添付保存usecaseへポートとして注入する（D-24）
-- [ ] 設定変更を `config.save()` で永続化するメソッドを持たせる
-- [ ] `views` / `viewmodels` / `models` は `AppContext` を通してのみ具象へ到達することを docstring に明記する（D-4）
+- [x] `AppContext`（storage_root / `StorageLock` / `ConnectionManager` / `AppConfig` / `KeyringCredentialStore` / `EmlStorage` / `ManifestWriter` / repo・fetcher のファクトリ）を実装する。`StorageLock` と `ConnectionManager` は `StorageSession` から借用し、`AppContext` 自身は解放しない
+- [x] repo とストレージの生成を**呼び出しスレッド側で行うファクトリ**として公開する（接続をスレッド間で共有しない）
+- [x] `BaseMessageRenderer` の具象ファクトリを公開し、閲覧・添付保存usecaseへポートとして注入する（D-24）
+- [x] 設定変更を `config.save()` で永続化するメソッドを持たせる
+- [x] `views` / `viewmodels` / `models` は `AppContext` を通してのみ具象へ到達することを docstring に明記する（D-4）
 
 #### **A-4. `presentation/strings.py` — UI文言定数**
 
