@@ -439,10 +439,10 @@
 
 #### **F-2. `usecases/export_message.py`**
 
-- [ ] `export_eml(storage, *, relative_path, expected_hash, dest_path) -> Path` を実装する
-- [ ] 書き出し前に `file_hash` を検証する（F-20）
-- [ ] 一時ファイルは `dest_path.parent` に作成し、`flush()` + `fsync()` 後に同一ボリューム上で `os.replace` する。失敗時は一時ファイルを除去する
-- [ ] 宛先親ディレクトリがシンボリックリンク等で意図しない場所へ変化していないことを保存直前に再検証する
+- [x] `export_eml(storage, *, relative_path, expected_hash, dest_path) -> Path` を実装する
+- [x] 書き出し前に `file_hash` を検証する（F-20）
+- [x] 一時ファイルは `dest_path.parent` に作成し、`flush()` + `fsync()` 後に同一ボリューム上で `os.replace` する。失敗時は一時ファイルを除去する
+- [x] 宛先親ディレクトリがシンボリックリンク等で意図しない場所へ変化していないことを保存直前に再検証する
 
 #### **F-3. UI 配線**
 
