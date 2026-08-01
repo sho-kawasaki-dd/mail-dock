@@ -8,7 +8,7 @@ from typing import Any, Literal, cast
 
 from PySide6.QtCore import Signal
 
-from mail_dock.domain.errors import MailDockError, OperationCancelledError
+from mail_dock.domain.errors import MailDockError, OperationCancelledError, StorageDetachedError
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.ports import BaseEmlStorage, BaseMessageRenderer
 from mail_dock.domain.search import (
@@ -79,6 +79,7 @@ class QueryWorker(Worker):
     request_failed = Signal(object)
     request_cancelled = Signal(object)
     search_path_detected = Signal(object)
+    storage_detached = Signal(object)
 
     def __init__(
         self,
@@ -300,6 +301,8 @@ class QueryWorker(Worker):
         if handle is None or not isinstance(error, MailDockError):
             return
         if self._request_state.is_current(handle.channel, handle.request_id):
+            if isinstance(error, StorageDetachedError):
+                self.storage_detached.emit(error)
             self.request_failed.emit(QueryFailure(handle.channel, handle.request_id, error))
 
     def _on_task_cancelled(self, token: object) -> None:

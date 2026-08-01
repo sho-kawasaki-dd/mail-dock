@@ -377,9 +377,9 @@
 
 #### **D-5. ストレージ切断の Signal 配線（骨組み。F-24 / D-16）**
 
-- [ ] ワーカーの `StorageDetachedError` を `storage_detached` Signal として MainWindow へ伝播する
-- [ ] 受信時に閲覧不可のバナーを出し、同期ボタンを無効化する
-- [ ] 状態機械・ハートビート・`WM_DEVICECHANGE` は Phase 4 である旨をコメントに残す
+- [x] ワーカーの `StorageDetachedError` を `storage_detached` Signal として MainWindow へ伝播する
+- [x] 受信時に閲覧不可のバナーを出し、同期ボタンを無効化する
+- [x] 状態機械・ハートビート・`WM_DEVICECHANGE` は Phase 4 である旨をコメントに残す
 
 ---
 

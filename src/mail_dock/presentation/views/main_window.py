@@ -156,7 +156,17 @@ class MainWindow(QMainWindow):
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
         self.splitter.setStretchFactor(2, 1)
-        self.setCentralWidget(self.splitter)
+
+        central = QWidget(self)
+        central_layout = QVBoxLayout(central)
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        self._storage_detached_banner = QLabel(strings.BANNER_STORAGE_DETACHED, central)
+        self._storage_detached_banner.setObjectName("storageDetachedBanner")
+        self._storage_detached_banner.setWordWrap(True)
+        self._storage_detached_banner.setVisible(False)
+        central_layout.addWidget(self._storage_detached_banner)
+        central_layout.addWidget(self.splitter, 1)
+        self.setCentralWidget(central)
 
     def _build_actions(self) -> None:
         self.sync_action = QAction(strings.MAIN_TOOLBAR_SYNC, self)
@@ -231,6 +241,7 @@ class MainWindow(QMainWindow):
         self.sync_worker.folder_tree_updated.connect(self._update_folder_tree)
         self.sync_worker.error_reported.connect(self._show_sync_error)
         self.sync_worker.storage_detached.connect(self._show_storage_detached)
+        self.query_worker.storage_detached.connect(self._show_storage_detached)
 
         self._cancel_button.clicked.connect(self._cancel_current_operation)
         self.message_list_viewmodel.request_page()
@@ -369,8 +380,13 @@ class MainWindow(QMainWindow):
             self._status_label.setText(notification.message)
 
     def _show_storage_detached(self, _error: object) -> None:
+        """Show the detached banner; recovery state handling remains Phase 4."""
+
+        self._storage_detached_banner.setText(strings.BANNER_STORAGE_DETACHED)
+        self._storage_detached_banner.setVisible(True)
         self._storage_status_label.setText(strings.ERROR_STORAGE_DETACHED)
         self.sync_action.setEnabled(False)
+        self.refresh_folders_action.setEnabled(False)
 
     def _cancel_current_operation(self) -> None:
         if self._sync_token is not None:
