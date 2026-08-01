@@ -256,9 +256,7 @@ class SetupWizard(QWizard):
         return True
 
     def _validate_folders(self) -> bool:
-        if not self._folder_checks or not any(
-            check.isChecked() for check in self._folder_checks
-        ):
+        if not self._folder_checks or not any(check.isChecked() for check in self._folder_checks):
             self._folders_status.setText(strings.WIZARD_STATUS_FOLDER_SELECTION_REQUIRED)
             return False
         if self._context is None or self._account_id is None:

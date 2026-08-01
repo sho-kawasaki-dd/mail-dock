@@ -56,9 +56,7 @@ def _remove_unsafe_content(soup: BeautifulSoup) -> None:
             if normalized_attribute.startswith("on"):
                 del tag.attrs[attribute]
                 continue
-            if normalized_attribute in {"href", "src"} and _is_dangerous_url(
-                tag.attrs[attribute]
-            ):
+            if normalized_attribute in {"href", "src"} and _is_dangerous_url(tag.attrs[attribute]):
                 del tag.attrs[attribute]
 
 

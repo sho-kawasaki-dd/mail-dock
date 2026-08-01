@@ -158,6 +158,7 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
         root = _available_root(settings, requested_root)
         setup_wizard: SetupWizard | None = None
         if root is None:
+
             def start_session(selected_root: Path) -> AppContext:
                 nonlocal session, context
                 session = StorageSession(settings, selected_root)

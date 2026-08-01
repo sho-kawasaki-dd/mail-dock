@@ -175,9 +175,7 @@ class SqliteSearchRepository(BaseSearchRepository):
             local_state=str(row[12]),
             thread_key=str(row[13]) if row[13] is not None else None,
             imap_flags=str(row[14]) if row[14] is not None else None,
-            moved_to_folder_display_name=(
-                str(row[15]) if row[15] is not None else None
-            ),
+            moved_to_folder_display_name=(str(row[15]) if row[15] is not None else None),
             failure_class=str(row[16]) if row[16] is not None else None,
         )
 

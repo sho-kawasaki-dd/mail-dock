@@ -34,9 +34,10 @@ def test_sanitizer_removes_active_content_and_injects_csp() -> None:
 
     assert len(result.find_all("meta", attrs={"http-equiv": "Content-Security-Policy"})) == 1
     assert result.find("meta", attrs={"http-equiv": "refresh"}) is None
-    assert result.find_all(
-        ["script", "iframe", "frame", "object", "embed", "form", "link", "base"]
-    ) == []
+    assert (
+        result.find_all(["script", "iframe", "frame", "object", "embed", "form", "link", "base"])
+        == []
+    )
     assert _first_tag(result, "a").get("onclick") is None
     assert _first_tag(result, "a").get("href") is None
     assert _first_tag(result, "img").get("onerror") is None

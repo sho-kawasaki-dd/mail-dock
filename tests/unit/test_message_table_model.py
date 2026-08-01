@@ -75,9 +75,7 @@ class FakeQueryWorker(QObject):
         return Request(self._next_id)
 
     def emit_page(self, request_id: int, page: SearchPage) -> None:
-        self.result.emit(
-            SimpleNamespace(channel="list/search", request_id=request_id, value=page)
-        )
+        self.result.emit(SimpleNamespace(channel="list/search", request_id=request_id, value=page))
 
 
 def _summary(message_id: int = 1) -> MessageSummary:
@@ -182,8 +180,7 @@ def test_columns_render_summary_values(qtbot: object) -> None:
         for column in range(model.columnCount(QModelIndex()))
     ]
     values = [
-        model.data(model.index(0, column))
-        for column in range(model.columnCount(QModelIndex()))
+        model.data(model.index(0, column)) for column in range(model.columnCount(QModelIndex()))
     ]
 
     assert headers == ["日付", "アカウント", "フォルダ", "差出人", "件名", "サイズ"]
@@ -215,9 +212,7 @@ def test_status_roles_render_from_summary(qtbot: object) -> None:
     unread = _model_with_summary(replace(_summary(), imap_flags="\\Flagged"))
     assert unread.data(index, Qt.ItemDataRole.ToolTipRole) == strings.TOOLTIP_UNREAD
 
-    deleted = _model_with_summary(
-        replace(_summary(), remote_state="deleted", local_state="purged")
-    )
+    deleted = _model_with_summary(replace(_summary(), remote_state="deleted", local_state="purged"))
     foreground = deleted.data(index, Qt.ItemDataRole.ForegroundRole)
     assert isinstance(foreground, QBrush)
     assert foreground.color().name() == "#808080"

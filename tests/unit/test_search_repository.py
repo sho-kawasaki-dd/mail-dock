@@ -230,9 +230,7 @@ def test_list_page_uses_one_joined_select_without_detail_queries(
         db_conn.set_trace_callback(None)
 
     select_statements = [
-        statement
-        for statement in statements
-        if statement.lstrip().upper().startswith("SELECT")
+        statement for statement in statements if statement.lstrip().upper().startswith("SELECT")
     ]
     assert len(select_statements) == 1
     assert "sync_failures" in select_statements[0]

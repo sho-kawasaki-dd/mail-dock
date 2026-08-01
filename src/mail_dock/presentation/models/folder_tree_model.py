@@ -68,9 +68,7 @@ def build_mail_account_root(
     account_nodes: list[FolderTreeNode] = []
     folders_by_account: dict[str, list[FolderTreeNode]] = {}
     account_ids = {
-        str(account_id)
-        for account in accounts
-        if (account_id := _account_id(account)) is not None
+        str(account_id) for account in accounts if (account_id := _account_id(account)) is not None
     }
 
     for folder in folders:
@@ -87,9 +85,7 @@ def build_mail_account_root(
                 account_id=account_id,
                 folder_id=folder_id,
                 is_sync_target=bool(folder.get("is_sync_target", False)),
-                message_filter=MessageFilter(
-                    account_ids=(account_id,), folder_ids=(folder_id,)
-                ),
+                message_filter=MessageFilter(account_ids=(account_id,), folder_ids=(folder_id,)),
             )
         )
 
@@ -225,11 +221,7 @@ class FolderTreeModel(QAbstractItemModel):
         if role == self.SyncTargetRole:
             return node.is_sync_target
         if role == Qt.ItemDataRole.CheckStateRole and node.kind == "folder":
-            return (
-                Qt.CheckState.Checked
-                if node.is_sync_target
-                else Qt.CheckState.Unchecked
-            )
+            return Qt.CheckState.Checked if node.is_sync_target else Qt.CheckState.Unchecked
         return None
 
     def flags(self, index: QModelIndex | QPersistentModelIndex) -> Qt.ItemFlag:
@@ -257,14 +249,8 @@ class FolderTreeModel(QAbstractItemModel):
             return node.message_filter
         if node.kind == "account" and node.account_id is not None:
             return MessageFilter(account_ids=(node.account_id,))
-        if (
-            node.kind == "folder"
-            and node.account_id is not None
-            and node.folder_id is not None
-        ):
-            return MessageFilter(
-                account_ids=(node.account_id,), folder_ids=(node.folder_id,)
-            )
+        if node.kind == "folder" and node.account_id is not None and node.folder_id is not None:
+            return MessageFilter(account_ids=(node.account_id,), folder_ids=(node.folder_id,))
         if node.kind in {"root", "all_accounts"}:
             return MessageFilter()
         return None

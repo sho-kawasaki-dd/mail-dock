@@ -339,9 +339,7 @@ class MessageListView(QTableView):
         if self._viewmodel is None:
             return
         summary = self._message_model.data(current, Qt.ItemDataRole.UserRole)
-        self._viewmodel.select_message(
-            summary.id if isinstance(summary, MessageSummary) else None
-        )
+        self._viewmodel.select_message(summary.id if isinstance(summary, MessageSummary) else None)
 
     def _thread_result_received(self, result: object) -> None:
         if getattr(result, "channel", None) != "count/thread":

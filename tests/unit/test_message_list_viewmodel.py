@@ -75,9 +75,7 @@ def test_state_signals_and_enter_search_request(qtbot: object) -> None:
     requested: list[tuple[str, str]] = []
     selected: list[int | None] = []
     viewmodel.search_changed.connect(lambda query, mode: changes.append((query, mode)))
-    viewmodel.search_requested.connect(
-        lambda query, mode: requested.append((query, mode))
-    )
+    viewmodel.search_requested.connect(lambda query, mode: requested.append((query, mode)))
     viewmodel.message_selected.connect(selected.append)
 
     viewmodel.set_search_query("  Invoice  ")
