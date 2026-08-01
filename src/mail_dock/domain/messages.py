@@ -15,6 +15,22 @@ class ParsedAttachment:
 
 
 @dataclass(frozen=True)
+class MessagePart:
+    content_id: str | None
+    content_type: str
+    filename: str | None
+    payload: bytes
+    is_inline: bool
+
+
+@dataclass(frozen=True)
+class RenderedMessage:
+    html_body: str | None
+    text_body: str
+    parts: tuple[MessagePart, ...]
+
+
+@dataclass(frozen=True)
 class ParsedMessage:
     subject: str = ""
     sender: str = ""

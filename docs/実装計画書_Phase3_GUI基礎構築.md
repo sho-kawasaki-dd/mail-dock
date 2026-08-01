@@ -254,9 +254,9 @@
 
 #### **C-1. `domain/messages.py` — 表示用データ構造の追加**
 
-- [ ] `MessagePart`（frozen dataclass）を追加する: `content_id: str | None` / `content_type: str` / `filename: str | None` / `payload: bytes` / `is_inline: bool`
-- [ ] `RenderedMessage`（frozen dataclass）を追加する: `html_body: str | None` / `text_body: str` / `parts: tuple[MessagePart, ...]`
-- [ ] 外部依存がゼロであることを維持する
+- [x] `MessagePart`（frozen dataclass）を追加する: `content_id: str | None` / `content_type: str` / `filename: str | None` / `payload: bytes` / `is_inline: bool`
+- [x] `RenderedMessage`（frozen dataclass）を追加する: `html_body: str | None` / `text_body: str` / `parts: tuple[MessagePart, ...]`
+- [x] 外部依存がゼロであることを維持する
 
 #### **C-1a. `domain/ports.py` — 表示・添付抽出ポート**
 
