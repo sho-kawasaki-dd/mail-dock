@@ -67,6 +67,15 @@ class QueryCancelled:
     request_id: int
 
 
+@dataclass(frozen=True)
+class SearchPathNotice:
+    """Notify the UI about the parsed search path before database work."""
+
+    channel: RequestChannel
+    request_id: int
+    has_slow_path: bool
+
+
 class QueryWorker(Worker):
     """Run all read operations on one dedicated query thread.
 
@@ -77,6 +86,7 @@ class QueryWorker(Worker):
 
     request_failed = Signal(object)
     request_cancelled = Signal(object)
+    search_path_detected = Signal(object)
 
     def __init__(
         self,
@@ -138,6 +148,17 @@ class QueryWorker(Worker):
     ) -> RequestHandle:
         """Queue a parsed search request without normalizing in the UI."""
 
+        def notify_search_path(plan: object) -> None:
+            handle = self._request_state.current("list/search")
+            if handle is not None:
+                self.search_path_detected.emit(
+                    SearchPathNotice(
+                        handle.channel,
+                        handle.request_id,
+                        bool(getattr(plan, "has_slow_path", False)),
+                    )
+                )
+
         return self._queue(
             "list/search",
             lambda repository, token: search_messages(
@@ -148,6 +169,7 @@ class QueryWorker(Worker):
                 cursor=cursor,
                 limit=limit,
                 cancel=token,
+                on_plan=notify_search_path,
             ),
         )
 

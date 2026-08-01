@@ -113,6 +113,7 @@ class SearchPage:
     items: tuple[MessageSummary, ...]
     next_cursor: PageCursor | None
     exhausted: bool
+    has_slow_path: bool = False
 
 
 @dataclass(frozen=True)

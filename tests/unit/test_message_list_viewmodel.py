@@ -4,6 +4,7 @@ from typing import Literal, cast
 import pytest
 from PySide6.QtCore import QObject, Signal
 
+from mail_dock.domain.errors import SearchQueryError
 from mail_dock.domain.search import MessageFilter, PageCursor
 from mail_dock.presentation.viewmodels.message_list_viewmodel import (
     MessageListQueryWorker,
@@ -124,3 +125,47 @@ def test_stale_result_is_ignored_and_filter_requests_a_new_page(qtbot: object) -
     )
     assert len(received) == 1
     assert viewmodel.filters == MessageFilter(account_ids=("account-2",))
+
+
+def test_search_feedback_tracks_slow_path_and_query_error(qtbot: object) -> None:
+    del qtbot
+    worker = FakeWorker()
+    viewmodel = MessageListViewModel(cast(MessageListQueryWorker, worker))
+    errors: list[str] = []
+    slow_paths: list[bool] = []
+    busy: list[bool] = []
+    viewmodel.search_error_changed.connect(errors.append)
+    viewmodel.slow_path_changed.connect(slow_paths.append)
+    viewmodel.request_busy_changed.connect(busy.append)
+
+    viewmodel.set_search_query("in")
+    request = viewmodel.execute_search()
+    assert busy == [True]
+    worker.result.emit(
+        type(
+            "Result",
+            (),
+            {
+                "channel": "list/search",
+                "request_id": request.request_id,
+                "value": type("Page", (), {"has_slow_path": True})(),
+            },
+        )()
+    )
+    assert slow_paths == [True]
+    assert busy == [True, False]
+
+    viewmodel.set_search_query('"unterminated')
+    request = viewmodel.execute_search()
+    worker.request_failed.emit(
+        type(
+            "Failure",
+            (),
+            {
+                "channel": "list/search",
+                "request_id": request.request_id,
+                "error": SearchQueryError("invalid query"),
+            },
+        )()
+    )
+    assert errors == ["検索条件が無効です。"]

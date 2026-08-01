@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import replace
 from typing import Literal
 
 from mail_dock.domain.fetcher import CancelToken
@@ -26,17 +27,21 @@ def search_messages(
     cursor: PageCursor | None = None,
     limit: int = 200,
     cancel: CancelToken | None = None,
+    on_plan: Callable[[object], None] | None = None,
 ) -> SearchPage:
     """Search messages after parsing the user query into a search plan."""
 
     plan = parse_query(query, mode=mode)
-    return search_repo.search_messages(
+    if on_plan is not None:
+        on_plan(plan)
+    page = search_repo.search_messages(
         plan,
         filters or MessageFilter(),
         cursor=cursor,
         limit=limit,
         cancel=cancel,
     )
+    return replace(page, has_slow_path=plan.has_slow_path)
 
 
 def list_messages(
