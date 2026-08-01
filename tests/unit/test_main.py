@@ -6,9 +6,11 @@ from typing import Any, cast
 import pytest
 
 import mail_dock.__main__ as main
-from mail_dock.__main__ import _build_parser, _exit_code, _run_search_command
+from mail_dock import config
+from mail_dock.__main__ import StorageSession, _build_parser, _exit_code, _run_search_command
 from mail_dock.domain.errors import SearchQueryError
 from mail_dock.domain.search import MessageSummary, PageCursor, SearchPage
+from mail_dock.infrastructure.storage.storage_root import StorageLock
 
 
 class FakeMessageRepository:
@@ -101,6 +103,62 @@ def test_search_parser_accepts_e1_options() -> None:
     assert args.mode == "or"
     assert args.limit == 25
     assert args.json is True
+
+
+def test_parser_accepts_gui_command() -> None:
+    args = _build_parser().parse_args(["gui"])
+
+    assert args.command == "gui"
+
+
+def test_main_routes_gui_and_no_command_without_starting_storage_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = config.AppConfig()
+    calls: list[Path | None] = []
+
+    monkeypatch.setattr(config, "load", lambda: settings)
+    monkeypatch.setattr(main, "setup_logging", lambda *args, **kwargs: None)
+
+    def fake_run_gui(received_settings: config.AppConfig, requested_root: Path | None) -> int:
+        calls.append(requested_root)
+        return 0 if received_settings is settings else 1
+
+    monkeypatch.setattr(
+        main,
+        "_run_gui",
+        fake_run_gui,
+    )
+
+    assert main.main([]) == 0
+    assert main.main(["gui", "--storage-root", "/tmp/mail-dock-test"]) == 0
+    assert calls == [None, Path("/tmp/mail-dock-test")]
+
+
+def test_storage_session_migrates_saves_settings_and_releases_lock(
+    tmp_storage_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = config.AppConfig()
+    saved: list[config.AppConfig] = []
+
+    def save_settings(value: config.AppConfig) -> None:
+        saved.append(value)
+
+    monkeypatch.setattr(config, "save", save_settings)
+    monkeypatch.setattr(main, "check_free_space", lambda path: None)
+
+    with StorageSession(settings, tmp_storage_root) as session:
+        assert session.root == tmp_storage_root
+        assert (
+            session.connection_manager.get_connection().execute("PRAGMA user_version").fetchone()[0]
+            == 3
+        )
+
+    assert saved[0].storage_root_candidates == (str(tmp_storage_root.resolve()),)
+    assert saved[0].storage_root_uuid is not None
+    with StorageLock(tmp_storage_root) as lock:
+        assert lock.held
 
 
 def test_search_command_builds_filters_and_prints_json(capsys: Any) -> None:

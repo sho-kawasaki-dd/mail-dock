@@ -115,14 +115,14 @@
 
 #### **A-1. `__main__.py` — `StorageSession` の共有化と `gui` 起動導線**
 
-- [ ] ルート確定後のUUID照合・`StorageLock` 取得・`ensure_layout`・`cleanup_tmp`・空き容量確認・`ConnectionManager` 生成・`migrate` 実行・設定書き戻し・後始末を、CLI と GUI が共用する `StorageSession` コンテキストマネージャへ抽出する
-- [ ] `StorageSession` がロックと接続の唯一の所有者となり、成功・例外・ウィンドウ終了の各経路でそれぞれ1回だけ解放する
-- [ ] ルート未設定時は `StorageSession` を開始せずGUIブートストラップへ渡し、ウィザード完了後に選択ルートで開始できるようにする（D-25）
-- [ ] 抽出により既存 CLI サブコマンドの挙動が変わらないことを既存テストで確認する（重複実装を作らない。D-19）
-- [ ] `gui` サブコマンドを追加する
-- [ ] サブコマンド無しで起動した場合に GUI を起動する（従来のヘルプ表示から変更する）
-- [ ] `_exit_code()` の既存マッピングを GUI 経路でも使う（`StorageLockedError` → 3 等）
-- [ ] GUI 起動時に `presentation` を import する（CLI 経路で PySide6 を import しない**遅延 import** とする）
+- [x] ルート確定後のUUID照合・`StorageLock` 取得・`ensure_layout`・`cleanup_tmp`・空き容量確認・`ConnectionManager` 生成・`migrate` 実行・設定書き戻し・後始末を、CLI と GUI が共用する `StorageSession` コンテキストマネージャへ抽出する
+- [x] `StorageSession` がロックと接続の唯一の所有者となり、成功・例外・ウィンドウ終了の各経路でそれぞれ1回だけ解放する
+- [x] ルート未設定時は `StorageSession` を開始せずGUIブートストラップへ渡し、ウィザード完了後に選択ルートで開始できるようにする（D-25）
+- [x] 抽出により既存 CLI サブコマンドの挙動が変わらないことを既存テストで確認する（重複実装を作らない。D-19）
+- [x] `gui` サブコマンドを追加する
+- [x] サブコマンド無しで起動した場合に GUI を起動する（従来のヘルプ表示から変更する）
+- [x] `_exit_code()` の既存マッピングを GUI 経路でも使う（`StorageLockedError` → 3 等）
+- [x] GUI 起動時に `presentation` を import する（CLI 経路で PySide6 を import しない**遅延 import** とする）
 
 #### **A-2. `presentation/app.py` — GUI エントリポイント**
 

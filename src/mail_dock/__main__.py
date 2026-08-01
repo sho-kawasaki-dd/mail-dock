@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, date, datetime, time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from mail_dock import __version__, config
 from mail_dock.domain.errors import (
@@ -119,6 +119,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "verify",
         parents=[common],
         help="run read-only database integrity checks and exit",
+    )
+    subparsers.add_parser(
+        "gui",
+        parents=[common],
+        help="start the graphical application",
     )
     account_parser = subparsers.add_parser(
         "account",
@@ -296,6 +301,121 @@ def _close_manager(manager: ConnectionManager | None) -> None:
     manager.request_close_all()
     manager.close_current_thread()
     manager.assert_all_closed()
+
+
+class StorageSession:
+    """Own the resources shared by CLI commands and the GUI.
+
+    Root resolution happens before the lock is acquired, so the GUI can use
+    the same root-selection function without starting a session during its
+    first-run bootstrap. Once entered, this object owns the lock and
+    connection manager until it is closed.
+    """
+
+    def __init__(
+        self,
+        settings: config.AppConfig,
+        requested_root: Path | None,
+        *,
+        readonly: bool = False,
+    ) -> None:
+        self.settings = settings
+        self.requested_root = requested_root
+        self.readonly = readonly
+        self._root: Path | None = None
+        self.root_uuid: str | None = None
+        self.network_drive = False
+        self.manager: ConnectionManager | None = None
+        self._lock: StorageLock | None = None
+        self._storage_logging_enabled = False
+        self._entered = False
+        self._closed = False
+
+    def __enter__(self) -> StorageSession:
+        if self._entered:
+            raise RuntimeError("StorageSession cannot be entered more than once")
+
+        root, root_uuid = _select_root(self.settings, self.requested_root)
+        lock = StorageLock(root, heartbeat_interval_sec=self.settings.heartbeat_interval_sec)
+        self._root = root
+        self.root_uuid = root_uuid
+        self.network_drive = drive_kind(root) is DriveKind.NETWORK
+        self._lock = lock
+        try:
+            lock.acquire()
+            ensure_layout(root)
+            cleanup_tmp(root)
+            check_free_space(root)
+            set_storage_log_target(root / "logs")
+            self._storage_logging_enabled = True
+
+            self.manager = ConnectionManager(
+                root / "metadata.db",
+                readonly=self.readonly,
+                network_drive=self.network_drive,
+            )
+            connection = self.manager.get_connection()
+            if self.readonly:
+                _verify_database(connection)
+                self.manager.close_current_thread()
+                _verify_fts_database(root / "metadata.db", network_drive=self.network_drive)
+                LOGGER.info("Database verification succeeded")
+            else:
+                version = migrate(connection, root / "metadata.db")
+                LOGGER.info("Database migration complete at schema version %d", version)
+            self._entered = True
+            return self
+        except BaseException:
+            self._cleanup()
+            raise
+
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
+        del exc_value, traceback
+        try:
+            if exc_type is None:
+                self._save_settings()
+        finally:
+            self._cleanup()
+
+    def _save_settings(self) -> None:
+        if self._root is None or self.root_uuid is None:
+            return
+        updated_settings = replace(
+            self.settings,
+            storage_root_uuid=self.root_uuid,
+            storage_root_candidates=(str(self._root.resolve(strict=False)),),
+        )
+        config.save(updated_settings)
+
+    @property
+    def root(self) -> Path:
+        """Return the resolved root while the session is active."""
+
+        if self._root is None or self._closed:
+            raise RuntimeError("StorageSession is not active")
+        return self._root
+
+    def _cleanup(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            _close_manager(self.manager)
+        finally:
+            try:
+                if self._storage_logging_enabled:
+                    set_storage_log_target(None)
+            finally:
+                if self._lock is not None:
+                    self._lock.release()
+
+    @property
+    def connection_manager(self) -> ConnectionManager:
+        """Return the active manager for repository construction."""
+
+        if self.manager is None or not self._entered or self._closed:
+            raise RuntimeError("StorageSession is not active")
+        return self.manager
 
 
 def _account_by_id(repo: SqliteMessageRepository, account_id: str) -> MessageRecord:
@@ -659,65 +779,30 @@ def _run_command(
     command: str | None,
     args: argparse.Namespace | None = None,
 ) -> int:
-    root, root_uuid = _select_root(settings, requested_root)
-    lock = StorageLock(root, heartbeat_interval_sec=settings.heartbeat_interval_sec)
-    manager: ConnectionManager | None = None
-    storage_logging_enabled = False
+    readonly = command == "verify"
     result = 0
-    try:
-        lock.acquire()
-        ensure_layout(root)
-        cleanup_tmp(root)
-        check_free_space(root)
-        set_storage_log_target(root / "logs")
-        storage_logging_enabled = True
-
-        network_drive = drive_kind(root) is DriveKind.NETWORK
-        readonly = command == "verify"
-        manager = ConnectionManager(
-            root / "metadata.db",
-            readonly=readonly,
-            network_drive=network_drive,
-        )
-        connection = manager.get_connection()
-        if readonly:
-            _verify_database(connection)
-            manager.close_current_thread()
-            _verify_fts_database(root / "metadata.db", network_drive=network_drive)
-            LOGGER.info("Database verification succeeded")
-        else:
-            version = migrate(connection, root / "metadata.db")
-            LOGGER.info("Database migration complete at schema version %d", version)
-
+    with StorageSession(settings, requested_root, readonly=readonly) as session:
         if command not in {None, "migrate", "verify"}:
             if args is None:
                 raise ConfigError("Command arguments are missing")
-            repository = SqliteMessageRepository(manager)
-            search_repository = SqliteSearchRepository(manager)
+            repository = SqliteMessageRepository(session.connection_manager)
+            search_repository = SqliteSearchRepository(session.connection_manager)
             result = _run_application_command(
                 args,
                 repository,
                 search_repository,
-                root,
+                session.root,
                 settings,
             )
-
-        updated_settings = replace(
-            settings,
-            storage_root_uuid=root_uuid,
-            storage_root_candidates=(str(root.resolve(strict=False)),),
-        )
-        config.save(updated_settings)
-    finally:
-        try:
-            _close_manager(manager)
-        finally:
-            try:
-                if storage_logging_enabled:
-                    set_storage_log_target(None)
-            finally:
-                lock.release()
     return result
+
+
+def _run_gui(settings: config.AppConfig, requested_root: Path | None) -> int:
+    """Start the GUI without importing PySide6 on CLI-only code paths."""
+
+    from mail_dock.presentation.app import run_gui
+
+    return cast(int, run_gui(settings, requested_root=requested_root))
 
 
 def _exit_code(error: MailDockError) -> int:
@@ -739,17 +824,20 @@ def _exit_code(error: MailDockError) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the mail-dock command-line application."""
+    """Run the mail-dock command-line or graphical application."""
 
     parser = _build_parser()
     args = parser.parse_args(argv)
     try:
         settings = config.load()
         setup_logging(config.config_dir(), debug=bool(getattr(args, "debug", False)))
+        command = getattr(args, "command", None)
+        if command in {None, "gui"}:
+            return _run_gui(settings, getattr(args, "storage_root", None))
         return _run_command(
             settings,
             getattr(args, "storage_root", None),
-            getattr(args, "command", None),
+            command,
             args,
         )
     except KeyboardInterrupt:
