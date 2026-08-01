@@ -45,13 +45,21 @@ def list_messages(
     filters: MessageFilter | None = None,
     cursor: PageCursor | None = None,
     limit: int = 200,
+    cancel: CancelToken | None = None,
 ) -> SearchPage:
     """List messages using the default active-state filter when unspecified."""
 
+    if cancel is None:
+        return search_repo.list_messages(
+            filters or MessageFilter(),
+            cursor=cursor,
+            limit=limit,
+        )
     return search_repo.list_messages(
         filters or MessageFilter(),
         cursor=cursor,
         limit=limit,
+        cancel=cancel,
     )
 
 
@@ -60,10 +68,13 @@ def list_thread(
     *,
     thread_key: str,
     filters: MessageFilter | None = None,
+    cancel: CancelToken | None = None,
 ) -> Sequence[MessageSummary]:
     """List messages belonging to one thread."""
 
-    return search_repo.list_thread(thread_key, filters or MessageFilter())
+    if cancel is None:
+        return search_repo.list_thread(thread_key, filters or MessageFilter())
+    return search_repo.list_thread(thread_key, filters or MessageFilter(), cancel=cancel)
 
 
 def count_messages(

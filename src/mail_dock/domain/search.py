@@ -150,6 +150,7 @@ class BaseSearchRepository(ABC):
         *,
         cursor: PageCursor | None = None,
         limit: int = 200,
+        cancel: CancelToken | None = None,
     ) -> SearchPage:
         """List messages using the same filtering and paging contract."""
 
@@ -164,7 +165,13 @@ class BaseSearchRepository(ABC):
         """Count messages matching optional search terms and filters."""
 
     @abstractmethod
-    def list_thread(self, thread_key: str, filters: MessageFilter) -> Sequence[MessageSummary]:
+    def list_thread(
+        self,
+        thread_key: str,
+        filters: MessageFilter,
+        *,
+        cancel: CancelToken | None = None,
+    ) -> Sequence[MessageSummary]:
         """List messages in one thread using the supplied filters."""
 
     @abstractmethod

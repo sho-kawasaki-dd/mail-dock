@@ -57,6 +57,9 @@ class Worker(QObject):
     cancelled = Signal()
     task_started = Signal()
     task_finished = Signal()
+    task_completed = Signal(object)
+    task_failed = Signal(object, object)
+    task_cancelled = Signal(object)
     stopped = Signal()
 
     def __init__(
@@ -176,20 +179,38 @@ class Worker(QObject):
             task.token.raise_if_cancelled()
             value = task.operation()
         except OperationCancelledError:
-            self.cancelled.emit()
+            self._emit_task_cancelled(task)
         except Exception as error:
             task_error = _as_mail_dock_error(error)
             LOGGER.exception("Worker task failed")
-            self.failed.emit(task_error)
+            self._emit_task_failed(task, task_error)
         else:
-            self.result.emit(value)
+            self._emit_task_result(task, value)
         finally:
             cleanup_error = self._close_connection()
             with self._state_lock:
                 self._tokens.discard(task.token)
             if cleanup_error is not None and task_error is None:
-                self.failed.emit(cleanup_error)
+                self._emit_task_failed(task, cleanup_error)
             self.task_finished.emit()
+            self.task_completed.emit(task.token)
+
+    def _emit_task_result(self, task: _Task, value: object) -> None:
+        """Emit a successful result; subclasses may filter stale requests."""
+
+        self.result.emit(value)
+
+    def _emit_task_failed(self, task: _Task, error: MailDockError) -> None:
+        """Emit a failure and retain the task identity for specialized workers."""
+
+        self.failed.emit(error)
+        self.task_failed.emit(task.token, error)
+
+    def _emit_task_cancelled(self, task: _Task) -> None:
+        """Emit cancellation and retain the task identity for specialized workers."""
+
+        self.cancelled.emit()
+        self.task_cancelled.emit(task.token)
 
     def _close_connection(self) -> MailDockError | None:
         """Close this thread's database connection, if one was supplied."""

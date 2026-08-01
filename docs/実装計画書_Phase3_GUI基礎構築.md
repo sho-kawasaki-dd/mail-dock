@@ -160,13 +160,13 @@
 
 #### **A-6. `presentation/threads/query_worker.py` — 読み取り専用ワーカー**
 
-- [ ] `list_messages` / `search_messages` / `count_messages` / `list_thread` / `get_message` / `open_message` の要求を受ける
-- [ ] `list/search`・`detail/open`・`count/thread` の要求チャネルごとに **リクエストID** と `CancelToken` を採番し、結果 Signal にチャネルとIDを含める（D-6）
-- [ ] UI側コントローラは同じチャネルの新要求を発行する直前に旧トークンを直接キャンセルする。異なるチャネルの要求は相互キャンセルしない
-- [ ] ワーカー内は要求を直列実行し、queuedされた未開始要求は世代IDを確認して古ければDB・EMLへ触れず破棄する
-- [ ] チャネル別ID・トークン・最新世代判定を `presentation/threads/request_state.py` のQt非依存クラスへ分離し、通常CIでテストする（D-28）
-- [ ] `OperationCancelledError` は失敗ではなく「キャンセル済み」として扱い、UIにエラーを出さない
-- [ ] `sqlite3` と解析具象を直接使わず、検索・一覧は `usecases/search_messages.py`、閲覧は `usecases/open_message.py` 経由で呼ぶ
+- [x] `list_messages` / `search_messages` / `count_messages` / `list_thread` / `get_message` / `open_message` の要求を受ける
+- [x] `list/search`・`detail/open`・`count/thread` の要求チャネルごとに **リクエストID** と `CancelToken` を採番し、結果 Signal にチャネルとIDを含める（D-6）
+- [x] UI側コントローラは同じチャネルの新要求を発行する直前に旧トークンを直接キャンセルする。異なるチャネルの要求は相互キャンセルしない
+- [x] ワーカー内は要求を直列実行し、queuedされた未開始要求は世代IDを確認して古ければDB・EMLへ触れず破棄する
+- [x] チャネル別ID・トークン・最新世代判定を `presentation/threads/request_state.py` のQt非依存クラスへ分離し、通常CIでテストする（D-28）
+- [x] `OperationCancelledError` は失敗ではなく「キャンセル済み」として扱い、UIにエラーを出さない
+- [x] `sqlite3` と解析具象を直接使わず、検索・一覧は `usecases/search_messages.py`、閲覧は `usecases/open_message.py` 経由で呼ぶ
 
 #### **A-7. `presentation/threads/sync_worker.py` — 書き込みワーカー**
 

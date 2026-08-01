@@ -240,9 +240,10 @@ class SqliteSearchRepository(BaseSearchRepository):
         *,
         cursor: PageCursor | None = None,
         limit: int = 200,
+        cancel: CancelToken | None = None,
     ) -> SearchPage:
-        with self._db_io("list messages"):
-            return self._page(plan=None, filters=filters, cursor=cursor, limit=limit, cancel=None)
+        with self._db_io("list messages", cancel):
+            return self._page(plan=None, filters=filters, cursor=cursor, limit=limit, cancel=cancel)
 
     def count_messages(
         self,
@@ -276,7 +277,13 @@ class SqliteSearchRepository(BaseSearchRepository):
                 self._clear_progress_handler(cancel)
         return int(row[0]) if row is not None else 0
 
-    def list_thread(self, thread_key: str, filters: MessageFilter) -> Sequence[MessageSummary]:
+    def list_thread(
+        self,
+        thread_key: str,
+        filters: MessageFilter,
+        *,
+        cancel: CancelToken | None = None,
+    ) -> Sequence[MessageSummary]:
         thread_filters = MessageFilter(
             account_ids=filters.account_ids,
             folder_ids=filters.folder_ids,
@@ -287,13 +294,13 @@ class SqliteSearchRepository(BaseSearchRepository):
             remote_states=filters.remote_states,
             thread_key=thread_key,
         )
-        with self._db_io("list thread"):
+        with self._db_io("list thread", cancel):
             return self._page(
                 plan=None,
                 filters=thread_filters,
                 cursor=None,
                 limit=2_147_483_647,
-                cancel=None,
+                cancel=cancel,
             ).items
 
     def get_message(self, message_id: int) -> MessageDetail | None:
