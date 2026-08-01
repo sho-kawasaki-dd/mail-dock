@@ -6,9 +6,19 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from datetime import datetime
 
-from mail_dock.domain.messages import RenderedMessage, StoredEml
+from mail_dock.domain.messages import AttachmentSavePlan, RenderedMessage, SavedFile, StoredEml
 
 type JSONValue = bool | int | float | str | list[JSONValue] | dict[str, JSONValue] | None
+
+__all__ = [
+    "AttachmentSavePlan",
+    "BaseCredentialStore",
+    "BaseEmlStorage",
+    "BaseManifestWriter",
+    "BaseMessageRenderer",
+    "JSONValue",
+    "SavedFile",
+]
 
 
 class BaseCredentialStore(ABC):

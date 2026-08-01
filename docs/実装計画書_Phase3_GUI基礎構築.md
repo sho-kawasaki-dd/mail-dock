@@ -427,15 +427,15 @@
 
 #### **F-1. `usecases/save_attachment.py` — 二段階添付保存**
 
-- [ ] domain側に `AttachmentSavePlan`（`relative_path` / `expected_hash` / `part_index` / `dest_dir` / `filename` / `warnings` / `is_executable`）と `SavedFile`（`path` / `warnings` / `is_executable`）を frozen dataclass として定義する
-- [ ] `prepare_attachment_save(storage, renderer, *, relative_path, expected_hash, part_index, dest_dir, filename=None) -> AttachmentSavePlan` を実装する
-- [ ] prepareは `BaseEmlStorage.read_verified()` でEMLを読み、`BaseMessageRenderer` で対象パートを取得して `sanitize_attachment_name()` と同名連番候補の決定を行うが、**ファイルは一切作成しない**
-- [ ] `part_index` が範囲外、または対象がインラインパートである場合はドメイン例外で拒否する
-- [ ] `commit_attachment_save(storage, renderer, *, plan, overwrite=False) -> SavedFile` を実装する
-- [ ] commitは `read_verified()` でEMLハッシュを再検証し、対象パート・サニタイズ結果も再検証して、**保存直前に `resolve_within(plan.dest_dir, name)` を再実行**する（F-19）
-- [ ] commit時に同名競合が発生した場合、`overwrite=False` なら再度連番を決定して既存ファイルを上書きしない。`overwrite=True` はUIで明示確認済みの場合だけ指定する
-- [ ] 一時ファイルは最終保存先の親ディレクトリに作成し、`flush()` + `fsync()` 後に同一ボリューム上で `os.replace` する。失敗時は一時ファイルを除去する
-- [ ] usecaseは `BaseEmlStorage` / `BaseMessageRenderer` にのみ依存し、`sqlite3` / PySide6 / infrastructure の具象をimportしない
+- [x] domain側に `AttachmentSavePlan`（`relative_path` / `expected_hash` / `part_index` / `dest_dir` / `filename` / `warnings` / `is_executable`）と `SavedFile`（`path` / `warnings` / `is_executable`）を frozen dataclass として定義する
+- [x] `prepare_attachment_save(storage, renderer, *, relative_path, expected_hash, part_index, dest_dir, filename=None) -> AttachmentSavePlan` を実装する
+- [x] prepareは `BaseEmlStorage.read_verified()` でEMLを読み、`BaseMessageRenderer` で対象パートを取得して `sanitize_attachment_name()` と同名連番候補の決定を行うが、**ファイルは一切作成しない**
+- [x] `part_index` が範囲外、または対象がインラインパートである場合はドメイン例外で拒否する
+- [x] `commit_attachment_save(storage, renderer, *, plan, overwrite=False) -> SavedFile` を実装する
+- [x] commitは `read_verified()` でEMLハッシュを再検証し、対象パート・サニタイズ結果も再検証して、**保存直前に `resolve_within(plan.dest_dir, name)` を再実行**する（F-19）
+- [x] commit時に同名競合が発生した場合、`overwrite=False` なら再度連番を決定して既存ファイルを上書きしない。`overwrite=True` はUIで明示確認済みの場合だけ指定する
+- [x] 一時ファイルは最終保存先の親ディレクトリに作成し、`flush()` + `fsync()` 後に同一ボリューム上で `os.replace` する。失敗時は一時ファイルを除去する
+- [x] usecaseは `BaseEmlStorage` / `BaseMessageRenderer` にのみ依存し、`sqlite3` / PySide6 / infrastructure の具象をimportしない
 
 #### **F-2. `usecases/export_message.py`**
 

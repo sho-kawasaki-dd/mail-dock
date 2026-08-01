@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -54,3 +55,25 @@ class StoredEml:
     file_hash: str
     size_bytes: int
     deduplicated: bool = False
+
+
+@dataclass(frozen=True)
+class AttachmentSavePlan:
+    """User-reviewable plan produced before an attachment is written."""
+
+    relative_path: str
+    expected_hash: str
+    part_index: int
+    dest_dir: Path
+    filename: str
+    warnings: tuple[str, ...]
+    is_executable: bool
+
+
+@dataclass(frozen=True)
+class SavedFile:
+    """Result of committing an attachment save."""
+
+    path: Path
+    warnings: tuple[str, ...]
+    is_executable: bool
