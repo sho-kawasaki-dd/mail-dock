@@ -8,9 +8,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QCoreApplication, QObject, QThread, QUrl, Signal, Slot
-from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
+from PySide6.QtCore import QCoreApplication, QObject, QThread, Signal, Slot
+from PySide6.QtWidgets import QApplication, QDialog
 
 from mail_dock import config
 from mail_dock.__main__ import (
@@ -23,7 +22,7 @@ from mail_dock.domain.errors import MailDockError, StorageForeignRootError
 from mail_dock.infrastructure.storage.storage_root import RootProbe, resolve_root
 from mail_dock.presentation import strings
 from mail_dock.presentation.context import AppContext
-from mail_dock.presentation.errors import present_error
+from mail_dock.presentation.views.dialogs.error_dialog import show_error
 from mail_dock.presentation.views.setup_wizard import SetupWizard
 from mail_dock.presentation.web.schemes import register_schemes
 
@@ -73,22 +72,7 @@ def _available_root(settings: config.AppConfig, requested_root: Path | None) -> 
 
 
 def _show_error(error: BaseException) -> None:
-    presentation = present_error(error)
-    if not isinstance(error, MailDockError):
-        LOGGER.exception("GUI startup failed", exc_info=error)
-    box = QMessageBox(QMessageBox.Icon.Critical, strings.APP_TITLE, presentation.message)
-    if presentation.recovery_action is not None:
-        box.setInformativeText(presentation.recovery_action)
-    log_button = None
-    if presentation.show_log_folder:
-        log_button = box.addButton(
-            strings.MAIN_MENU_OPEN_LOG_FOLDER,
-            QMessageBox.ButtonRole.HelpRole,
-        )
-    box.addButton(QMessageBox.StandardButton.Ok)
-    box.exec()
-    if box.clickedButton() is log_button:
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(config.config_dir() / "logs")))
+    show_error(error)
 
 
 def _stop_window(window: Any, context: AppContext | None) -> None:

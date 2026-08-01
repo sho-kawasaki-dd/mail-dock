@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from mail_dock.domain.accounts import validate_account_id
 from mail_dock.domain.errors import MailDockError, StorageForeignRootError
+from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.repository import MessageRecord
 from mail_dock.infrastructure.storage.storage_root import (
     DriveKind,
@@ -35,6 +36,8 @@ from mail_dock.presentation.errors import present_error
 from mail_dock.presentation.threads.worker import Worker
 from mail_dock.usecases.register_account import register_account
 from mail_dock.usecases.sync_folders import refresh_folders, set_sync_target
+
+from .dialogs.progress_dialog import ProgressDialog
 
 RootContextFactory = Callable[[Path], Any]
 
@@ -68,6 +71,7 @@ class SetupWizard(QWizard):
         self._on_root_confirmed = on_root_confirmed
         self._root_confirmed = context is not None
         self._worker: Worker | None = None
+        self._progress_dialog: ProgressDialog | None = None
         self._operation: str | None = None
         self._connection_test_passed = False
         self._account_id: str | None = None
@@ -291,7 +295,7 @@ class SetupWizard(QWizard):
         self._connection_test_passed = False
         self._connection_test_button.setEnabled(False)
         self._account_status.setText(strings.WIZARD_STATUS_TESTING_CONNECTION)
-        self._submit_operation(
+        token = self._submit_operation(
             "connection",
             lambda: _test_connection(
                 self._context,
@@ -301,6 +305,7 @@ class SetupWizard(QWizard):
                 password=password,
             ),
         )
+        self._show_progress(strings.WIZARD_STATUS_TESTING_CONNECTION, token)
 
     def _invalidate_connection_test(self, *_args: object) -> None:
         self._connection_test_passed = False
@@ -310,10 +315,11 @@ class SetupWizard(QWizard):
         if self._operation == "folders" or account_id is None:
             return
         self._folders_status.setText(strings.WIZARD_STATUS_FOLDER_LOADING)
-        self._submit_operation(
+        token = self._submit_operation(
             "folders",
             lambda: self._refresh_account_folders(account_id),
         )
+        self._show_progress(strings.WIZARD_STATUS_FOLDER_LOADING, token)
 
     def _refresh_account_folders(self, account_id: str) -> tuple[MessageRecord, ...]:
         if self._context is None:
@@ -330,7 +336,7 @@ class SetupWizard(QWizard):
             refresh_folders(fetcher, repository, account_id)
         return tuple(repository.list_folders(account_id))
 
-    def _submit_operation(self, operation: str, callback: Callable[[], object]) -> None:
+    def _submit_operation(self, operation: str, callback: Callable[[], object]) -> CancelToken:
         self._stop_worker()
         connection_manager = getattr(self._context, "connection_manager", None)
         worker = Worker(connection_manager)
@@ -340,11 +346,19 @@ class SetupWizard(QWizard):
         worker.failed.connect(self._operation_failed)
         worker.cancelled.connect(self._operation_cancelled)
         worker.start()
-        worker.submit(callback)
+        return worker.submit(callback)
+
+    def _show_progress(self, message: str, token: CancelToken) -> None:
+        self._close_progress()
+        dialog = ProgressDialog(message, self)
+        dialog.attach_token(token)
+        self._progress_dialog = dialog
+        dialog.show()
 
     def _operation_succeeded(self, value: object) -> None:
         operation = self._operation
         self._operation = None
+        self._close_progress()
         if operation == "connection":
             self._connection_test_passed = True
             self._connection_test_button.setEnabled(True)
@@ -357,6 +371,7 @@ class SetupWizard(QWizard):
     def _operation_failed(self, error: object) -> None:
         operation = self._operation
         self._operation = None
+        self._close_progress()
         safe_error = error if isinstance(error, BaseException) else MailDockError("setup failed")
         message = present_error(safe_error).message
         if operation == "connection":
@@ -369,6 +384,7 @@ class SetupWizard(QWizard):
 
     def _operation_cancelled(self) -> None:
         self._operation = None
+        self._close_progress()
         self._stop_worker()
 
     def _set_folder_checks(self, records: tuple[MessageRecord, ...]) -> None:
@@ -399,6 +415,7 @@ class SetupWizard(QWizard):
         label.setText(present_error(error).message)
 
     def reject(self) -> None:
+        self._close_progress()
         self._stop_worker()
         super().reject()
 
@@ -407,6 +424,12 @@ class SetupWizard(QWizard):
         self._worker = None
         if worker is not None:
             worker.stop()
+
+    def _close_progress(self) -> None:
+        if self._progress_dialog is not None:
+            self._progress_dialog.finish()
+            self._progress_dialog.deleteLater()
+            self._progress_dialog = None
 
     def _browse(self) -> None:
         selected = QFileDialog.getExistingDirectory(self, strings.WIZARD_DIALOG_SELECT_ROOT)

@@ -13,9 +13,9 @@ from PySide6.QtWebEngineCore import (
     QWebEnginePage,
     QWebEngineProfile,
 )
-from PySide6.QtWidgets import QMessageBox, QWidget
+from PySide6.QtWidgets import QWidget
 
-from mail_dock.presentation import strings
+from mail_dock.presentation.views.dialogs.confirmation_dialog import confirm_external_link
 
 from .url_policy import is_allowed_external_url
 
@@ -25,14 +25,7 @@ OpenExternalUrl = Callable[[QUrl], bool]
 
 def _confirm_external_url(url: str, parent: QWidget | None) -> bool:
     """Ask for confirmation before handing a URL to the operating system."""
-    result = QMessageBox.question(
-        parent,
-        strings.DIALOG_CONFIRM_TITLE,
-        strings.DIALOG_CONFIRM_EXTERNAL_LINK.format(url=url),
-        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        QMessageBox.StandardButton.No,
-    )
-    return result == QMessageBox.StandardButton.Yes
+    return confirm_external_link(url, parent)
 
 
 class MailPage(QWebEnginePage):

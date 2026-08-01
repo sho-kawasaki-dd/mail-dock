@@ -29,12 +29,15 @@ from PySide6.QtWidgets import (
 from mail_dock import config
 from mail_dock.domain.accounts import validate_account_id
 from mail_dock.domain.errors import MailDockError
+from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.repository import MessageRecord
 from mail_dock.presentation import strings
 from mail_dock.presentation.errors import present_error
 from mail_dock.presentation.threads.worker import Worker
 from mail_dock.usecases.register_account import register_account
 from mail_dock.usecases.sync_folders import refresh_folders, set_sync_target
+
+from .progress_dialog import ProgressDialog
 
 _MEGABYTE = 1024 * 1024
 
@@ -59,6 +62,7 @@ class AccountDialog(QDialog):
         self._worker.cancelled.connect(self._operation_cancelled)
         self._worker.start()
         self._operation: str | None = None
+        self._progress_dialog: ProgressDialog | None = None
         self._connection_test_passed = False
         self._build_ui()
 
@@ -126,7 +130,8 @@ class AccountDialog(QDialog):
         self._connection_test_passed = False
         self._test_button.setEnabled(False)
         self._status_label.setText(strings.SETTINGS_STATUS_TESTING_CONNECTION)
-        self._submit("connection", lambda: _test_connection(self._context, values))
+        token = self._submit("connection", lambda: _test_connection(self._context, values))
+        self._show_progress(strings.SETTINGS_STATUS_TESTING_CONNECTION, token)
 
     def _register_account(self) -> None:
         values = self._account_values()
@@ -167,15 +172,23 @@ class AccountDialog(QDialog):
             "display_name": self._display_name_edit.text().strip(),
         }
 
-    def _submit(self, operation: str, callback: Callable[[], object]) -> None:
+    def _submit(self, operation: str, callback: Callable[[], object]) -> CancelToken:
         self._worker.cancel_all()
         self._operation = operation
-        self._worker.submit(lambda: _OperationResult(operation, callback()))
+        return self._worker.submit(lambda: _OperationResult(operation, callback()))
+
+    def _show_progress(self, message: str, token: CancelToken) -> None:
+        self._close_progress()
+        dialog = ProgressDialog(message, self)
+        dialog.attach_token(token)
+        self._progress_dialog = dialog
+        dialog.show()
 
     def _operation_succeeded(self, value: object) -> None:
         if not isinstance(value, _OperationResult) or value.operation != self._operation:
             return
         self._operation = None
+        self._close_progress()
         if value.operation == "connection":
             self._connection_test_passed = True
             self._test_button.setEnabled(True)
@@ -191,6 +204,7 @@ class AccountDialog(QDialog):
         if self._operation is None:
             return
         self._operation = None
+        self._close_progress()
         self._test_button.setEnabled(True)
         self._buttons.setEnabled(True)
         self._show_error(
@@ -199,6 +213,7 @@ class AccountDialog(QDialog):
 
     def _operation_cancelled(self) -> None:
         self._operation = None
+        self._close_progress()
         self._test_button.setEnabled(True)
         self._buttons.setEnabled(True)
 
@@ -206,11 +221,18 @@ class AccountDialog(QDialog):
         self._status_label.setText(present_error(error).message)
 
     def reject(self) -> None:
+        self._close_progress()
         self._stop_worker()
         super().reject()
 
     def _stop_worker(self) -> None:
         self._worker.stop()
+
+    def _close_progress(self) -> None:
+        if self._progress_dialog is not None:
+            self._progress_dialog.finish()
+            self._progress_dialog.deleteLater()
+            self._progress_dialog = None
 
 
 class SettingsDialog(QDialog):
@@ -233,6 +255,7 @@ class SettingsDialog(QDialog):
         self._worker.cancelled.connect(self._operation_cancelled)
         self._worker.start()
         self._operation: str | None = None
+        self._progress_dialog: ProgressDialog | None = None
         self._accounts: tuple[MessageRecord, ...] = ()
         self._folders: tuple[MessageRecord, ...] = ()
         self._selected_account_id: str | None = None
@@ -361,7 +384,8 @@ class SettingsDialog(QDialog):
         if account is None:
             return
         self._set_busy(True)
-        self._submit("folders", lambda: self._refresh_account_folders(account, account_id))
+        token = self._submit("folders", lambda: self._refresh_account_folders(account, account_id))
+        self._show_progress(strings.SETTINGS_BUTTON_REFRESH_FOLDERS, token)
 
     def _refresh_account_folders(
         self,
@@ -409,15 +433,23 @@ class SettingsDialog(QDialog):
         self._folder_status.setText(strings.SETTINGS_STATUS_ACCOUNT_ADDED)
         self._load_accounts()
 
-    def _submit(self, operation: str, callback: Callable[[], object]) -> None:
+    def _submit(self, operation: str, callback: Callable[[], object]) -> CancelToken:
         self._worker.cancel_all()
         self._operation = operation
-        self._worker.submit(lambda: _OperationResult(operation, callback()))
+        return self._worker.submit(lambda: _OperationResult(operation, callback()))
+
+    def _show_progress(self, message: str, token: CancelToken) -> None:
+        self._close_progress()
+        dialog = ProgressDialog(message, self)
+        dialog.attach_token(token)
+        self._progress_dialog = dialog
+        dialog.show()
 
     def _operation_succeeded(self, value: object) -> None:
         if not isinstance(value, _OperationResult) or value.operation != self._operation:
             return
         self._operation = None
+        self._close_progress()
         self._set_busy(False)
         if value.operation == "accounts":
             records = value.value if isinstance(value.value, tuple) else ()
@@ -462,6 +494,7 @@ class SettingsDialog(QDialog):
 
     def _operation_failed(self, error: object) -> None:
         self._operation = None
+        self._close_progress()
         self._set_busy(False)
         self._folder_status.setText(
             present_error(
@@ -473,6 +506,7 @@ class SettingsDialog(QDialog):
 
     def _operation_cancelled(self) -> None:
         self._operation = None
+        self._close_progress()
         self._set_busy(False)
 
     def _set_busy(self, busy: bool) -> None:
@@ -521,11 +555,18 @@ class SettingsDialog(QDialog):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def reject(self) -> None:
+        self._close_progress()
         self._stop_worker()
         super().reject()
 
     def _stop_worker(self) -> None:
         self._worker.stop()
+
+    def _close_progress(self) -> None:
+        if self._progress_dialog is not None:
+            self._progress_dialog.finish()
+            self._progress_dialog.deleteLater()
+            self._progress_dialog = None
 
 
 def _test_connection(context: Any, values: dict[str, Any]) -> None:
