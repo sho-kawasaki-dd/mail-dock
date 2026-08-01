@@ -6,6 +6,7 @@ from PySide6.QtCore import QObject
 from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEngineSettings
 
 from .interceptor import MailUrlRequestInterceptor
+from .schemes import install_scheme_handlers
 
 _DISABLED_ATTRIBUTES = (
     QWebEngineSettings.WebAttribute.JavascriptEnabled,
@@ -46,4 +47,5 @@ def create_mail_profile(
 
     interceptor = request_interceptor or MailUrlRequestInterceptor(profile)
     profile.setUrlRequestInterceptor(interceptor)
+    install_scheme_handlers(profile)
     return profile

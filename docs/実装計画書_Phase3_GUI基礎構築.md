@@ -317,12 +317,12 @@
 
 #### **C-7. `presentation/web/schemes.py` — 層4**
 
-- [ ] `register_schemes()` を実装し、`cid` と `maildock` を `QWebEngineUrlScheme` として登録する（**`QApplication` 生成前に呼ぶ**。D-11）
-- [ ] `CidSchemeHandler(QWebEngineUrlSchemeHandler)`: 現在表示中メッセージの `MessagePart` から `Content-ID` 一致のパートを `QBuffer` で返す
-- [ ] `MailBodySchemeHandler`: 本文HTMLを配信する（`setHtml()` の約2MB制限回避）
-- [ ] 未知の `cid` は 404 相当で失敗させる（外部へ問い合わせない）
-- [ ] メッセージ切り替え時に前のメッセージのパートを破棄する（メモリ滞留の防止。N-3）
-- [ ] `installUrlSchemeHandler()` をプロファイルへ設定する
+- [x] `register_schemes()` を実装し、`cid` と `maildock` を `QWebEngineUrlScheme` として登録する（**`QApplication` 生成前に呼ぶ**。D-11）
+- [x] `CidSchemeHandler(QWebEngineUrlSchemeHandler)`: 現在表示中メッセージの `MessagePart` から `Content-ID` 一致のパートを `QBuffer` で返す
+- [x] `MailBodySchemeHandler`: 本文HTMLを配信する（`setHtml()` の約2MB制限回避）
+- [x] 未知の `cid` は 404 相当で失敗させる（外部へ問い合わせない）
+- [x] メッセージ切り替え時に前のメッセージのパートを破棄する（メモリ滞留の防止。N-3）
+- [x] `installUrlSchemeHandler()` をプロファイルへ設定する
 
 #### **C-8. `presentation/web/page.py` — 層6（ナビゲーション制御）**
 
