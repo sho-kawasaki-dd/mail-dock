@@ -157,6 +157,11 @@ class SyncWorker(Worker):
 
     request_sync_all_accounts = sync_all_accounts
 
+    def set_sync_options(self, options: SyncOptions) -> None:
+        """Update defaults used by synchronization requests created later."""
+
+        self._sync_options = options
+
     def _run_sync_account(
         self,
         account_id: str,

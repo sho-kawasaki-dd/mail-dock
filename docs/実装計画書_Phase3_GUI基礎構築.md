@@ -407,13 +407,13 @@
 
 #### **E-2. `presentation/views/dialogs/settings_dialog.py`（F-22 / D-15）**
 
-- [ ] 1通あたりサイズ上限（`max_message_bytes`、既定 50MB）
-- [ ] 外部画像の読み込み（`block_remote_images`、既定ブロック）
-- [ ] 起動時に同期する（`sync_on_startup`）
-- [ ] 起動時の整合性チェック（`startup_verification`: quick / full）。選択値が次回起動時にA-2の検証処理へ実際に反映されること
-- [ ] ログフォルダを開く（`QDesktopServices.openUrl()`）
-- [ ] アカウント一覧の表示・追加、同期対象フォルダの再編集
-- [ ] Phase 4 / 4.5 の設定項目（purge モード・ゴミ箱猶予日数・ハートビート間隔・サーバー削除モード・PST取込設定）は**表示しない**
+- [x] 1通あたりサイズ上限（`max_message_bytes`、既定 50MB）
+- [x] 外部画像の読み込み（`block_remote_images`、既定ブロック）
+- [x] 起動時に同期する（`sync_on_startup`）
+- [x] 起動時の整合性チェック（`startup_verification`: quick / full）。選択値が次回起動時にA-2の検証処理へ実際に反映されること
+- [x] ログフォルダを開く（`QDesktopServices.openUrl()`）
+- [x] アカウント一覧の表示・追加、同期対象フォルダの再編集
+- [x] Phase 4 / 4.5 の設定項目（purge モード・ゴミ箱猶予日数・ハートビート間隔・サーバー削除モード・PST取込設定）は**表示しない**
 
 #### **E-3. `presentation/views/dialogs/` — 共通ダイアログ**
 

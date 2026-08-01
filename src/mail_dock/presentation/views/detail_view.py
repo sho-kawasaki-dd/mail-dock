@@ -178,6 +178,13 @@ class DetailView(QWidget):
         """Clear the preview and cancel outstanding detail requests."""
         self.show_message(None)
 
+    def set_block_remote_images(self, block: bool) -> None:
+        """Apply the global remote-image setting to the current preview policy."""
+
+        self._block_remote_images = block
+        self._allow_remote_images_for_message = not block
+        self._interceptor.set_allow_remote_images(not block)
+
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         """Detach the page before the off-the-record profile is destroyed."""
         self._body_view.setPage(None)  # type: ignore[arg-type]  # Qt accepts None to detach the page.

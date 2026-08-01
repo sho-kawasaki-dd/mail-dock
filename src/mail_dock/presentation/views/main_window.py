@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any, cast
 
-from PySide6.QtCore import QSettings, Qt, Signal
-from PySide6.QtGui import QAction, QCloseEvent
+from PySide6.QtCore import QSettings, Qt, QUrl, Signal
+from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from mail_dock import config
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.presentation import strings
 from mail_dock.presentation.context import AppContext
@@ -36,6 +37,7 @@ from mail_dock.presentation.threads.sync_worker import (
 )
 from mail_dock.presentation.viewmodels.message_list_viewmodel import MessageListViewModel
 from mail_dock.presentation.views.detail_view import DetailView
+from mail_dock.presentation.views.dialogs.settings_dialog import SettingsDialog
 from mail_dock.presentation.views.message_list import MessageListSearchBar, MessageListView
 from mail_dock.usecases.sync_folders import FolderRefreshResult
 from mail_dock.usecases.sync_mail import SyncOptions, SyncProgress, SyncResult
@@ -202,6 +204,8 @@ class MainWindow(QMainWindow):
         self.export_eml_action.triggered.connect(self.export_requested)
         self.thread_view_action.triggered.connect(self.detail_view.request_thread)
         self.exit_action.triggered.connect(self.close)
+        self.settings_requested.connect(self._show_settings)
+        self.open_log_folder_action.triggered.connect(self._open_log_folder)
 
     def _build_status_bar(self) -> None:
         status = QStatusBar(self)
@@ -387,6 +391,23 @@ class MainWindow(QMainWindow):
         self._storage_status_label.setText(strings.ERROR_STORAGE_DETACHED)
         self.sync_action.setEnabled(False)
         self.refresh_folders_action.setEnabled(False)
+
+    def _show_settings(self) -> None:
+        dialog = SettingsDialog(self.context, self)
+        dialog.settings_saved.connect(self._settings_changed)
+        dialog.exec()
+
+    def _settings_changed(self, settings: object) -> None:
+        if not isinstance(settings, config.AppConfig):
+            return
+        self.sync_worker.set_sync_options(SyncOptions(max_message_bytes=settings.max_message_bytes))
+        self.detail_view.set_block_remote_images(settings.block_remote_images)
+        self.sync_worker.load_folder_tree()
+
+    def _open_log_folder(self) -> None:
+        path = config.config_dir() / "logs"
+        path.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _cancel_current_operation(self) -> None:
         if self._sync_token is not None:
