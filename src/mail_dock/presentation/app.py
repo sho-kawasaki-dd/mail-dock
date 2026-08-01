@@ -91,7 +91,7 @@ def _start_verification(
     thread = QThread()
     worker = _StartupVerificationWorker(session, session.settings.startup_verification)
     worker.moveToThread(thread)
-    result: dict[str, Any] = {"error": None, "window": None}
+    result: dict[str, Any] = {"error": None, "window": None, "worker": worker}
 
     def verified() -> None:
         window = context.build_main_window()

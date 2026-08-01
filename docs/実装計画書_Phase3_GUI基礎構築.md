@@ -493,31 +493,31 @@
 
 #### **G-2. GUIテスト（`gui` マーカー／ローカル手動）**
 
-- [ ] `tests/conftest.py` に `gui` マーカーのスキップ条件を追加する（`docker` と同じ形。環境変数でオプトイン。D-20）
-- [ ] **セッションスコープの `QApplication` フィクスチャ**を用意し、その前に `register_schemes()` を呼ぶ（本番と同じ初期化順を再現する。D-20）
-- [ ] `tests/gui/test_message_table_model.py`
-  - [ ] `fetchMore` が非同期で行を追加すること
-  - [ ] 全ページを連結した結果が `list_messages` の一括取得と**完全一致**すること（重複・欠損ゼロ）
-  - [ ] `date_sent` NULL 混在・同一 `date_sent` でも成立すること
-  - [ ] 古いリクエストIDの結果が破棄されること
-  - [ ] フィルタ変更でモデルがリセットされ、カーソルが捨てられること
-- [ ] `tests/gui/test_folder_tree_model.py`: ツリー構造と選択→`MessageFilter` 変換
-- [ ] `tests/gui/test_query_worker.py`: UI側から実行中トークンを直接キャンセルできること、同一チャネルの前要求だけがキャンセルされること、`OperationCancelledError` がエラー通知されないこと
-- [ ] `tests/gui/test_sync_worker.py`: 進捗の間引き、実行中Slotのイベントループ復帰を待たないキャンセル、`StorageDetachedError` の Signal 伝播
-- [ ] `tests/gui/test_web_sandbox.py`
-  - [ ] プロファイルがオフレコで、キャッシュ・永続クッキーが無効なこと
-  - [ ] JavaScript ほか危険な属性がすべて無効なこと
-  - [ ] インターセプタが `http` / `https` / `file` をブロックし、`cid` / `maildock` を通すこと
-  - [ ] 外部画像を解除すると画像リクエストのみ通り、メールを切り替えると再びブロックされること
-  - [ ] `cid:` ハンドラがインライン画像を返し、未知の `cid` を失敗させること
-  - [ ] 2MB を超える本文HTMLが `maildock:` 経由で表示できること
-  - [ ] 許可URLのリンククリックだけがアプリ内遷移せず外部ブラウザ導線へ渡り、不許可URLは確認・外部起動とも行わないこと（`QDesktopServices` をモック）
-- [ ] `tests/gui/test_detail_view.py`: `purged` の代替表示、添付一覧、「この会話のN件を表示」
-- [ ] `tests/gui/test_main_window.py`: 3ペイン構成、同期ボタンの多重起動防止、終了時のワーカー停止
-- [ ] `tests/gui/test_setup_wizard.py`: 3ページの遷移とバリデーション（`FakeFetcher` と一時ルートを使用）
-- [ ] `tests/gui/test_settings_dialog.py`: 変更が `config.save()` へ反映されること、Phase 4 項目が表示されないこと
-- [ ] `tests/gui/test_app_bootstrap.py`: ルート未設定でもウィザードが起動し、確定後だけ `StorageSession` が開始され、ロックと接続が各終了経路で1回だけ解放されること
-- [ ] `tests/gui/test_startup_verification.py`: quick/fullの各設定が対応する検証を起動し、完了前にメイン画面のDB操作を開始しないこと
+- [x] `tests/conftest.py` に `gui` マーカーのスキップ条件を追加する（`docker` と同じ形。環境変数でオプトイン。D-20）
+- [x] **セッションスコープの `QApplication` フィクスチャ**を用意し、その前に `register_schemes()` を呼ぶ（本番と同じ初期化順を再現する。D-20）
+- [x] `tests/gui/test_message_table_model.py`
+  - [x] `fetchMore` が非同期で行を追加すること
+  - [x] 全ページを連結した結果が `list_messages` の一括取得と**完全一致**すること（重複・欠損ゼロ）
+  - [x] `date_sent` NULL 混在・同一 `date_sent` でも成立すること
+  - [x] 古いリクエストIDの結果が破棄されること
+  - [x] フィルタ変更でモデルがリセットされ、カーソルが捨てられること
+- [x] `tests/gui/test_folder_tree_model.py`: ツリー構造と選択→`MessageFilter` 変換
+- [x] `tests/gui/test_query_worker.py`: UI側から実行中トークンを直接キャンセルできること、同一チャネルの前要求だけがキャンセルされること、`OperationCancelledError` がエラー通知されないこと
+- [x] `tests/gui/test_sync_worker.py`: 進捗の間引き、実行中Slotのイベントループ復帰を待たないキャンセル、`StorageDetachedError` の Signal 伝播
+- [x] `tests/gui/test_web_sandbox.py`
+  - [x] プロファイルがオフレコで、キャッシュ・永続クッキーが無効なこと
+  - [x] JavaScript ほか危険な属性がすべて無効なこと
+  - [x] インターセプタが `http` / `https` / `file` をブロックし、`cid` / `maildock` を通すこと
+  - [x] 外部画像を解除すると画像リクエストのみ通り、メールを切り替えると再びブロックされること
+  - [x] `cid:` ハンドラがインライン画像を返し、未知の `cid` を失敗させること
+  - [x] 2MB を超える本文HTMLが `maildock:` 経由で表示できること
+  - [x] 許可URLのリンククリックだけがアプリ内遷移せず外部ブラウザ導線へ渡り、不許可URLは確認・外部起動とも行わないこと（`QDesktopServices` をモック）
+- [x] `tests/gui/test_detail_view.py`: `purged` の代替表示、添付一覧、「この会話のN件を表示」
+- [x] `tests/gui/test_main_window.py`: 3ペイン構成、同期ボタンの多重起動防止、終了時のワーカー停止
+- [x] `tests/gui/test_setup_wizard.py`: 3ページの遷移とバリデーション（`FakeFetcher` と一時ルートを使用）
+- [x] `tests/gui/test_settings_dialog.py`: 変更が `config.save()` へ反映されること、Phase 4 項目が表示されないこと
+- [x] `tests/gui/test_app_bootstrap.py`: ルート未設定でもウィザードが起動し、確定後だけ `StorageSession` が開始され、ロックと接続が各終了経路で1回だけ解放されること
+- [x] `tests/gui/test_startup_verification.py`: quick/fullの各設定が対応する検証を起動し、完了前にメイン画面のDB操作を開始しないこと
 
 #### **G-3. CI**
 

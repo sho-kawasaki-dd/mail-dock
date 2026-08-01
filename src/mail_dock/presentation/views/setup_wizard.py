@@ -113,7 +113,7 @@ class SetupWizard(QWizard):
         layout.addRow(strings.WIZARD_LABEL_FREE_SPACE, self._free_space_label)
         layout.addRow(strings.WIZARD_LABEL_ENCRYPTION, self._encryption_label)
         layout.addRow(self._root_status)
-        self.addPage(self._root_page)
+        self._root_page_id = self.addPage(self._root_page)
 
     def _build_account_page(self) -> None:
         self._account_page = QWizardPage()
@@ -151,7 +151,7 @@ class SetupWizard(QWizard):
         self._account_status = QLabel()
         self._account_status.setWordWrap(True)
         layout.addRow(self._account_status)
-        self.addPage(self._account_page)
+        self._account_page_id = self.addPage(self._account_page)
 
     def _build_folders_page(self) -> None:
         self._folders_page = QWizardPage()
@@ -165,17 +165,17 @@ class SetupWizard(QWizard):
         layout.addWidget(self._folders_status)
         self._folders_layout = QVBoxLayout()
         layout.addLayout(self._folders_layout)
-        self.addPage(self._folders_page)
+        self._folders_page_id = self.addPage(self._folders_page)
         self._set_finish_enabled(False)
 
     def validateCurrentPage(self) -> bool:  # noqa: N802
         """Validate the active page and perform its setup action."""
 
-        if self.currentPage() is self._root_page:
+        if self.currentId() == self._root_page_id:
             return self._validate_root()
-        if self.currentPage() is self._account_page:
+        if self.currentId() == self._account_page_id:
             return self._validate_account()
-        if self.currentPage() is self._folders_page:
+        if self.currentId() == self._folders_page_id:
             return self._validate_folders()
         return super().validateCurrentPage()
 
@@ -183,7 +183,7 @@ class SetupWizard(QWizard):
         """Start folder discovery when the folder page becomes visible."""
 
         super().initializePage(page_id)
-        if self.page(page_id) is self._folders_page and self._context is not None:
+        if page_id == self._folders_page_id and self._context is not None:
             self._load_folders()
 
     def _validate_root(self) -> bool:
