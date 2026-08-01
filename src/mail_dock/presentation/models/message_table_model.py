@@ -156,6 +156,7 @@ class MessageTableModel(QAbstractTableModel):
         self._exhausted = False
         self._pending_request_id: int | None = None
         self._thread_mode = False
+        self._stopped = False
 
         worker.result.connect(self._on_result)
         request_failed = getattr(worker, "request_failed", None)
@@ -261,10 +262,22 @@ class MessageTableModel(QAbstractTableModel):
 
         return (
             not parent.isValid()
+            and not self._stopped
             and not self._thread_mode
             and not self._exhausted
             and self._pending_request_id is None
         )
+
+    def stop_loading(self) -> None:
+        """Reject new page requests while the owning window is closing."""
+
+        if self._stopped:
+            return
+        self._stopped = True
+        if self._pending_request_id is not None:
+            self._worker.cancel("list/search")
+        self._pending_request_id = None
+        self._exhausted = True
 
     def fetchMore(  # noqa: N802
         self,
