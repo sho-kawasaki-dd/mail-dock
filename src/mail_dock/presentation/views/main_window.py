@@ -23,13 +23,21 @@ from PySide6.QtWidgets import (
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.presentation import strings
 from mail_dock.presentation.context import AppContext
-from mail_dock.presentation.models.folder_tree_model import FolderTreeModel
+from mail_dock.presentation.models.folder_tree_model import (
+    FolderTreeModel,
+    build_mail_account_roots,
+)
 from mail_dock.presentation.models.message_table_model import MessageTableModel
 from mail_dock.presentation.threads.query_worker import QueryWorker
-from mail_dock.presentation.threads.sync_worker import SyncWorker
+from mail_dock.presentation.threads.sync_worker import (
+    FolderTreeSnapshot,
+    SyncErrorNotification,
+    SyncWorker,
+)
 from mail_dock.presentation.viewmodels.message_list_viewmodel import MessageListViewModel
 from mail_dock.presentation.views.detail_view import DetailView
 from mail_dock.presentation.views.message_list import MessageListSearchBar, MessageListView
+from mail_dock.usecases.sync_folders import FolderRefreshResult
 from mail_dock.usecases.sync_mail import SyncOptions, SyncProgress, SyncResult
 
 
@@ -48,6 +56,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(strings.MAIN_WINDOW_TITLE)
         self._workers_stopped = False
         self._sync_token: CancelToken | None = None
+        self._folder_refresh_token: CancelToken | None = None
         self._ui_settings = QSettings("mail-dock", "mail-dock")
 
         self.query_worker = QueryWorker(
@@ -178,7 +187,7 @@ class MainWindow(QMainWindow):
         help_menu.addAction(self.open_log_folder_action)
 
         self.sync_action.triggered.connect(self._sync_selected_account)
-        self.refresh_folders_action.triggered.connect(self.refresh_folders_requested)
+        self.refresh_folders_action.triggered.connect(self._refresh_selected_account)
         self.settings_action.triggered.connect(self.settings_requested)
         self.export_eml_action.triggered.connect(self.export_requested)
         self.thread_view_action.triggered.connect(self.detail_view.request_thread)
@@ -219,10 +228,15 @@ class MainWindow(QMainWindow):
         self.sync_worker.progress.connect(self._show_sync_progress)
         self.sync_worker.sync_result.connect(self._show_sync_result)
         self.sync_worker.folders_refreshed.connect(self._show_folder_refresh_result)
+        self.sync_worker.folder_tree_updated.connect(self._update_folder_tree)
+        self.sync_worker.error_reported.connect(self._show_sync_error)
         self.sync_worker.storage_detached.connect(self._show_storage_detached)
 
         self._cancel_button.clicked.connect(self._cancel_current_operation)
         self.message_list_viewmodel.request_page()
+        load_folder_tree = getattr(self.sync_worker, "load_folder_tree", None)
+        if callable(load_folder_tree):
+            load_folder_tree()
 
     def _update_message_count(self, *_args: object) -> None:
         self._count_label.setText(
@@ -253,13 +267,24 @@ class MainWindow(QMainWindow):
             self.message_list_viewmodel.set_filters(selected_filter)
 
     def _sync_selected_account(self) -> None:
-        if self._sync_token is not None:
+        if self._sync_token is not None or self._folder_refresh_token is not None:
             return
         account_id = self._selected_account_id()
         if account_id is None:
             self._status_label.setText(strings.STATUS_NO_ACCOUNT_SELECTED)
             return
         self._start_sync(self.sync_worker.sync_account(account_id))
+
+    def _refresh_selected_account(self) -> None:
+        if self._sync_token is not None or self._folder_refresh_token is not None:
+            return
+        account_id = self._selected_account_id()
+        if account_id is None:
+            self._status_label.setText(strings.STATUS_NO_ACCOUNT_SELECTED)
+            return
+        self._folder_refresh_token = self.sync_worker.refresh_folders(account_id)
+        self.refresh_folders_action.setEnabled(False)
+        self._status_label.setText(strings.STATUS_REFRESHING_FOLDERS)
 
     def _start_sync(self, token: CancelToken) -> None:
         self._sync_token = token
@@ -316,7 +341,32 @@ class MainWindow(QMainWindow):
             self.message_table_model.reload()
 
     def _show_folder_refresh_result(self, _result: object) -> None:
-        self._status_label.setText(strings.STATUS_READY)
+        self._folder_refresh_token = None
+        self.refresh_folders_action.setEnabled(True)
+        if not isinstance(_result, FolderRefreshResult):
+            self._status_label.setText(strings.STATUS_READY)
+            return
+        self._status_label.setText(
+            strings.STATUS_FOLDER_REFRESH_RESULT.format(
+                new_count=_result.new_count,
+                removed_count=len(_result.removed_raw_names),
+            )
+        )
+
+    def _update_folder_tree(self, snapshot: object) -> None:
+        if not isinstance(snapshot, FolderTreeSnapshot):
+            return
+        self.folder_tree_model.set_roots(
+            build_mail_account_roots(snapshot.accounts, snapshot.folders)
+        )
+
+    def _show_sync_error(self, notification: object) -> None:
+        if not isinstance(notification, SyncErrorNotification):
+            return
+        if notification.operation == "refresh_folders":
+            self._folder_refresh_token = None
+            self.refresh_folders_action.setEnabled(True)
+            self._status_label.setText(notification.message)
 
     def _show_storage_detached(self, _error: object) -> None:
         self._storage_status_label.setText(strings.ERROR_STORAGE_DETACHED)

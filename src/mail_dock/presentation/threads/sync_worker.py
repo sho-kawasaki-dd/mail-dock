@@ -49,11 +49,27 @@ class SyncErrorNotification:
 
 
 @dataclass(frozen=True)
+class FolderTreeSnapshot:
+    """Repository-shaped account and folder data for the folder tree."""
+
+    accounts: tuple[MessageRecord, ...]
+    folders: tuple[MessageRecord, ...]
+
+
+@dataclass(frozen=True)
+class _FolderRefreshTaskResult:
+    """Refresh counts plus the post-refresh folder tree snapshot."""
+
+    result: FolderRefreshResult
+    snapshot: FolderTreeSnapshot
+
+
+@dataclass(frozen=True)
 class _SyncTaskResult:
     """Internal result envelope used to route results to typed signals."""
 
     operation: SyncOperation
-    value: SyncResult | FolderRefreshResult
+    value: SyncResult | _FolderRefreshTaskResult | FolderTreeSnapshot
 
 
 class SyncWorker(Worker):
@@ -63,6 +79,7 @@ class SyncWorker(Worker):
     progress = Signal(object)
     sync_result = Signal(object)
     folders_refreshed = Signal(object)
+    folder_tree_updated = Signal(object)
     error_reported = Signal(object)
     authentication_failed = Signal(object)
     fetch_failed = Signal(object)
@@ -177,11 +194,25 @@ class SyncWorker(Worker):
                 token.raise_if_cancelled()
                 result = self._refresh_folders_usecase(fetcher, repository, account_id)
             token.raise_if_cancelled()
-            return _SyncTaskResult("refresh_folders", result)
+            return _SyncTaskResult(
+                "refresh_folders",
+                _FolderRefreshTaskResult(result, _folder_tree_snapshot(repository)),
+            )
 
         return self._submit_operation("refresh_folders", operation)
 
     request_refresh_folders = refresh_folders
+
+    def load_folder_tree(self) -> CancelToken:
+        """Load the current account and folder tree on the sync worker."""
+
+        def operation(_token: CancelToken) -> _SyncTaskResult:
+            return _SyncTaskResult(
+                "refresh_folders",
+                _folder_tree_snapshot(self._repository_factory()),
+            )
+
+        return self._submit_operation("refresh_folders", operation)
 
     def _submit_operation(
         self,
@@ -225,8 +256,11 @@ class SyncWorker(Worker):
             return
         if value.operation == "sync":
             self.sync_result.emit(value.value)
+        elif isinstance(value.value, _FolderRefreshTaskResult):
+            self.folders_refreshed.emit(value.value.result)
+            self.folder_tree_updated.emit(value.value.snapshot)
         else:
-            self.folders_refreshed.emit(value.value)
+            self.folder_tree_updated.emit(value.value)
         super()._emit_task_result(task, value.value)
 
     def _emit_task_failed(self, task: _Task, error: MailDockError) -> None:
@@ -308,3 +342,16 @@ def _close_manifest(manifest: BaseManifestWriter) -> None:
     close = getattr(manifest, "close", None)
     if callable(close):
         close()
+
+
+def _folder_tree_snapshot(repository: BaseMessageRepository) -> FolderTreeSnapshot:
+    """Read all tree data while the repository's worker thread owns the DB."""
+
+    accounts = tuple(repository.list_accounts())
+    folders = tuple(
+        folder
+        for account in accounts
+        if (account_id := _account_id(account)) is not None
+        for folder in repository.list_folders(account_id)
+    )
+    return FolderTreeSnapshot(accounts=accounts, folders=folders)
