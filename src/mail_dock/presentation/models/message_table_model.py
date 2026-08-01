@@ -279,6 +279,14 @@ class MessageTableModel(QAbstractTableModel):
         self._pending_request_id = None
         self._exhausted = True
 
+    def reload(self) -> None:
+        """Discard the current page and asynchronously load the first page."""
+
+        if self._stopped:
+            return
+        self._reset_pages()
+        self.fetchMore()
+
     def fetchMore(  # noqa: N802
         self,
         parent: QModelIndex | QPersistentModelIndex = _EMPTY_INDEX,

@@ -106,30 +106,65 @@ class SyncWorker(Worker):
         selected_options = options or self._sync_options
 
         def operation(token: CancelToken) -> _SyncTaskResult:
-            repository = self._repository_factory()
-            account = _find_account(repository, account_id)
-            fetcher = self._fetcher_factory(account)
-            storage = self._storage_factory()
-            manifest = self._manifest_factory(account_id)
-            try:
-                with fetcher:
-                    result = self._sync_account_usecase(
-                        fetcher,
-                        repository,
-                        storage,
-                        manifest,
-                        account_id=account_id,
-                        options=selected_options,
-                        cancel=token,
-                        on_progress=self._forward_progress(),
-                    )
-                return _SyncTaskResult("sync", result)
-            finally:
-                _close_manifest(manifest)
+            return _SyncTaskResult(
+                "sync",
+                self._run_sync_account(account_id, token, selected_options),
+            )
 
         return self._submit_operation("sync", operation)
 
     request_sync_account = sync_account
+
+    def sync_all_accounts(self, *, options: SyncOptions | None = None) -> CancelToken:
+        """Queue one synchronization run for every enabled account."""
+
+        selected_options = options or self._sync_options
+
+        def operation(token: CancelToken) -> _SyncTaskResult:
+            repository = self._repository_factory()
+            account_ids = [
+                account_id
+                for account in repository.list_accounts()
+                if _is_enabled_account(account) and (account_id := _account_id(account))
+            ]
+            aggregate = SyncResult(0, 0, 0, 0, False)
+            for account_id in account_ids:
+                token.raise_if_cancelled()
+                result = self._run_sync_account(account_id, token, selected_options)
+                aggregate = _add_sync_results(aggregate, result)
+                if result.cancelled:
+                    break
+            return _SyncTaskResult("sync", aggregate)
+
+        return self._submit_operation("sync", operation)
+
+    request_sync_all_accounts = sync_all_accounts
+
+    def _run_sync_account(
+        self,
+        account_id: str,
+        token: CancelToken,
+        options: SyncOptions,
+    ) -> SyncResult:
+        repository = self._repository_factory()
+        account = _find_account(repository, account_id)
+        fetcher = self._fetcher_factory(account)
+        storage = self._storage_factory()
+        manifest = self._manifest_factory(account_id)
+        try:
+            with fetcher:
+                return self._sync_account_usecase(
+                    fetcher,
+                    repository,
+                    storage,
+                    manifest,
+                    account_id=account_id,
+                    options=options,
+                    cancel=token,
+                    on_progress=self._forward_progress(),
+                )
+        finally:
+            _close_manifest(manifest)
 
     def refresh_folders(self, account_id: str) -> CancelToken:
         """Queue a remote folder refresh for ``account_id``."""
@@ -247,6 +282,26 @@ def _find_account(repository: BaseMessageRepository, account_id: str) -> Message
         if account.get("id") == account_id:
             return account
     raise DatabaseError(f"Account does not exist: {account_id}")
+
+
+def _account_id(account: MessageRecord) -> str | None:
+    value = account.get("id", account.get("account_id"))
+    return value if isinstance(value, str) and value else None
+
+
+def _is_enabled_account(account: MessageRecord) -> bool:
+    value = account.get("is_enabled", 1)
+    return value not in (False, 0, "0")
+
+
+def _add_sync_results(left: SyncResult, right: SyncResult) -> SyncResult:
+    return SyncResult(
+        left.fetched_count + right.fetched_count,
+        left.transferred_bytes + right.transferred_bytes,
+        left.skipped_count + right.skipped_count,
+        left.failed_count + right.failed_count,
+        left.cancelled or right.cancelled,
+    )
 
 
 def _close_manifest(manifest: BaseManifestWriter) -> None:

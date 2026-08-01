@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from mail_dock.domain.fetcher import CancelToken
 from mail_dock.presentation import strings
 from mail_dock.presentation.context import AppContext
 from mail_dock.presentation.models.folder_tree_model import FolderTreeModel
@@ -46,6 +47,7 @@ class MainWindow(QMainWindow):
         self.setObjectName("mainWindow")
         self.setWindowTitle(strings.MAIN_WINDOW_TITLE)
         self._workers_stopped = False
+        self._sync_token: CancelToken | None = None
         self._ui_settings = QSettings("mail-dock", "mail-dock")
 
         self.query_worker = QueryWorker(
@@ -100,9 +102,15 @@ class MainWindow(QMainWindow):
         self._restore_ui_state()
 
     def start_startup_sync(self) -> None:
-        """Start synchronization for the selected account when one exists."""
+        """Start one synchronization run for all enabled accounts."""
 
-        self._sync_selected_account()
+        if self._sync_token is not None:
+            return
+        sync_all_accounts = getattr(self.sync_worker, "sync_all_accounts", None)
+        if callable(sync_all_accounts):
+            self._start_sync(sync_all_accounts())
+        else:
+            self._sync_selected_account()
 
     def stop_workers(self) -> None:
         """Stop all GUI workers before the storage session closes."""
@@ -222,9 +230,9 @@ class MainWindow(QMainWindow):
         )
 
     def _set_query_busy(self, busy: bool) -> None:
-        if busy:
+        if busy and self._sync_token is None:
             self._status_label.setText(strings.STATUS_QUERYING)
-        elif not self.sync_worker.active_tokens:
+        elif not busy and self._sync_token is None:
             self._status_label.setText(strings.STATUS_READY)
         self.search_bar.cancel_button.setEnabled(busy)
 
@@ -245,11 +253,19 @@ class MainWindow(QMainWindow):
             self.message_list_viewmodel.set_filters(selected_filter)
 
     def _sync_selected_account(self) -> None:
+        if self._sync_token is not None:
+            return
         account_id = self._selected_account_id()
         if account_id is None:
             self._status_label.setText(strings.STATUS_NO_ACCOUNT_SELECTED)
             return
-        self.sync_worker.sync_account(account_id)
+        self._start_sync(self.sync_worker.sync_account(account_id))
+
+    def _start_sync(self, token: CancelToken) -> None:
+        self._sync_token = token
+        self.sync_action.setEnabled(False)
+        self._cancel_button.setEnabled(True)
+        self._status_label.setText(strings.STATUS_SYNCING)
 
     def _selected_account_id(self) -> str | None:
         current = self.folder_tree_view.currentIndex()
@@ -260,22 +276,44 @@ class MainWindow(QMainWindow):
     def _show_sync_progress(self, progress: object) -> None:
         if not isinstance(progress, SyncProgress):
             return
+        if progress.total_bytes_estimate > 0:
+            self._progress_bar.setValue(
+                min(100, int(progress.transferred_bytes * 100 / progress.total_bytes_estimate))
+            )
+        eta = (
+            strings.STATUS_SYNC_ETA_SECONDS.format(seconds=progress.eta_seconds)
+            if progress.eta_seconds is not None
+            else strings.STATUS_SYNC_ETA_UNKNOWN
+        )
         self._status_label.setText(
             strings.STATUS_SYNC_PROGRESS.format(
                 folder=progress.current_folder,
                 transferred=progress.transferred_bytes,
                 total=progress.total_bytes_estimate,
+                count=progress.message_count,
+                eta=eta,
             )
         )
-        if progress.total_bytes_estimate > 0:
-            self._progress_bar.setValue(
-                min(100, int(progress.transferred_bytes * 100 / progress.total_bytes_estimate))
-            )
 
     def _show_sync_result(self, result: object) -> None:
         if isinstance(result, SyncResult):
-            self._status_label.setText(strings.STATUS_SYNC_COMPLETE)
+            self._sync_token = None
+            self.sync_action.setEnabled(True)
+            self._cancel_button.setEnabled(False)
+            self.message_list_viewmodel.cancel_search()
+            self._status_label.setText(
+                (
+                    strings.STATUS_SYNC_CANCELLED
+                    if result.cancelled
+                    else strings.STATUS_SYNC_RESULT
+                ).format(
+                    fetched=result.fetched_count,
+                    skipped=result.skipped_count,
+                    failed=result.failed_count,
+                )
+            )
             self._progress_bar.setValue(0)
+            self.message_table_model.reload()
 
     def _show_folder_refresh_result(self, _result: object) -> None:
         self._status_label.setText(strings.STATUS_READY)
@@ -285,8 +323,8 @@ class MainWindow(QMainWindow):
         self.sync_action.setEnabled(False)
 
     def _cancel_current_operation(self) -> None:
-        self.message_list_viewmodel.cancel_search()
-        self.sync_worker.cancel_all()
+        if self._sync_token is not None:
+            self._sync_token.cancel()
 
     def _restore_ui_state(self) -> None:
         geometry = self._ui_settings.value("geometry")
