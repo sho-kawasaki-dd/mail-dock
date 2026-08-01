@@ -598,19 +598,19 @@
 各項目の完了を確認したうえで、対応するタスクのチェックボックスを埋めること。
 
 - [ ] V-1. `uv sync` → `uv run ruff format --check .` → `uv run ruff check .` → `uv run mypy` がすべて成功する
-- [ ] V-2. `uv run pytest -m "not docker and not gui"` が全緑になり、`domain` + `usecases` のカバレッジが 80% 以上である
-- [ ] V-3. GUIテストがローカルで全緑になる（`gui` マーカーのオプトイン実行）
+- [x] V-2. `uv run pytest -m "not docker and not gui"` が全緑になり、`domain` + `usecases` のカバレッジが 80% 以上である
+- [x] V-3. GUIテストがローカルで全緑になる（`gui` マーカーのオプトイン実行）
 - [ ] V-4. 起動導線: `mail-dock gui` とサブコマンド無しの `mail-dock` で GUI が起動し、既存の CLI サブコマンド（`migrate` / `verify` / `account` / `folders` / `sync` / `reparse` / `search`）の挙動が変わらない
 - [ ] V-5. ウィザード一周: 空のディレクトリから GUI だけでルート初期化 → アカウント登録 → フォルダ選択 → 同期 → 検索 → 本文表示 → 添付保存 まで完了できる
-- [ ] V-6. HTML 5層防御: ①プロファイルがオフレコでキャッシュ・永続クッキーが無効 ②JavaScript ほか危険な属性がすべて無効 ③`http` / `https` / `file` がブロックされ `cid` / `maildock` のみ通る ④`cid:` ハンドラがインライン画像を返し未知の `cid` は失敗する ⑤CSP `<meta>` が本文へ注入されている — の5点が個別テストで固定されている
-- [ ] V-7. ナビゲーション: 許可された `https` / `http` リンクだけがアプリ内で遷移せず、確認のうえ外部ブラウザへ転送される。不許可URLは確認も外部起動も行われず、`<meta http-equiv="refresh">` が除去されている
-- [ ] V-8. 外部画像: 既定でブロックされ、「画像を読み込む」で画像リクエストのみ許可され、別のメールを開くと再びブロックされる
-- [ ] V-9. 遅延ロード: `fetchMore` で全ページを連結した結果が `list_messages` の一括取得と**完全に一致**し、重複・欠損がゼロである。同一 `date_sent` と `date_sent` NULL の混在でも成立する。`next_cursor` を加工していない
-- [ ] V-10. UI応答: 同期中も一覧のスクロール・検索・本文表示が可能である。2文字語を含む検索で警告バナーが表示され、実行中Slotのイベントループ復帰を待たずキャンセルが効く。本文・件数要求が一覧取得を誤ってキャンセルしない
-- [ ] V-11. 層の隔離: `presentation/views` / `viewmodels` / `models` に `sqlite3` と `mail_dock.infrastructure` の import が無いことを静的に確認する。`domain` / `usecases` に PySide6 の import が無い
-- [ ] V-12. 保存の安全性: パストラバーサル・NTFS禁止文字・予約名・実行可能拡張子が期待どおり処理され、保存先が指定ディレクトリ外へ出ない。prepareでは書き込まず実行可能拡張子でcommit前に警告が出る。一時ファイルと最終ファイルが同一ボリュームにあり、TOCTOU再検証が働く
-- [ ] V-13. 状態表示: `deleted` グレーアウト・`moved` ツールチップ・`purged` の実体なし表示・未読／スターアイコン・`oversize` バッジが正しく出る。フラグを変更する導線が存在しない
-- [ ] V-14. エラー表示: `StorageLockedError`（他インスタンス使用中）・`AuthenticationError`・`StorageDetachedError` がそれぞれ専用の文言で表示され、トレースバックが画面に出ない
+- [x] V-6. HTML 5層防御: ①プロファイルがオフレコでキャッシュ・永続クッキーが無効 ②JavaScript ほか危険な属性がすべて無効 ③`http` / `https` / `file` がブロックされ `cid` / `maildock` のみ通る ④`cid:` ハンドラがインライン画像を返し未知の `cid` は失敗する ⑤CSP `<meta>` が本文へ注入されている — の5点が個別テストで固定されている
+- [x] V-7. ナビゲーション: 許可された `https` / `http` リンクだけがアプリ内で遷移せず、確認のうえ外部ブラウザへ転送される。不許可URLは確認も外部起動も行われず、`<meta http-equiv="refresh">` が除去されている
+- [x] V-8. 外部画像: 既定でブロックされ、「画像を読み込む」で画像リクエストのみ許可され、別のメールを開くと再びブロックされる
+- [x] V-9. 遅延ロード: `fetchMore` で全ページを連結した結果が `list_messages` の一括取得と**完全に一致**し、重複・欠損がゼロである。同一 `date_sent` と `date_sent` NULL の混在でも成立する。`next_cursor` を加工していない
+- [x] V-10. UI応答: 同期中も一覧のスクロール・検索・本文表示が可能である。2文字語を含む検索で警告バナーが表示され、実行中Slotのイベントループ復帰を待たずキャンセルが効く。本文・件数要求が一覧取得を誤ってキャンセルしない
+- [x] V-11. 層の隔離: `presentation/views` / `viewmodels` / `models` に `sqlite3` と `mail_dock.infrastructure` の import が無いことを静的に確認する。`domain` / `usecases` に PySide6 の import が無い
+- [x] V-12. 保存の安全性: パストラバーサル・NTFS禁止文字・予約名・実行可能拡張子が期待どおり処理され、保存先が指定ディレクトリ外へ出ない。prepareでは書き込まず実行可能拡張子でcommit前に警告が出る。一時ファイルと最終ファイルが同一ボリュームにあり、TOCTOU再検証が働く
+- [x] V-13. 状態表示: `deleted` グレーアウト・`moved` ツールチップ・`purged` の実体なし表示・未読／スターアイコン・`oversize` バッジが正しく出る。フラグを変更する導線が存在しない
+- [x] V-14. エラー表示: `StorageLockedError`（他インスタンス使用中）・`AuthenticationError`・`StorageDetachedError` がそれぞれ専用の文言で表示され、トレースバックが画面に出ない
 - [ ] V-15. 性能: 起動時間が 3秒以内（N-2）、1万件規模の一覧スクロールが 60fps（N-1）、同期中のメモリが 600MB 以下（N-3）であることを実測し、本書「7.」へ記録する
 - [ ] V-16. CI: プルリクエストで `lint` / `test-windows` / `test-linux` の3ジョブがすべて成功し、GUIテストが実行されていない
 
