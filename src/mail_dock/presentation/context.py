@@ -121,6 +121,24 @@ class AppContext:
             remote_trash_folder=self.settings.remote_trash_folder,
         )
 
+    def create_fetcher_for_credentials(
+        self,
+        *,
+        host: str,
+        port: int,
+        username: str,
+        password: str,
+    ) -> BaseMailFetcher:
+        """Create an unaffiliated fetcher for the setup connection test."""
+
+        return OnamaeImapFetcher(
+            host,
+            username,
+            password,
+            port=port,
+            remote_trash_folder=self.settings.remote_trash_folder,
+        )
+
     def create_message_renderer(self) -> Any:
         """Create the renderer used by the open-message and save use cases."""
 

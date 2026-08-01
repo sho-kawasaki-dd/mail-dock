@@ -385,25 +385,25 @@
 
 ### **3.5 グループE: ウィザードと設定**
 
-#### **E-1. `presentation/views/setup_wizard.py`（F-2 / F-3 / F-4）**
+#### E-1. `presentation/views/setup_wizard.py`（F-2 / F-3 / F-4）
 
-- [ ] ページ1: ストレージルート選択
-  - [ ] `QFileDialog` でディレクトリを選択する
-  - [ ] `drive_kind()` でドライブ種別を表示し、`check_free_space()` で空き容量を確認する
-  - [ ] 暗号化状態を確認できない場合に警告を表示する（BitLocker To Go 前提。開発計画書 5.3）
-  - [ ] 既存の `.maildock_root` があれば UUID を照合して再利用し、無ければ `initialize_root()` で初期化する
-  - [ ] 他インスタンスがロック中なら明示的に伝える
-- [ ] ページ2: アカウント登録
-  - [ ] `account_id` / ホスト / ポート / ユーザー名 / パスワード / 表示名を入力する
-  - [ ] 「接続テスト」で `BaseMailFetcher.connect()` をワーカー経由で実行し、結果を表示する
-  - [ ] `register_account()` を呼び、パスワードは `keyring` にのみ保存する
-  - [ ] `validate_account_id()` の失敗をインライン表示する
-- [ ] ページ3: 同期対象フォルダ選択
-  - [ ] `refresh_folders()` を実行し、フォルダ一覧をチェックボックスで提示する
-  - [ ] `set_sync_target()` で選択を反映する
-  - [ ] 新規フォルダが既定で非対象であることを説明文で明示する
-- [ ] ウィザードのキャンセルで不完全な状態が残らないこと（ルート初期化済みなら設定へ書き戻す）
-- [ ] 完了後に設定を `config.save()` で永続化する
+- [x] ページ1: ストレージルート選択
+  - [x] `QFileDialog` でディレクトリを選択する
+  - [x] `drive_kind()` でドライブ種別を表示し、`check_free_space()` で空き容量を確認する
+  - [x] 暗号化状態を確認できない場合に警告を表示する（BitLocker To Go 前提。開発計画書 5.3）
+  - [x] 既存の `.maildock_root` があれば UUID を照合して再利用し、無ければ `initialize_root()` で初期化する
+  - [x] 他インスタンスがロック中なら明示的に伝える
+- [x] ページ2: アカウント登録
+  - [x] `account_id` / ホスト / ポート / ユーザー名 / パスワード / 表示名を入力する
+  - [x] 「接続テスト」で `BaseMailFetcher.connect()` をワーカー経由で実行し、結果を表示する
+  - [x] `register_account()` を呼び、パスワードは `keyring` にのみ保存する
+  - [x] `validate_account_id()` の失敗をインライン表示する
+- [x] ページ3: 同期対象フォルダ選択
+  - [x] `refresh_folders()` を実行し、フォルダ一覧をチェックボックスで提示する
+  - [x] `set_sync_target()` で選択を反映する
+  - [x] 新規フォルダが既定で非対象であることを説明文で明示する
+- [x] ウィザードのキャンセルで不完全な状態が残らないこと（ルート初期化済みなら設定へ書き戻す）
+- [x] 完了後に設定を `config.save()` で永続化する
 
 #### **E-2. `presentation/views/dialogs/settings_dialog.py`（F-22 / D-15）**
 

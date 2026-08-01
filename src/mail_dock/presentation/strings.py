@@ -29,6 +29,20 @@ WIZARD_WARNING_ENCRYPTION_UNKNOWN = (
     "暗号化状態が確認できません。BitLocker To Go で暗号化されていることを確認してください。"
 )
 WIZARD_WARNING_INSUFFICIENT_SPACE = "空き容量が不足しています。"
+WIZARD_WARNING_SPACE = "空き容量が少なくなっています。"
+WIZARD_LABEL_DRIVE_KIND = "ドライブ種別"
+WIZARD_LABEL_FREE_SPACE = "空き容量"
+WIZARD_LABEL_ENCRYPTION = "暗号化"
+WIZARD_ENCRYPTION_UNKNOWN = "確認できません"
+WIZARD_STATUS_ROOT_READY = "保存先を確認しました。"
+WIZARD_STATUS_TESTING_CONNECTION = "接続をテストしています..."
+WIZARD_STATUS_CONNECTION_OK = "接続に成功しました。"
+WIZARD_STATUS_CONNECTION_REQUIRED = "登録前に接続テストを実行してください。"
+WIZARD_STATUS_ACCOUNT_REQUIRED = "アカウント情報を入力してください。"
+WIZARD_STATUS_FOLDER_LOADING = "フォルダを取得しています..."
+WIZARD_STATUS_FOLDER_EMPTY = "フォルダが見つかりません。"
+WIZARD_STATUS_NO_ACCOUNT = "アカウントを登録してからフォルダを取得してください。"
+WIZARD_STATUS_FOLDER_SELECTION_REQUIRED = "同期対象フォルダを1つ以上選択してください。"
 WIZARD_HELP_FOLDER_SYNC_TARGET = "新規フォルダは既定で同期対象に含まれません。"
 
 MAIN_WINDOW_TITLE = APP_TITLE

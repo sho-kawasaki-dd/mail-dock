@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -69,13 +70,6 @@ def _available_root(settings: config.AppConfig, requested_root: Path | None) -> 
     if resolution.probe is RootProbe.FOREIGN:
         raise StorageForeignRootError(strings.ERROR_FOREIGN_ROOT)
     return resolution.path
-
-
-def _show_setup_wizard(requested_root: Path | None) -> Path | None:
-    wizard = SetupWizard(initial_root=requested_root)
-    if wizard.exec() != QDialog.DialogCode.Accepted:
-        return None
-    return wizard.selected_root
 
 
 def _show_error(error: BaseException) -> None:
@@ -162,14 +156,35 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
     session_error: BaseException | None = None
     try:
         root = _available_root(settings, requested_root)
+        setup_wizard: SetupWizard | None = None
         if root is None:
-            root = _show_setup_wizard(requested_root)
-        if root is None:
-            return 0
+            def start_session(selected_root: Path) -> AppContext:
+                nonlocal session, context
+                session = StorageSession(settings, selected_root)
+                session.__enter__()
+                context = AppContext(session, settings)
+                updated_settings = replace(
+                    settings,
+                    storage_root_uuid=session.root_uuid,
+                    storage_root_candidates=(str(selected_root.resolve(strict=False)),),
+                )
+                context.save_settings(updated_settings)
+                return context
 
-        session = StorageSession(settings, root)
-        session.__enter__()
-        context = AppContext(session, settings)
+            setup_wizard = SetupWizard(
+                initial_root=requested_root,
+                expected_root_uuid=settings.storage_root_uuid,
+                on_root_confirmed=start_session,
+            )
+            if setup_wizard.exec() != QDialog.DialogCode.Accepted:
+                return 0
+            root = setup_wizard.selected_root
+            if root is None or session is None or context is None:
+                return 1
+        else:
+            session = StorageSession(settings, root)
+            session.__enter__()
+            context = AppContext(session, settings)
         verification_thread, verification_result = _start_verification(app, session, context)
         event_code = app.exec()
         window = verification_result["window"]
