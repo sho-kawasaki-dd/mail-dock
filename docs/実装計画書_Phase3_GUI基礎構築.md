@@ -197,15 +197,15 @@
 
 #### **B-1. `presentation/models/message_table_model.py`**
 
-- [ ] `MessageTableModel(QAbstractTableModel)` を実装する
-- [ ] 列: 日付 / アカウント / フォルダ / 差出人 / 件名 / サイズ（F-8）
-- [ ] `canFetchMore()` は「`exhausted` が偽」かつ「取得要求が飛んでいない」ときに真を返す
-- [ ] `fetchMore()` は `QueryWorker` へ要求を出すだけで、DB に触らない（D-6）
-- [ ] 結果 Signal の到着時に `beginInsertRows()` / `endInsertRows()` で行を追加する
-- [ ] **リクエストIDが最新でない結果は破棄する**（フィルタ変更や検索実行と競合したときの混線防止）
-- [ ] `next_cursor` を加工せず保持し、そのまま次の要求へ渡す（Phase 2 引き継ぎ）
-- [ ] フィルタ・検索条件が変わったら `beginResetModel()` でモデルを初期化し、カーソルを捨てる
-- [ ] `limit=200` を既定とする
+- [x] `MessageTableModel(QAbstractTableModel)` を実装する
+- [x] 列: 日付 / アカウント / フォルダ / 差出人 / 件名 / サイズ（F-8）
+- [x] `canFetchMore()` は「`exhausted` が偽」かつ「取得要求が飛んでいない」ときに真を返す
+- [x] `fetchMore()` は `QueryWorker` へ要求を出すだけで、DB に触らない（D-6）
+- [x] 結果 Signal の到着時に `beginInsertRows()` / `endInsertRows()` で行を追加する
+- [x] **リクエストIDが最新でない結果は破棄する**（フィルタ変更や検索実行と競合したときの混線防止）
+- [x] `next_cursor` を加工せず保持し、そのまま次の要求へ渡す（Phase 2 引き継ぎ）
+- [x] フィルタ・検索条件が変わったら `beginResetModel()` でモデルを初期化し、カーソルを捨てる
+- [x] `limit=200` を既定とする
 
 #### **B-2. 視覚的ステータス表示（F-9）**
 
