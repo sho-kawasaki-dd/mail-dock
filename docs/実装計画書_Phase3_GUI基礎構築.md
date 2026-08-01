@@ -326,13 +326,13 @@
 
 #### **C-8. `presentation/web/page.py` — 層6（ナビゲーション制御）**
 
-- [ ] `presentation/web/url_policy.py` にQt非依存の `is_allowed_external_url(url: str) -> bool` を実装する（D-26 / D-28）
-- [ ] `https` / `http` のみ許可し、`file` / `javascript` / `data` / カスタムスキーム、制御文字、ユーザー情報を含むURL、4096文字超を拒否する
-- [ ] `MailPage(QWebEnginePage)` で `acceptNavigationRequest()` をオーバーライドする
-- [ ] 初回の本文表示（`maildock:` へのナビゲーション）のみ許可する
-- [ ] 許可されたリンククリックだけをURL提示の確認ダイアログへ渡し、承認後に `QDesktopServices.openUrl()` で開く。拒否URLは確認ダイアログも外部起動も行わず、**アプリ内では常に遷移させない**（F-16）
-- [ ] `javaScriptAlert` 等のダイアログ系を無効化する
-- [ ] 証明書エラー・認証要求を拒否する
+- [x] `presentation/web/url_policy.py` にQt非依存の `is_allowed_external_url(url: str) -> bool` を実装する（D-26 / D-28）
+- [x] `https` / `http` のみ許可し、`file` / `javascript` / `data` / カスタムスキーム、制御文字、ユーザー情報を含むURL、4096文字超を拒否する
+- [x] `MailPage(QWebEnginePage)` で `acceptNavigationRequest()` をオーバーライドする
+- [x] 初回の本文表示（`maildock:` へのナビゲーション）のみ許可する
+- [x] 許可されたリンククリックだけをURL提示の確認ダイアログへ渡し、承認後に `QDesktopServices.openUrl()` で開く。拒否URLは確認ダイアログも外部起動も行わず、**アプリ内では常に遷移させない**（F-16）
+- [x] `javaScriptAlert` 等のダイアログ系を無効化する
+- [x] 証明書エラー・認証要求を拒否する
 
 #### **C-9. `presentation/views/detail_view.py`**
 
