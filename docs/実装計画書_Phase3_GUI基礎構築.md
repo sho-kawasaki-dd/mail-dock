@@ -279,16 +279,16 @@
 
 #### **C-3. `infrastructure/parsing/html_sanitizer.py` — CSP注入とタグ除去（*Qt非依存*）**
 
-- [ ] `sanitize_mail_html(html: str, *, allow_remote_images: bool) -> str` を実装する
-- [ ] `<head>` へ CSP の `<meta http-equiv="Content-Security-Policy">` を**強制挿入**する
-  - [ ] 既定: `default-src 'none'; img-src cid:; style-src 'unsafe-inline'; form-action 'none'; frame-src 'none'`
-  - [ ] `allow_remote_images=True` のとき `img-src` に `https:` / `http:` を加える
-  - [ ] 本文中に既存の CSP `<meta>` があれば除去してから挿入する（上書きされないため）
-- [ ] `<meta http-equiv="refresh">` を除去する（F-16）
-- [ ] `<script>` / `<iframe>` / `<frame>` / `<object>` / `<embed>` / `<form>` / `<link>` / `<base>` を除去する
-- [ ] `on*` イベント属性と `javascript:` / `data:` の `href` / `src` を除去する
-- [ ] `<head>` が無いHTML断片でも正しく `<html><head>` を補って処理すること
-- [ ] Qt を import せず、純粋関数として単体テストできること（D-10）
+- [x] `sanitize_mail_html(html: str, *, allow_remote_images: bool) -> str` を実装する
+- [x] `<head>` へ CSP の `<meta http-equiv="Content-Security-Policy">` を**強制挿入**する
+  - [x] 既定: `default-src 'none'; img-src cid:; style-src 'unsafe-inline'; form-action 'none'; frame-src 'none'`
+  - [x] `allow_remote_images=True` のとき `img-src` に `https:` / `http:` を加える
+  - [x] 本文中に既存の CSP `<meta>` があれば除去してから挿入する（上書きされないため）
+- [x] `<meta http-equiv="refresh">` を除去する（F-16）
+- [x] `<script>` / `<iframe>` / `<frame>` / `<object>` / `<embed>` / `<form>` / `<link>` / `<base>` を除去する
+- [x] `on*` イベント属性と `javascript:` / `data:` の `href` / `src` を除去する
+- [x] `<head>` が無いHTML断片でも正しく `<html><head>` を補って処理すること
+- [x] Qt を import せず、純粋関数として単体テストできること（D-10）
 
 #### **C-4. `usecases/open_message.py` — 閲覧ユースケース**
 
