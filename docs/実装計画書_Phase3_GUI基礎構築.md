@@ -260,11 +260,11 @@
 
 #### **C-1a. `domain/ports.py` — 表示・添付抽出ポート**
 
-- [ ] `BaseMessageRenderer(ABC)` を追加し、`render(raw: bytes) -> RenderedMessage` を定義する（D-24）
-- [ ] `BaseEmlStorage.read_verified(relative_path: str, expected_hash: str) -> bytes` を追加し、同じ読み出し操作で完全SHA-256を検証して一致したバイト列だけを返す。不一致は `StorageError` 系で拒否する
-- [ ] `infrastructure/storage/eml_storage.py` の `EmlStorage.read_verified()` は境界検証後にファイルを1回だけ開き、読み出しながら完全SHA-256を計算し、一致した場合だけそのバイト列を返す。検証後に別の `read()` を行う二段階実装は禁止する
-- [ ] `part_index` は `RenderedMessage.parts` 内の0始まりインデックスとし、通常添付・インラインを含むMIME走査順で安定することを契約に明記する
-- [ ] usecases がMIME解析の具象や BeautifulSoup / PySide6 をimportせずに単体テストできる境界とする
+- [x] `BaseMessageRenderer(ABC)` を追加し、`render(raw: bytes) -> RenderedMessage` を定義する（D-24）
+- [x] `BaseEmlStorage.read_verified(relative_path: str, expected_hash: str) -> bytes` を追加し、同じ読み出し操作で完全SHA-256を検証して一致したバイト列だけを返す。不一致は `StorageError` 系で拒否する
+- [x] `infrastructure/storage/eml_storage.py` の `EmlStorage.read_verified()` は境界検証後にファイルを1回だけ開き、読み出しながら完全SHA-256を計算し、一致した場合だけそのバイト列を返す。検証後に別の `read()` を行う二段階実装は禁止する
+- [x] `part_index` は `RenderedMessage.parts` 内の0始まりインデックスとし、通常添付・インラインを含むMIME走査順で安定することを契約に明記する
+- [x] usecases がMIME解析の具象や BeautifulSoup / PySide6 をimportせずに単体テストできる境界とする
 
 #### **C-2. `infrastructure/parsing/eml_render.py` — `BaseMessageRenderer` の具象実装**
 

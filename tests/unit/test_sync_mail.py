@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from mail_dock.domain.errors import AuthenticationError
+from mail_dock.domain.errors import AuthenticationError, StorageError
 from mail_dock.domain.fetcher import CancelToken, RemoteFolder, RemoteMessageRef
 from mail_dock.domain.messages import ParsedMessage, StoredEml
 from mail_dock.domain.ports import BaseEmlStorage, BaseManifestWriter, JSONValue
@@ -39,6 +39,12 @@ class MemoryStorage(BaseEmlStorage):
 
     def read(self, relative_path: str) -> bytes:
         return self.raw_by_path[relative_path]
+
+    def read_verified(self, relative_path: str, expected_hash: str) -> bytes:
+        raw = self.read(relative_path)
+        if hashlib.sha256(raw).hexdigest() != expected_hash.casefold():
+            raise StorageError("EML file hash does not match expected hash")
+        return raw
 
 
 class MemoryManifest(BaseManifestWriter):

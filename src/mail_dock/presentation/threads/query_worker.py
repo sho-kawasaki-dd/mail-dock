@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Literal, cast
 
 from PySide6.QtCore import Signal
 
 from mail_dock.domain.errors import MailDockError, OperationCancelledError
 from mail_dock.domain.fetcher import CancelToken
-from mail_dock.domain.ports import BaseEmlStorage
+from mail_dock.domain.ports import BaseEmlStorage, BaseMessageRenderer
 from mail_dock.domain.search import (
     BaseSearchRepository,
     MessageFilter,
@@ -25,14 +25,6 @@ from mail_dock.usecases.search_messages import (
     list_thread,
     search_messages,
 )
-
-
-class BaseMessageRenderer(Protocol):
-    """Minimal renderer boundary needed until the domain C-1 port lands."""
-
-    def render(self, raw: bytes) -> object:
-        """Render verified EML bytes into a domain display value."""
-
 
 SearchMode = Literal["and", "or"]
 RepositoryFactory = Callable[[], BaseSearchRepository]

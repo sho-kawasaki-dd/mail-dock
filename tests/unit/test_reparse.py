@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime
 
+from mail_dock.domain.errors import StorageError
 from mail_dock.domain.messages import StoredEml
 from mail_dock.domain.ports import BaseEmlStorage
 from mail_dock.usecases.reparse import ReparseResult, reparse_messages
@@ -26,6 +27,12 @@ class MemoryEmlStorage(BaseEmlStorage):
             return self.files[relative_path]
         except KeyError as error:
             raise FileNotFoundError(relative_path) from error
+
+    def read_verified(self, relative_path: str, expected_hash: str) -> bytes:
+        raw = self.read(relative_path)
+        if hashlib.sha256(raw).hexdigest() != expected_hash.casefold():
+            raise StorageError("EML file hash does not match expected hash")
+        return raw
 
 
 def _raw(subject: str = "Subject") -> bytes:

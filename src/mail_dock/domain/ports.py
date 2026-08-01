@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from datetime import datetime
 
-from mail_dock.domain.messages import StoredEml
+from mail_dock.domain.messages import RenderedMessage, StoredEml
 
 type JSONValue = bool | int | float | str | list[JSONValue] | dict[str, JSONValue] | None
 
@@ -41,6 +41,22 @@ class BaseEmlStorage(ABC):
     @abstractmethod
     def read(self, relative_path: str) -> bytes:
         """Read an EML by a storage-relative path after validating its boundary."""
+
+    @abstractmethod
+    def read_verified(self, relative_path: str, expected_hash: str) -> bytes:
+        """Read an EML once and return it only when its complete hash matches."""
+
+
+class BaseMessageRenderer(ABC):
+    """Use-case port for rendering verified EML bytes for display and attachments."""
+
+    @abstractmethod
+    def render(self, raw: bytes) -> RenderedMessage:
+        """Render EML bytes, keeping parts in stable MIME walk order.
+
+        Consumers may use a zero-based ``part_index`` into ``parts``. Both
+        regular attachments and inline parts are included in that order.
+        """
 
 
 class BaseManifestWriter(ABC):

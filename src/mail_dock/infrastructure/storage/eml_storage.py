@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from mail_dock.domain.accounts import validate_account_id
+from mail_dock.domain.errors import StorageError
 from mail_dock.domain.messages import StoredEml
 from mail_dock.domain.ports import BaseEmlStorage
 from mail_dock.infrastructure.storage.detach import storage_io
@@ -189,3 +190,23 @@ class EmlStorage(BaseEmlStorage):
         with storage_io():
             path = _resolve_inside(self.root, relative_path)
             return path.read_bytes()
+
+    def read_verified(self, relative_path: str, expected_hash: str) -> bytes:
+        if len(expected_hash) != _HASH_LENGTH or any(
+            character not in "0123456789abcdefABCDEF" for character in expected_hash
+        ):
+            raise StorageError("Invalid expected EML hash")
+
+        with storage_io():
+            path = _resolve_inside(self.root, relative_path)
+            digest = hashlib.sha256()
+            payload = bytearray()
+            with path.open("rb") as file:
+                for chunk in iter(lambda: file.read(1024 * 1024), b""):
+                    digest.update(chunk)
+                    payload.extend(chunk)
+
+        actual_hash = digest.hexdigest()
+        if actual_hash != expected_hash.casefold():
+            raise StorageError("EML file hash does not match expected hash")
+        return bytes(payload)

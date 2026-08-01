@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from mail_dock.domain.errors import StorageDetachedError
+from mail_dock.domain.errors import StorageDetachedError, StorageError
 from mail_dock.infrastructure.storage.eml_storage import (
     EmlStorage,
     cleanup_tmp,
@@ -103,7 +103,22 @@ def test_read_and_reuse_reject_paths_outside_root(tmp_storage_root: Path) -> Non
     with pytest.raises(ValueError, match="escapes"):
         storage.read("../outside.eml")
     with pytest.raises(ValueError, match="escapes"):
+        storage.read_verified("../outside.eml", "0" * 64)
+    with pytest.raises(ValueError, match="escapes"):
         storage.reuse("../outside.eml", "0" * 64)
+
+
+def test_read_verified_returns_bytes_only_for_a_matching_complete_hash(
+    tmp_storage_root: Path,
+) -> None:
+    storage = EmlStorage(tmp_storage_root)
+    raw = b"verified EML content"
+    stored = storage.save("account", None, raw)
+
+    assert storage.read_verified(stored.relative_path, stored.file_hash) == raw
+
+    with pytest.raises(StorageError, match="hash"):
+        storage.read_verified(stored.relative_path, "0" * 64)
 
 
 def test_detached_storage_error_is_classified(
