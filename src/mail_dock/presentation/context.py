@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from mail_dock import config
 from mail_dock.domain.errors import ConfigError
@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 
 
 MessageRendererFactory = Callable[[], Any]
+HtmlSanitizerFactory = Callable[..., str]
 
 
 class AppContext:
@@ -127,6 +128,12 @@ class AppContext:
             return self._renderer_factory()
         renderer_module = import_module("mail_dock.infrastructure.parsing.eml_render")
         return renderer_module.EmlMessageRenderer()
+
+    def create_html_sanitizer(self) -> HtmlSanitizerFactory:
+        """Create the Qt-independent sanitizer used by the mail preview."""
+
+        sanitizer_module = import_module("mail_dock.infrastructure.parsing.html_sanitizer")
+        return cast(HtmlSanitizerFactory, sanitizer_module.sanitize_mail_html)
 
     def stop_workers(self) -> None:
         """Stop presentation workers before the owning session is released."""
