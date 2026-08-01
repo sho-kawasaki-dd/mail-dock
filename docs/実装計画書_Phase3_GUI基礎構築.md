@@ -220,10 +220,10 @@
 
 #### **B-3. `presentation/models/folder_tree_model.py`**
 
-- [ ] 「メールアカウント」ルート → 「すべてのアカウント」／各アカウント → 各フォルダのツリーを構築する
-- [ ] **ルートノードのリスト**を受け取る構造にする（Phase 4.5 の PST ルート追加に備える。D-14）
-- [ ] 表示名は `folders.display_name` を使い、非同期対象フォルダも表示する（同期対象かどうかを区別できるようにする）
-- [ ] 選択が `MessageFilter`（`account_ids` / `folder_ids`）へ変換されること
+- [x] 「メールアカウント」ルート → 「すべてのアカウント」／各アカウント → 各フォルダのツリーを構築する
+- [x] **ルートノードのリスト**を受け取る構造にする（Phase 4.5 の PST ルート追加に備える。D-14）
+- [x] 表示名は `folders.display_name` を使い、非同期対象フォルダも表示する（同期対象かどうかを区別できるようにする）
+- [x] 選択が `MessageFilter`（`account_ids` / `folder_ids`）へ変換されること
 
 #### **B-4. `presentation/viewmodels/message_list_viewmodel.py`**
 
