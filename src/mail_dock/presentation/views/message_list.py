@@ -2,27 +2,56 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, time
-from typing import cast
+from collections.abc import Callable, Sequence
+from datetime import UTC, date, datetime, time
+from typing import Literal, Protocol, cast
 
+from PySide6.QtCore import QModelIndex, QPersistentModelIndex, Qt, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDateEdit,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
+    QTableView,
     QToolButton,
     QWidget,
 )
 
-from mail_dock.domain.search import MessageFilter
+from mail_dock.domain.search import MessageFilter, MessageSummary
 from mail_dock.presentation import strings
+from mail_dock.presentation.models.message_table_model import MessageTableModel
 from mail_dock.presentation.viewmodels.message_list_viewmodel import (
     MessageListViewModel,
     SearchMode,
 )
+
+
+class _ThreadRequestHandle(Protocol):
+    request_id: int
+
+
+class _ThreadSignal(Protocol):
+    def connect(self, slot: Callable[[object], None]) -> object:
+        """Connect a result receiver."""
+
+
+class _ThreadQueryWorker(Protocol):
+    result: _ThreadSignal
+
+    def list_thread(
+        self,
+        *,
+        thread_key: str,
+        filters: MessageFilter | None = None,
+    ) -> _ThreadRequestHandle:
+        """Queue a thread listing."""
+
+    def cancel(self, channel: Literal["count/thread"]) -> _ThreadRequestHandle | None:
+        """Cancel one request channel."""
 
 
 class MessageListSearchBar(QWidget):
@@ -188,7 +217,7 @@ class MessageListSearchBar(QWidget):
         if not enabled.isChecked():
             return None
         selected = editor.date()
-        selected_date = selected.toPython()
+        selected_date = cast(date, selected.toPython())
         boundary = time.min if start else time.max
         return datetime.combine(selected_date, boundary, tzinfo=UTC)
 
@@ -201,3 +230,130 @@ class MessageListSearchBar(QWidget):
 
     def _set_request_busy(self, busy: bool) -> None:
         self._cancel_button.setEnabled(busy)
+
+
+class MessageListView(QTableView):
+    """Configure and operate the asynchronous message table.
+
+    The model owns pagination and all database-facing requests. This view only
+    asks the model for another page when the viewport reaches its end and
+    renders a thread result in the same table without creating a second view.
+    """
+
+    thread_loaded = Signal(int)
+
+    def __init__(
+        self,
+        model: MessageTableModel,
+        parent: QWidget | None = None,
+        *,
+        viewmodel: MessageListViewModel | None = None,
+        worker: _ThreadQueryWorker | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._message_model = model
+        self._viewmodel = viewmodel
+        self._thread_worker = worker or cast(_ThreadQueryWorker, model.worker)
+        self._thread_request_id: int | None = None
+        self._configure_table()
+        self.setModel(model)
+        self.selectionModel().currentRowChanged.connect(self._selection_changed)
+        self._thread_worker.result.connect(self._thread_result_received)
+
+    @property
+    def message_model(self) -> MessageTableModel:
+        """Return the table model controlled by this view."""
+
+        return self._message_model
+
+    @property
+    def thread_request_pending(self) -> bool:
+        """Whether a thread result is currently being loaded."""
+
+        return self._thread_request_id is not None
+
+    def show_thread(
+        self,
+        thread_key: str,
+        filters: MessageFilter | None = None,
+    ) -> _ThreadRequestHandle:
+        """Load ``thread_key`` and display it in the existing table."""
+
+        if self._thread_request_id is not None:
+            self._thread_worker.cancel("count/thread")
+        handle = self._thread_worker.list_thread(
+            thread_key=thread_key,
+            filters=filters,
+        )
+        self._thread_request_id = handle.request_id
+        return handle
+
+    def clear_thread(self) -> None:
+        """Return to the normal paginated list in the same table."""
+
+        if self._thread_request_id is not None:
+            self._thread_worker.cancel("count/thread")
+            self._thread_request_id = None
+        self._message_model.clear_thread()
+
+    def _configure_table(self) -> None:
+        self.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        self.setSortingEnabled(False)
+        self.setWordWrap(False)
+        self.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.setAlternatingRowColors(True)
+
+        vertical_header = self.verticalHeader()
+        vertical_header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        vertical_header.setDefaultSectionSize(28)
+        vertical_header.setMinimumSectionSize(28)
+
+        horizontal_header = self.horizontalHeader()
+        horizontal_header.setSectionsClickable(False)
+        horizontal_header.setStretchLastSection(False)
+        for column, width in enumerate((140, 140, 140, 220, 360, 100)):
+            horizontal_header.setSectionResizeMode(
+                column,
+                QHeaderView.ResizeMode.Interactive,
+            )
+            self.setColumnWidth(column, width)
+
+    def scrollContentsBy(self, dx: int, dy: int) -> None:  # noqa: N802
+        super().scrollContentsBy(dx, dy)
+        if dy:
+            self._fetch_more_at_bottom()
+
+    def _fetch_more_at_bottom(self) -> None:
+        scrollbar = self.verticalScrollBar()
+        threshold = max(1, scrollbar.pageStep() // 2)
+        if scrollbar.value() >= scrollbar.maximum() - threshold:
+            self._message_model.fetchMore()
+
+    def _selection_changed(
+        self,
+        current: QModelIndex | QPersistentModelIndex,
+        previous: QModelIndex | QPersistentModelIndex,
+    ) -> None:
+        del previous
+        if self._viewmodel is None:
+            return
+        summary = self._message_model.data(current, Qt.ItemDataRole.UserRole)
+        self._viewmodel.select_message(
+            summary.id if isinstance(summary, MessageSummary) else None
+        )
+
+    def _thread_result_received(self, result: object) -> None:
+        if getattr(result, "channel", None) != "count/thread":
+            return
+        if getattr(result, "request_id", None) != self._thread_request_id:
+            return
+        self._thread_request_id = None
+        value = getattr(result, "value", None)
+        if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+            return
+        items = tuple(item for item in value if isinstance(item, MessageSummary))
+        if len(items) != len(value):
+            return
+        self._message_model.show_thread(items)
+        self.thread_loaded.emit(len(items))

@@ -4,12 +4,17 @@ from typing import Literal, cast
 import pytest
 from PySide6.QtCore import QObject, Signal
 
-from mail_dock.domain.search import MessageFilter, PageCursor
+from mail_dock.domain.search import MessageFilter, MessageSummary, PageCursor
+from mail_dock.presentation.models.message_table_model import (
+    MessageQueryWorker,
+    MessageTableModel,
+    MessageThreadQueryWorker,
+)
 from mail_dock.presentation.viewmodels.message_list_viewmodel import (
     MessageListQueryWorker,
     MessageListViewModel,
 )
-from mail_dock.presentation.views.message_list import MessageListSearchBar
+from mail_dock.presentation.views.message_list import MessageListSearchBar, MessageListView
 
 pytestmark = pytest.mark.gui
 
@@ -51,14 +56,35 @@ class FakeWorker(QObject):
             "search", query=query, mode=mode, filters=filters, cursor=cursor, limit=limit
         )
 
-    def cancel(self, channel: Literal["list/search"]) -> Request | None:
-        del channel
+    def list_thread(
+        self,
+        *,
+        thread_key: str,
+        filters: MessageFilter | None = None,
+    ) -> Request:
+        return self._issue("thread", thread_key=thread_key, filters=filters)
+
+    def cancel(self, channel: str) -> Request | None:
+        self.calls.append(("cancel", {"channel": channel}))
         return None
 
     def _issue(self, operation: str, **kwargs: object) -> Request:
         self._next_id += 1
         self.calls.append((operation, kwargs))
         return Request(self._next_id)
+
+    def emit_thread(self, request_id: int, items: tuple[MessageSummary, ...]) -> None:
+        self.result.emit(
+            type(
+                "Result",
+                (),
+                {
+                    "channel": "count/thread",
+                    "request_id": request_id,
+                    "value": items,
+                },
+            )()
+        )
 
 
 def test_enter_only_search_and_structured_filters(qtbot: object) -> None:
@@ -85,7 +111,34 @@ def test_enter_only_search_and_structured_filters(qtbot: object) -> None:
 
     search_bar._from_enabled.setChecked(True)
     assert worker.calls[-1][0] == "search"
-    assert worker.calls[-1][1]["filters"].date_from is not None
+    filters = cast(MessageFilter, worker.calls[-1][1]["filters"])
+    assert filters.date_from is not None
 
     search_bar._attachment_selector.setCurrentIndex(1)
-    assert worker.calls[-1][1]["filters"].has_attachment is True
+    filters = cast(MessageFilter, worker.calls[-1][1]["filters"])
+    assert filters.has_attachment is True
+
+
+def test_message_list_view_configures_table_and_loads_thread(qtbot: object) -> None:
+    del qtbot
+    worker = FakeWorker()
+    model = MessageTableModel(cast(MessageQueryWorker, worker))
+    view = MessageListView(
+        model,
+        worker=cast(MessageThreadQueryWorker, worker),
+    )
+
+    assert view.selectionBehavior() == view.SelectionBehavior.SelectRows
+    assert view.isSortingEnabled() is False
+    assert view.verticalHeader().sectionResizeMode(0) == view.verticalHeader().ResizeMode.Fixed
+
+    request = view.show_thread("thread-1")
+    assert worker.calls[-1] == ("thread", {"thread_key": "thread-1", "filters": None})
+    worker.emit_thread(request.request_id, ())
+    assert model.thread_mode is True
+    assert model.rowCount() == 0
+    assert model.canFetchMore() is False
+
+    view.clear_thread()
+    assert model.thread_mode is False
+    assert model.canFetchMore() is True

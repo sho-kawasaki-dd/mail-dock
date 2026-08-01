@@ -71,6 +71,23 @@ class MessageQueryWorker(Protocol):
         """Cancel the current request in the list/search channel."""
 
 
+class MessageThreadQueryWorker(Protocol):
+    """Worker surface needed to load a thread into this model."""
+
+    result: _SignalLike
+
+    def list_thread(
+        self,
+        *,
+        thread_key: str,
+        filters: MessageFilter | None = None,
+    ) -> _RequestHandleLike:
+        """Queue one thread listing."""
+
+    def cancel(self, channel: Literal["count/thread"]) -> _RequestHandleLike | None:
+        """Cancel the current thread request."""
+
+
 _HEADERS = (
     strings.TABLE_HEADER_DATE,
     strings.TABLE_HEADER_ACCOUNT,
@@ -138,6 +155,7 @@ class MessageTableModel(QAbstractTableModel):
         self._next_cursor: PageCursor | None = None
         self._exhausted = False
         self._pending_request_id: int | None = None
+        self._thread_mode = False
 
         worker.result.connect(self._on_result)
         request_failed = getattr(worker, "request_failed", None)
@@ -170,6 +188,18 @@ class MessageTableModel(QAbstractTableModel):
         """Whether a list/search page is currently in flight."""
 
         return self._pending_request_id is not None
+
+    @property
+    def worker(self) -> MessageQueryWorker:
+        """Return the worker used for asynchronous requests."""
+
+        return self._worker
+
+    @property
+    def thread_mode(self) -> bool:
+        """Whether the rows currently shown are a thread result."""
+
+        return self._thread_mode
 
     def rowCount(  # noqa: N802
         self,
@@ -229,7 +259,12 @@ class MessageTableModel(QAbstractTableModel):
     ) -> bool:
         """Report whether another page may be requested."""
 
-        return not parent.isValid() and not self._exhausted and self._pending_request_id is None
+        return (
+            not parent.isValid()
+            and not self._thread_mode
+            and not self._exhausted
+            and self._pending_request_id is None
+        )
 
     def fetchMore(  # noqa: N802
         self,
@@ -263,6 +298,36 @@ class MessageTableModel(QAbstractTableModel):
             self._filters = filters
             self._reset_pages()
 
+    def show_thread(self, items: tuple[MessageSummary, ...]) -> None:
+        """Replace the paginated rows with one already loaded thread.
+
+        The list/search request is deliberately discarded locally instead of
+        being cancelled here. Its independent worker channel may still be in
+        use by another controller, and stale results are ignored while the
+        model is in thread mode.
+        """
+
+        self.beginResetModel()
+        self._items = list(items)
+        self._next_cursor = None
+        self._exhausted = True
+        self._pending_request_id = None
+        self._thread_mode = True
+        self.endResetModel()
+
+    def clear_thread(self) -> None:
+        """Leave thread mode and prepare the model for a fresh first page."""
+
+        if not self._thread_mode:
+            return
+        self.beginResetModel()
+        self._items.clear()
+        self._next_cursor = None
+        self._exhausted = False
+        self._pending_request_id = None
+        self._thread_mode = False
+        self.endResetModel()
+
     def set_search(self, query: str, mode: SearchMode = "and") -> None:
         """Replace the raw query and mode without normalizing in the model."""
 
@@ -285,11 +350,14 @@ class MessageTableModel(QAbstractTableModel):
         self._items.clear()
         self._next_cursor = None
         self._exhausted = False
+        self._thread_mode = False
         self._pending_request_id = None
         self.endResetModel()
 
     def _on_result(self, result: object) -> None:
         if getattr(result, "channel", None) != "list/search":
+            return
+        if self._thread_mode:
             return
         request_id = getattr(result, "request_id", None)
         if request_id != self._pending_request_id:
