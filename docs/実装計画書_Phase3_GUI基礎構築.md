@@ -268,14 +268,14 @@
 
 #### **C-2. `infrastructure/parsing/eml_render.py` — `BaseMessageRenderer` の具象実装**
 
-- [ ] `extract_render_parts(raw: bytes) -> RenderedMessage` を実装する
-- [ ] `EmlMessageRenderer(BaseMessageRenderer)` を実装し、`render()` を `extract_render_parts()` へ委譲する
-- [ ] `text/html` パートを（デコードして）`html_body` に、`text/plain` を `text_body` に格納する
-- [ ] `Content-ID` の山括弧を除去して `MessagePart.content_id` に格納する
-- [ ] 添付・インラインの判定は `eml_parser.py` と同じ規則（`Content-Disposition` と `Content-ID`）に揃える
-- [ ] 文字コードのデコードは既存の `charset.decode_text()` を使う（フォールバック順序を崩さない）
-- [ ] `parse_eml()` と統合しない理由（表示用はバイト列を保持し、検索用は正規化テキストのみ）を docstring に明記する（D-12）
-- [ ] `parts` の順序を `email.message.Message.walk()` によるMIME走査順で固定し、同じEMLから常に同じ `part_index` が得られることをテストする
+- [x] `extract_render_parts(raw: bytes) -> RenderedMessage` を実装する
+- [x] `EmlMessageRenderer(BaseMessageRenderer)` を実装し、`render()` を `extract_render_parts()` へ委譲する
+- [x] `text/html` パートを（デコードして）`html_body` に、`text/plain` を `text_body` に格納する
+- [x] `Content-ID` の山括弧を除去して `MessagePart.content_id` に格納する
+- [x] 添付・インラインの判定は `eml_parser.py` と同じ規則（`Content-Disposition` と `Content-ID`）に揃える
+- [x] 文字コードのデコードは既存の `charset.decode_text()` を使う（フォールバック順序を崩さない）
+- [x] `parse_eml()` と統合しない理由（表示用はバイト列を保持し、検索用は正規化テキストのみ）を docstring に明記する（D-12）
+- [x] `parts` の順序を `email.message.Message.walk()` によるMIME走査順で固定し、同じEMLから常に同じ `part_index` が得られることをテストする
 
 #### **C-3. `infrastructure/parsing/html_sanitizer.py` — CSP注入とタグ除去（*Qt非依存*）**
 
