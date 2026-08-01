@@ -19,6 +19,7 @@ from mail_dock.__main__ import (
 )
 from mail_dock.domain.errors import MailDockError, StorageForeignRootError, StorageLockedError
 from mail_dock.infrastructure.storage.storage_root import RootProbe, resolve_root
+from mail_dock.presentation import strings
 from mail_dock.presentation.context import AppContext
 from mail_dock.presentation.views.setup_wizard import SetupWizard
 from mail_dock.presentation.web.schemes import register_schemes
@@ -57,12 +58,14 @@ class _StartupVerificationWorker(QObject):
 def _available_root(settings: config.AppConfig, requested_root: Path | None) -> Path | None:
     """Resolve a known root without creating a marker or acquiring a lock."""
 
-    candidates = (requested_root,) if requested_root is not None else tuple(
-        Path(candidate) for candidate in settings.storage_root_candidates
+    candidates = (
+        (requested_root,)
+        if requested_root is not None
+        else tuple(Path(candidate) for candidate in settings.storage_root_candidates)
     )
     resolution = resolve_root(candidates, settings.storage_root_uuid)
     if resolution.probe is RootProbe.FOREIGN:
-        raise StorageForeignRootError("選択されたストレージルートは別のアーカイブです。")
+        raise StorageForeignRootError(strings.ERROR_FOREIGN_ROOT)
     return resolution.path
 
 
@@ -75,13 +78,13 @@ def _show_setup_wizard(requested_root: Path | None) -> Path | None:
 
 def _show_error(error: BaseException) -> None:
     if isinstance(error, StorageLockedError):
-        message = "他のインスタンスがストレージを使用中です。"
+        message = strings.ERROR_STORAGE_LOCKED
     elif isinstance(error, MailDockError):
         message = str(error)
     else:
         LOGGER.exception("GUI startup failed", exc_info=error)
-        message = "mail-dock の起動に失敗しました。ログを確認してください。"
-    QMessageBox.critical(None, "mail-dock", message)
+        message = strings.ERROR_STARTUP_FAILED
+    QMessageBox.critical(None, strings.APP_TITLE, message)
 
 
 def _stop_window(window: Any, context: AppContext | None) -> None:

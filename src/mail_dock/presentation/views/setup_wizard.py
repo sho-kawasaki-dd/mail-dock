@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from mail_dock.infrastructure.storage.storage_root import initialize_root
+from mail_dock.presentation import strings
 
 
 class SetupWizard(QWizard):
@@ -21,17 +22,17 @@ class SetupWizard(QWizard):
 
     def __init__(self, initial_root: Path | None = None) -> None:
         super().__init__()
-        self.setWindowTitle("mail-dock 初回セットアップ")
+        self.setWindowTitle(strings.WIZARD_TITLE)
         self._selected_root: Path | None = None
         self._root_edit = QLineEdit(str(initial_root) if initial_root else "")
 
         page = QWizardPage()
-        page.setTitle("保存先を選択")
+        page.setTitle(strings.WIZARD_PAGE_STORAGE_TITLE)
         layout = QFormLayout(page)
-        layout.addRow("ストレージルート", self._root_edit)
-        browse_button = QPushButton("参照", page)
+        layout.addRow(strings.WIZARD_LABEL_STORAGE_ROOT, self._root_edit)
+        browse_button = QPushButton(strings.WIZARD_BUTTON_BROWSE, page)
         browse_button.clicked.connect(self._browse)
-        layout.addRow("", browse_button)
+        layout.addRow(browse_button)
         self.addPage(page)
 
     @property
@@ -50,6 +51,6 @@ class SetupWizard(QWizard):
         super().accept()
 
     def _browse(self) -> None:
-        selected = QFileDialog.getExistingDirectory(self, "ストレージルートを選択")
+        selected = QFileDialog.getExistingDirectory(self, strings.WIZARD_DIALOG_SELECT_ROOT)
         if selected:
             self._root_edit.setText(selected)

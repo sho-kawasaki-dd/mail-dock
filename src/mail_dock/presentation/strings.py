@@ -1,0 +1,129 @@
+"""User-facing strings for the presentation layer.
+
+Keep visible UI text in this module so views and controllers contain only
+presentation logic. Format strings with ``str.format`` at the call site when
+they contain runtime values.
+"""
+
+APP_NAME = "mail-dock"
+APP_TITLE = APP_NAME
+
+WIZARD_TITLE = "mail-dock 初回セットアップ"
+WIZARD_PAGE_STORAGE_TITLE = "保存先を選択"
+WIZARD_PAGE_ACCOUNT_TITLE = "アカウント登録"
+WIZARD_PAGE_FOLDERS_TITLE = "同期対象フォルダ選択"
+WIZARD_LABEL_STORAGE_ROOT = "ストレージルート"
+WIZARD_LABEL_ACCOUNT_ID = "account_id"
+WIZARD_LABEL_HOST = "ホスト"
+WIZARD_LABEL_PORT = "ポート"
+WIZARD_LABEL_USERNAME = "ユーザー名"
+WIZARD_LABEL_PASSWORD = "パスワード"
+WIZARD_LABEL_DISPLAY_NAME = "表示名"
+WIZARD_BUTTON_BROWSE = "参照"
+WIZARD_BUTTON_CONNECTION_TEST = "接続テスト"
+WIZARD_BUTTON_NEXT = "次へ"
+WIZARD_BUTTON_FINISH = "完了"
+WIZARD_BUTTON_CANCEL = "キャンセル"
+WIZARD_DIALOG_SELECT_ROOT = "ストレージルートを選択"
+WIZARD_WARNING_ENCRYPTION_UNKNOWN = (
+    "暗号化状態が確認できません。BitLocker To Go で暗号化されていることを確認してください。"
+)
+WIZARD_WARNING_INSUFFICIENT_SPACE = "空き容量が不足しています。"
+WIZARD_HELP_FOLDER_SYNC_TARGET = "新規フォルダは既定で同期対象に含まれません。"
+
+MAIN_WINDOW_TITLE = APP_TITLE
+MAIN_MENU_FILE = "ファイル"
+MAIN_MENU_EXPORT_EML = ".eml として保存"
+MAIN_MENU_EXIT = "終了"
+MAIN_MENU_VIEW = "表示"
+MAIN_MENU_THREAD_VIEW = "スレッド表示"
+MAIN_MENU_HELP = "ヘルプ"
+MAIN_MENU_OPEN_LOG_FOLDER = "ログフォルダを開く"
+MAIN_TOOLBAR_SYNC = "同期"
+MAIN_TOOLBAR_REFRESH_FOLDERS = "フォルダを再取得"
+MAIN_TOOLBAR_SEARCH = "検索"
+MAIN_TOOLBAR_SETTINGS = "設定"
+
+TABLE_HEADER_DATE = "日付"
+TABLE_HEADER_ACCOUNT = "アカウント"
+TABLE_HEADER_FOLDER = "フォルダ"
+TABLE_HEADER_FROM = "差出人"
+TABLE_HEADER_SUBJECT = "件名"
+TABLE_HEADER_SIZE = "サイズ"
+
+STATUS_SYNCING = "同期中..."
+STATUS_SYNC_COMPLETE = "同期完了"
+STATUS_QUERYING = "検索中..."
+STATUS_LOADING = "読み込み中..."
+STATUS_REMOTE_DELETED = "削除済み"
+STATUS_REMOTE_MOVED = "移動先: {folder}"
+STATUS_LOCAL_PURGED = "実体なし"
+STATUS_UNREAD = "未読"
+STATUS_FLAGGED = "スター付き"
+STATUS_OVERSIZE = "未取得\uff08サイズ上限超過\uff09"
+TOOLTIP_UNREAD = "同期時点のスナップショットです"
+TOOLTIP_IMAP_FLAGS = "このメッセージのフラグは同期時点の状態で、変更できません"
+
+SEARCH_PLACEHOLDER = "件名・差出人で検索"
+SEARCH_MODE_AND = "AND"
+SEARCH_MODE_OR = "OR"
+SEARCH_SLOW_PATH_WARNING = "短い語を含むため、時間がかかる場合があります"
+SEARCH_NO_RESULTS = "検索結果がありません"
+SEARCH_INVALID_QUERY = "検索条件が無効です。"
+SEARCH_CLEAR = "検索をクリア"
+FILTER_ALL_ACCOUNTS = "すべてのアカウント"
+FILTER_ALL_FOLDERS = "すべてのフォルダ"
+
+DETAIL_HEADER_TO = "宛先:"
+DETAIL_HEADER_CC = "Cc:"
+DETAIL_HEADER_DATE = "日付:"
+DETAIL_HEADER_ACCOUNT = "アカウント:"
+DETAIL_HEADER_FOLDER = "フォルダ:"
+DETAIL_REMOTE_IMAGES_BLOCKED = "外部画像がブロックされています"
+DETAIL_LOAD_REMOTE_IMAGES = "画像を読み込む"
+DETAIL_THREAD_SHOW = "この会話の{count}件を表示"
+DETAIL_NO_BODY = "本文がありません"
+DETAIL_PURGED = "このメッセージの実体はローカルにありません。"
+DETAIL_ATTACHMENT_LIST = "添付ファイル"
+DETAIL_ATTACHMENT_SAVE = "保存"
+
+ERROR_TITLE = "エラー"
+ERROR_STARTUP_FAILED = "mail-dock の起動に失敗しました。ログを確認してください。"
+ERROR_STORAGE_LOCKED = "他のインスタンスがストレージを使用中です。"
+ERROR_FOREIGN_ROOT = "選択されたストレージルートは別のアーカイブです。"
+ERROR_STORAGE_DETACHED = "ストレージが切断されました。接続を確認してください。"
+ERROR_AUTHENTICATION = "認証に失敗しました。ユーザー名またはパスワードを確認してください。"
+ERROR_CONNECTION = "サーバーに接続できません。"
+ERROR_INSUFFICIENT_SPACE = "ストレージの空き容量が不足しています。"
+ERROR_DATABASE = "メタデータベースを確認できません。ログを確認してください。"
+ERROR_UNKNOWN = "予期しないエラーが発生しました。ログを確認してください。"
+ERROR_LOG_FOLDER = "詳細はログファイルを参照してください。"
+
+DIALOG_CONFIRM_TITLE = "確認"
+DIALOG_CONFIRM_EXTERNAL_LINK = "外部ブラウザでこのリンクを開きますか?\n{url}"
+DIALOG_CONFIRM_SAVE_EXECUTABLE = (
+    "このファイルは実行可能ファイルです。本当に保存しますか?\n{filename}"
+)
+DIALOG_CONFIRM_OVERWRITE = "ファイルが既に存在します。上書きしますか?\n{filename}"
+DIALOG_SYNC_COMPLETE = (
+    "同期が完了しました。\n取得: {fetched} 件\nスキップ: {skipped} 件\n失敗: {failed} 件"
+)
+DIALOG_REFRESH_FOLDERS_COMPLETE = (
+    "フォルダ取得が完了しました。\n新規: {new_count} 件\n消失: {removed_count} 件"
+)
+
+SETTINGS_TITLE = "設定"
+SETTINGS_LABEL_MAX_MESSAGE_SIZE = "1通あたりサイズ上限 (MB)"
+SETTINGS_LABEL_BLOCK_REMOTE_IMAGES = "外部画像をブロック"
+SETTINGS_LABEL_SYNC_ON_STARTUP = "起動時に同期"
+SETTINGS_LABEL_STARTUP_VERIFICATION = "起動時の整合性チェック"
+SETTINGS_VERIFICATION_QUICK = "簡易"
+SETTINGS_VERIFICATION_FULL = "完全"
+SETTINGS_BUTTON_OK = "OK"
+SETTINGS_BUTTON_CANCEL = "キャンセル"
+SETTINGS_BUTTON_APPLY = "適用"
+
+SAVE_DIALOG_TITLE = "ファイルの保存先を選択"
+SAVE_ATTACHMENT_SANITIZED = "ファイル名が変更されました: {original} → {sanitized}"
+SAVE_SUCCESS = "{filename} を保存しました。"
+EXPORT_FILENAME_PATTERN = "{subject}_{date}.eml"
