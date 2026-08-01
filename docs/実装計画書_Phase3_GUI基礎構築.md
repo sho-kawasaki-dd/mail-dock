@@ -302,10 +302,10 @@
 
 #### **C-5. `presentation/web/profile.py` — 層1・層2**
 
-- [ ] 名前無しの `QWebEngineProfile()` を生成し、**オフレコ**であることを確認する
-- [ ] `setHttpCacheType(NoCache)` / `setPersistentCookiesPolicy(NoPersistentCookies)` を設定する
-- [ ] `QWebEngineSettings` で以下をすべて `False` にする: `JavascriptEnabled` / `LocalStorageEnabled` / `PluginsEnabled` / `LocalContentCanAccessRemoteUrls` / `LocalContentCanAccessFileUrls` / `AllowRunningInsecureContent` / `ScreenCaptureEnabled` / `FullScreenSupportEnabled` / `AutoLoadIconsForPage`
-- [ ] プロファイルの寿命をアプリと同じにし、`QWebEnginePage` より長く保持する（先に破棄するとクラッシュするため）
+- [x] 名前無しの `QWebEngineProfile()` を生成し、**オフレコ**であることを確認する
+- [x] `setHttpCacheType(NoCache)` / `setPersistentCookiesPolicy(NoPersistentCookies)` を設定する
+- [x] `QWebEngineSettings` で以下をすべて `False` にする: `JavascriptEnabled` / `LocalStorageEnabled` / `PluginsEnabled` / `LocalContentCanAccessRemoteUrls` / `LocalContentCanAccessFileUrls` / `AllowRunningInsecureContent` / `ScreenCaptureEnabled` / `FullScreenSupportEnabled` / `AutoLoadIconsForPage`
+- [x] プロファイルの寿命をアプリと同じにし、`QWebEnginePage` より長く保持する（先に破棄するとクラッシュするため）
 
 #### **C-6. `presentation/web/interceptor.py` — 層3**
 
