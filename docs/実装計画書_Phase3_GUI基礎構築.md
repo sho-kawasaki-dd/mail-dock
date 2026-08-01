@@ -521,15 +521,15 @@
 
 #### **G-3. CI**
 
-- [ ] `lint` / `test-windows` / `test-linux` の3ジョブを `-m "not docker and not gui"` で実行する
-- [ ] GUIテストが CI で実行されないことを確認する
-- [ ] 新規モジュールが `ruff` / `mypy` を通ることを確認する
+- [x] `lint` / `test-windows` / `test-linux` の3ジョブを `-m "not docker and not gui"` で実行する
+- [x] GUIテストが CI で実行されないことを確認する
+- [x] 新規モジュールが `ruff` / `mypy` を通ることを確認する
 
 #### **G-4. ドキュメント**
 
-- [ ] `README.md` に GUI の起動方法（`mail-dock` / `mail-dock gui`）を追記する
-- [ ] `README.md` に GUIテストのローカル実行方法（環境変数・オフスクリーン実行）を追記する
-- [ ] `THIRD-PARTY-LICENSES.md` に QtWebEngine（Chromium）関連の記載を追加する
+- [x] `README.md` に GUI の起動方法（`mail-dock` / `mail-dock gui`）を追記する
+- [x] `README.md` に GUIテストのローカル実行方法（環境変数・オフスクリーン実行）を追記する
+- [x] `THIRD-PARTY-LICENSES.md` に QtWebEngine（Chromium）関連の記載を追加する
 
 ---
 

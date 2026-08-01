@@ -41,7 +41,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
       - name: Run tests
-        run: uv run pytest -m "not docker" --cov=mail_dock
+        run: uv run pytest -m "not docker and not gui" --cov=mail_dock
 
   test-linux:
     runs-on: ubuntu-latest
@@ -54,12 +54,14 @@ jobs:
           enable-cache: true
       - name: Install dependencies
         run: uv sync --frozen
+      - name: Run non-Docker tests
+        run: uv run pytest -m "not docker and not gui" --cov=mail_dock
       - name: Start Docker integration services
         run: docker compose -f tests/docker/compose.yaml up -d --wait
       - name: Run Docker integration tests
         env:
           MAILDOCK_DOCKER: "1"
-        run: uv run pytest -m docker
+        run: uv run pytest -m "docker and not gui"
       - name: Stop Docker integration services
         if: ${{ always() }}
         run: docker compose -f tests/docker/compose.yaml down -v

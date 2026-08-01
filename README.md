@@ -18,10 +18,33 @@ uv sync
 uv run ruff format --check .
 uv run ruff check .
 uv run mypy
-uv run pytest -m "not docker"
+uv run pytest -m "not docker and not gui"
 ```
 
-The default test command excludes Docker-based integration tests and is suitable for the Windows mock-based development path.
+The default test command excludes Docker-based integration tests and GUI tests, and is suitable for the Windows mock-based development path.
+
+## GUI
+
+Start the desktop application with either command:
+
+```sh
+uv run mail-dock
+uv run mail-dock gui
+```
+
+The first command starts the GUI when no subcommand is provided. The GUI setup wizard is shown when no valid storage root has been configured.
+
+Run GUI tests locally with the GUI marker enabled. On headless Linux environments, use Qt's offscreen platform:
+
+```sh
+MAILDOCK_GUI=1 QT_QPA_PLATFORM=offscreen uv run pytest -m gui
+```
+
+To run all tests that do not require Docker, including GUI tests, use:
+
+```sh
+MAILDOCK_GUI=1 QT_QPA_PLATFORM=offscreen uv run pytest -m "not docker"
+```
 
 ## WSL Docker tests
 
@@ -39,7 +62,7 @@ IMAP `3144` / IMAPS `3994`. Both use the test account `testuser` with password
 mailboxes plus the Japanese `受信トレイ.請求書` hierarchy with `.` as the
 folder delimiter.
 
-Use the application CLI with `uv run mail-dock`. The `--storage-root` option selects an archive root; `migrate` applies database migrations and `verify` performs read-only integrity checks.
+Use the application CLI with `uv run mail-dock migrate` or `uv run mail-dock verify`. The `--storage-root` option selects an archive root; `migrate` applies database migrations and `verify` performs read-only integrity checks.
 
 ## FTS PoC checks
 
