@@ -5,6 +5,7 @@ from typing import Literal, cast
 
 import pytest
 from PySide6.QtCore import QModelIndex, QObject, Qt, Signal
+from PySide6.QtGui import QBrush
 
 from mail_dock.domain.search import MessageFilter, MessageSummary, PageCursor, SearchPage
 from mail_dock.presentation import strings
@@ -217,7 +218,9 @@ def test_status_roles_render_from_summary(qtbot: object) -> None:
     deleted = _model_with_summary(
         replace(_summary(), remote_state="deleted", local_state="purged")
     )
-    assert deleted.data(index, Qt.ItemDataRole.ForegroundRole).color().name() == "#808080"
+    foreground = deleted.data(index, Qt.ItemDataRole.ForegroundRole)
+    assert isinstance(foreground, QBrush)
+    assert foreground.color().name() == "#808080"
     assert deleted.data(index, Qt.ItemDataRole.DisplayRole) == strings.STATUS_LOCAL_PURGED
     assert deleted.data(index, Qt.ItemDataRole.DecorationRole) is not None
 

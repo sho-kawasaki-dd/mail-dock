@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, date, datetime, time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from mail_dock import __version__, config
 from mail_dock.domain.errors import (
@@ -810,7 +810,7 @@ def _run_gui(settings: config.AppConfig, requested_root: Path | None) -> int:
 
     from mail_dock.presentation.app import run_gui
 
-    return cast(int, run_gui(settings, requested_root=requested_root))
+    return run_gui(settings, requested_root=requested_root)
 
 
 def _exit_code(error: MailDockError) -> int:
