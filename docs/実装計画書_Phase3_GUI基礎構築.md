@@ -126,14 +126,14 @@
 
 #### **A-2. `presentation/app.py` — GUI エントリポイント**
 
-- [ ] `run_gui(...) -> int` を実装する
-- [ ] **`QApplication` 生成の前に** `presentation/web/schemes.py` の `register_schemes()` を呼ぶ（`cid` / `maildock` の `QWebEngineUrlScheme` 登録。D-11）
-- [ ] ストレージルートが未設定・未解決の場合も例外終了せず、`QApplication` 生成後に初回セットアップウィザードを起動する
-- [ ] ウィザードでルートが確定してから `StorageSession` を開始し、設定済みの場合も同じ経路で `AppContext` を構築する
-- [ ] `StorageLock` の取得に失敗した場合に `QMessageBox` を表示して終了コード 3 を返す（F-23）
-- [ ] `AppContext` を構築して `MainWindow` を表示し、`app.exec()` の戻り値を返す
-- [ ] 終了時にワーカースレッドを停止してから `StorageSession` を閉じる（`ConnectionManager` と `StorageLock` を個別に二重解放しない）
-- [ ] `startup_verification='quick'` なら `quick_check` / `foreign_key_check`、`'full'` なら加えてFTS integrity-checkをワーカーで実行し、完了までメイン画面のDB操作を開始しない。FTS検査はPhase 2と同じ短命な専用書き込み可能接続を使い、QueryWorkerの読み取り接続を流用しない（D-27）
+- [x] `run_gui(...) -> int` を実装する
+- [x] **`QApplication` 生成の前に** `presentation/web/schemes.py` の `register_schemes()` を呼ぶ（`cid` / `maildock` の `QWebEngineUrlScheme` 登録。D-11）
+- [x] ストレージルートが未設定・未解決の場合も例外終了せず、`QApplication` 生成後に初回セットアップウィザードを起動する
+- [x] ウィザードでルートが確定してから `StorageSession` を開始し、設定済みの場合も同じ経路で `AppContext` を構築する
+- [x] `StorageLock` の取得に失敗した場合に `QMessageBox` を表示して終了コード 3 を返す（F-23）
+- [x] `AppContext` を構築して `MainWindow` を表示し、`app.exec()` の戻り値を返す
+- [x] 終了時にワーカースレッドを停止してから `StorageSession` を閉じる（`ConnectionManager` と `StorageLock` を個別に二重解放しない）
+- [x] `startup_verification='quick'` なら `quick_check` / `foreign_key_check`、`'full'` なら加えてFTS integrity-checkをワーカーで実行し、完了までメイン画面のDB操作を開始しない。FTS検査はPhase 2と同じ短命な専用書き込み可能接続を使い、QueryWorkerの読み取り接続を流用しない（D-27）
 - [ ] `sync_on_startup` が真なら起動直後に同期を1回起動する（D-21）
 
 #### **A-3. `presentation/context.py` — GUI用コンポジションルート**
