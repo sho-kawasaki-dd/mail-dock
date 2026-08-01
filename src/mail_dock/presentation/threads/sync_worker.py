@@ -24,7 +24,7 @@ from mail_dock.domain.errors import (
 from mail_dock.domain.fetcher import BaseMailFetcher, CancelToken
 from mail_dock.domain.ports import BaseEmlStorage, BaseManifestWriter
 from mail_dock.domain.repository import BaseMessageRepository, MessageRecord
-from mail_dock.presentation import strings
+from mail_dock.presentation.errors import user_message
 from mail_dock.presentation.threads.worker import Worker, _Task
 from mail_dock.usecases.sync_folders import FolderRefreshResult, refresh_folders
 from mail_dock.usecases.sync_mail import SyncOptions, SyncProgress, SyncResult, sync_account
@@ -200,7 +200,7 @@ class SyncWorker(Worker):
             notification = SyncErrorNotification(
                 operation=operation,
                 error=error,
-                message=_user_message(error),
+                message=user_message(error),
             )
             self.error_reported.emit(notification)
             if isinstance(error, StorageDetachedError):
@@ -253,14 +253,3 @@ def _close_manifest(manifest: BaseManifestWriter) -> None:
     close = getattr(manifest, "close", None)
     if callable(close):
         close()
-
-
-def _user_message(error: MailDockError) -> str:
-    if isinstance(error, StorageDetachedError):
-        return strings.ERROR_STORAGE_DETACHED
-    if isinstance(error, AuthenticationError):
-        return strings.ERROR_AUTHENTICATION
-    if isinstance(error, FetchError):
-        return strings.ERROR_CONNECTION
-    return strings.ERROR_UNKNOWN
-

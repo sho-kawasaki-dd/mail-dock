@@ -179,9 +179,9 @@
 
 #### **A-8. `presentation/errors.py` — 例外→UI文言の対応表**
 
-- [ ] `MailDockError` 階層（`StorageDetachedError` / `StorageLockedError` / `InsufficientSpaceError` / `DatabaseError` / `AuthenticationError` / `TransientError` / `PermanentError` / `OversizeError` / `CredentialStoreError` / `SearchQueryError` / `OperationCancelledError` 等）に対する文言と復旧導線の対応表を定義する
-- [ ] 未知の例外は汎用文言＋「ログを開く」導線にフォールバックする
-- [ ] トレースバックを画面へ出さず、ログにのみ記録する（F-25）
+- [x] `MailDockError` 階層（`StorageDetachedError` / `StorageLockedError` / `InsufficientSpaceError` / `DatabaseError` / `AuthenticationError` / `TransientError` / `PermanentError` / `OversizeError` / `CredentialStoreError` / `SearchQueryError` / `OperationCancelledError` 等）に対する文言と復旧導線の対応表を定義する
+- [x] 未知の例外は汎用文言＋「ログを開く」導線にフォールバックする
+- [x] トレースバックを画面へ出さず、ログにのみ記録する（F-25）
 
 ---
 
