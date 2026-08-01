@@ -151,12 +151,12 @@
 
 #### **A-5. `presentation/threads/worker.py` — ワーカー基盤**
 
-- [ ] `QObject` ワーカー ＋ `QThread` の `moveToThread` パターンで基底クラスを実装する
-- [ ] タスクを Signal で受け、結果／エラーを Signal で返す（例外はスレッドを越えて raise しない）
-- [ ] 例外は `MailDockError` に正規化して `failed` Signal で返す
-- [ ] スレッド終了時に、そのスレッドが開いた SQLite 接続を必ず閉じる
-- [ ] UI側コントローラが実行中タスクの `CancelToken` を所有し、ワーカーのSlot実行中でも `cancel()` を直接呼べる構造にする。キャンセル要求を同じワーカースレッドのqueued Slotだけに依存させない
-- [ ] `stop()` はUI側から全チャネルの `CancelToken` を立て、タスク終了後に `quit()` + `wait()` する
+- [x] `QObject` ワーカー ＋ `QThread` の `moveToThread` パターンで基底クラスを実装する
+- [x] タスクを Signal で受け、結果／エラーを Signal で返す（例外はスレッドを越えて raise しない）
+- [x] 例外は `MailDockError` に正規化して `failed` Signal で返す
+- [x] スレッド終了時に、そのスレッドが開いた SQLite 接続を必ず閉じる
+- [x] UI側コントローラが実行中タスクの `CancelToken` を所有し、ワーカーのSlot実行中でも `cancel()` を直接呼べる構造にする。キャンセル要求を同じワーカースレッドのqueued Slotだけに依存させない
+- [x] `stop()` はUI側から全チャネルの `CancelToken` を立て、タスク終了後に `quit()` + `wait()` する
 
 #### **A-6. `presentation/threads/query_worker.py` — 読み取り専用ワーカー**
 
