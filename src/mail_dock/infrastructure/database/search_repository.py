@@ -174,6 +174,11 @@ class SqliteSearchRepository(BaseSearchRepository):
             remote_state=str(row[11]),
             local_state=str(row[12]),
             thread_key=str(row[13]) if row[13] is not None else None,
+            imap_flags=str(row[14]) if row[14] is not None else None,
+            moved_to_folder_display_name=(
+                str(row[15]) if row[15] is not None else None
+            ),
+            failure_class=str(row[16]) if row[16] is not None else None,
         )
 
     def _page(
@@ -202,8 +207,13 @@ class SqliteSearchRepository(BaseSearchRepository):
         sql = (
             "SELECT m.id, m.account_id, m.folder_id, f.raw_name, f.display_name, "
             "m.subject, m.sender, m.date_sent, m.internal_date, m.size_bytes, "
-            "m.has_attachment, m.remote_state, m.local_state, m.thread_key "
+            "m.has_attachment, m.remote_state, m.local_state, m.thread_key, "
+            "m.imap_flags, moved_to_f.display_name, sf.error_class "
             "FROM messages AS m JOIN folders AS f ON f.id = m.folder_id "
+            "LEFT JOIN folders AS moved_to_f ON moved_to_f.id = m.moved_to_folder_id "
+            "LEFT JOIN sync_failures AS sf ON sf.account_id = m.account_id "
+            "AND sf.folder_id = m.folder_id AND sf.uidvalidity = m.uidvalidity "
+            "AND sf.uid = m.uid "
             f"WHERE {where} "
             "ORDER BY COALESCE(m.date_sent, m.internal_date, '') DESC, m.id DESC LIMIT ?"
         )
@@ -311,9 +321,14 @@ class SqliteSearchRepository(BaseSearchRepository):
                     "SELECT m.id, m.account_id, m.folder_id, f.raw_name, f.display_name, "
                     "m.subject, m.sender, m.date_sent, m.internal_date, m.size_bytes, "
                     "m.has_attachment, m.remote_state, m.local_state, m.thread_key, "
+                    "m.imap_flags, moved_to_f.display_name, sf.error_class, "
                     "m.recipient, m.cc, m.message_id, m.in_reply_to, m.references_ids, "
-                    "m.relative_path, m.file_hash, m.imap_flags "
-                    "FROM messages AS m JOIN folders AS f ON f.id = m.folder_id WHERE m.id = ?",
+                    "m.relative_path, m.file_hash "
+                    "FROM messages AS m JOIN folders AS f ON f.id = m.folder_id "
+                    "LEFT JOIN folders AS moved_to_f ON moved_to_f.id = m.moved_to_folder_id "
+                    "LEFT JOIN sync_failures AS sf ON sf.account_id = m.account_id "
+                    "AND sf.folder_id = m.folder_id AND sf.uidvalidity = m.uidvalidity "
+                    "AND sf.uid = m.uid WHERE m.id = ?",
                     (message_id,),
                 )
                 .fetchone()
@@ -323,14 +338,13 @@ class SqliteSearchRepository(BaseSearchRepository):
         summary = self._summary(row)
         return MessageDetail(
             **summary.__dict__,
-            recipient=str(row[14] or ""),
-            cc=str(row[15] or ""),
-            message_id=str(row[16]) if row[16] is not None else None,
-            in_reply_to=str(row[17]) if row[17] is not None else None,
-            references_ids=str(row[18]) if row[18] is not None else None,
-            relative_path=str(row[19]) if row[19] is not None else None,
-            file_hash=str(row[20]) if row[20] is not None else None,
-            imap_flags=str(row[21]) if row[21] is not None else None,
+            recipient=str(row[17] or ""),
+            cc=str(row[18] or ""),
+            message_id=str(row[19]) if row[19] is not None else None,
+            in_reply_to=str(row[20]) if row[20] is not None else None,
+            references_ids=str(row[21]) if row[21] is not None else None,
+            relative_path=str(row[22]) if row[22] is not None else None,
+            file_hash=str(row[23]) if row[23] is not None else None,
         )
 
 

@@ -64,6 +64,8 @@ def _add(
     local_state: str = "active",
     remote_state: str = "present",
     thread_key: str | None = None,
+    uidvalidity: int = 1,
+    imap_flags: str | None = "\\Seen",
 ) -> int:
     return int(
         repository.add_message(
@@ -71,7 +73,7 @@ def _add(
                 "account_id": account_id,
                 "folder_id": folder_id,
                 "uid": uid,
-                "uidvalidity": 1,
+                "uidvalidity": uidvalidity,
                 "content_key": f"content-{account_id}-{uid}",
                 "source_item_key": f"source-{account_id}-{uid}",
                 "subject": subject,
@@ -89,7 +91,7 @@ def _add(
                 "references_ids": "<parent@example.com>",
                 "relative_path": f"eml/{uid}.eml",
                 "file_hash": f"hash-{uid}",
-                "imap_flags": "\\Seen",
+                "imap_flags": imap_flags,
             },
             {
                 "subject": subject,
@@ -192,6 +194,48 @@ def test_keyset_paging_handles_ties_and_null_dates(
     assert [item.id for item in first.items + second.items] == [ids[1], ids[0], ids[2], ids[3]]
     assert second.next_cursor is None
     assert second.exhausted is True
+
+
+def test_list_summary_includes_joined_status_fields_for_current_uidvalidity(
+    db_conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    messages, search, folder_a, _ = _repositories(db_conn, tmp_path / "metadata.db")
+    moved_folder = messages.upsert_folder(
+        {"account_id": "account-a", "raw_name": "Moved", "display_name": "移動先"}
+    )
+    moved_id = _add(messages, folder_a, 1, imap_flags="\\Flagged")
+    failed_id = _add(messages, folder_a, 2)
+    messages.update_remote_state(moved_id, "moved", moved_folder)
+    messages.record_failure("account-a", folder_a, 1, 2, "oversize", "too large")
+    messages.record_failure("account-a", folder_a, 99, 2, "parse", "old generation")
+
+    items = {item.id: item for item in list_messages(search).items}
+
+    assert items[moved_id].imap_flags == "\\Flagged"
+    assert items[moved_id].moved_to_folder_display_name == "移動先"
+    assert items[moved_id].failure_class is None
+    assert items[failed_id].failure_class == "oversize"
+
+
+def test_list_page_uses_one_joined_select_without_detail_queries(
+    db_conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    messages, search, folder_a, _ = _repositories(db_conn, tmp_path / "metadata.db")
+    _add(messages, folder_a, 1)
+    statements: list[str] = []
+    db_conn.set_trace_callback(statements.append)
+    try:
+        list_messages(search)
+    finally:
+        db_conn.set_trace_callback(None)
+
+    select_statements = [
+        statement
+        for statement in statements
+        if statement.lstrip().upper().startswith("SELECT")
+    ]
+    assert len(select_statements) == 1
+    assert "sync_failures" in select_statements[0]
 
 
 def test_read_operations_return_count_thread_and_detail(

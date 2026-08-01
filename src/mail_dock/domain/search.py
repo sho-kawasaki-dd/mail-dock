@@ -87,6 +87,9 @@ class MessageSummary:
     remote_state: str
     local_state: str
     thread_key: str | None
+    imap_flags: str | None
+    moved_to_folder_display_name: str | None
+    failure_class: str | None
 
 
 @dataclass(frozen=True)

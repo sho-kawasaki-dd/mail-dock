@@ -189,11 +189,11 @@
 
 #### **B-0. `domain/search.py` / `infrastructure/database/search_repository.py` — 一覧表示契約の拡張**
 
-- [ ] `MessageSummary` に `imap_flags: str | None` / `moved_to_folder_display_name: str | None` / `failure_class: str | None` を追加する（D-23）
-- [ ] 一覧・検索・スレッド取得SQLが移動先 `folders` と現在UID世代の `sync_failures` をLEFT JOINし、1回の問い合わせで表示情報を返す
-- [ ] `sync_failures` は `(account_id, folder_id, uidvalidity, uid)` でJOINし、旧UIDVALIDITY世代の失敗を現在行へ誤表示しない
-- [ ] 一覧描画から `get_message()` を行ごとに呼ばないことをリポジトリのクエリ回数テストで固定する
-- [ ] `BaseSearchRepository` は引き続き読み取り専用とし、書き込みメソッドを追加しない
+- [x] `MessageSummary` に `imap_flags: str | None` / `moved_to_folder_display_name: str | None` / `failure_class: str | None` を追加する（D-23）
+- [x] 一覧・検索・スレッド取得SQLが移動先 `folders` と現在UID世代の `sync_failures` をLEFT JOINし、1回の問い合わせで表示情報を返す
+- [x] `sync_failures` は `(account_id, folder_id, uidvalidity, uid)` でJOINし、旧UIDVALIDITY世代の失敗を現在行へ誤表示しない
+- [x] 一覧描画から `get_message()` を行ごとに呼ばないことをリポジトリのクエリ回数テストで固定する
+- [x] `BaseSearchRepository` は引き続き読み取り専用とし、書き込みメソッドを追加しない
 
 #### **B-1. `presentation/models/message_table_model.py`**
 

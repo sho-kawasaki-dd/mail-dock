@@ -62,6 +62,9 @@ class FakeSearchRepository:
             remote_state="present",
             local_state="active",
             thread_key=None,
+            imap_flags="\\Seen",
+            moved_to_folder_display_name=None,
+            failure_class=None,
         )
         return SearchPage(
             items=(item,),
