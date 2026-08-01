@@ -5,6 +5,8 @@ from __future__ import annotations
 from PySide6.QtCore import QObject
 from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEngineSettings
 
+from .interceptor import MailUrlRequestInterceptor
+
 _DISABLED_ATTRIBUTES = (
     QWebEngineSettings.WebAttribute.JavascriptEnabled,
     QWebEngineSettings.WebAttribute.LocalStorageEnabled,
@@ -18,7 +20,11 @@ _DISABLED_ATTRIBUTES = (
 )
 
 
-def create_mail_profile(parent: QObject | None = None) -> QWebEngineProfile:
+def create_mail_profile(
+    parent: QObject | None = None,
+    *,
+    request_interceptor: MailUrlRequestInterceptor | None = None,
+) -> QWebEngineProfile:
     """Return an off-the-record profile configured for untrusted mail HTML.
 
     Pass the application object as ``parent`` so Qt retains the profile for
@@ -37,4 +43,7 @@ def create_mail_profile(parent: QObject | None = None) -> QWebEngineProfile:
     settings = profile.settings()
     for attribute in _DISABLED_ATTRIBUTES:
         settings.setAttribute(attribute, False)
+
+    interceptor = request_interceptor or MailUrlRequestInterceptor(profile)
+    profile.setUrlRequestInterceptor(interceptor)
     return profile

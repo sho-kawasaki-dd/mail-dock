@@ -309,11 +309,11 @@
 
 #### **C-6. `presentation/web/interceptor.py` — 層3**
 
-- [ ] `MailUrlRequestInterceptor(QWebEngineUrlRequestInterceptor)` を実装する
-- [ ] **既定で全リクエストをブロック**し、`cid` / `maildock` スキームのみ許可する
-- [ ] 外部画像の一時解除中は、`resourceType()` が画像のときに限り `http` / `https` を許可する（D-9）
-- [ ] 解除状態はメールを切り替えるとリセットされること
-- [ ] プロファイルへ `setUrlRequestInterceptor()` で設定する
+- [x] `MailUrlRequestInterceptor(QWebEngineUrlRequestInterceptor)` を実装する
+- [x] **既定で全リクエストをブロック**し、`cid` / `maildock` スキームのみ許可する
+- [x] 外部画像の一時解除中は、`resourceType()` が画像のときに限り `http` / `https` を許可する（D-9）
+- [x] 解除状態はメールを切り替えるとリセットされること
+- [x] プロファイルへ `setUrlRequestInterceptor()` で設定する
 
 #### **C-7. `presentation/web/schemes.py` — 層4**
 
