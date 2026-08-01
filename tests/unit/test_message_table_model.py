@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Literal, cast
@@ -7,6 +7,7 @@ import pytest
 from PySide6.QtCore import QModelIndex, QObject, Qt, Signal
 
 from mail_dock.domain.search import MessageFilter, MessageSummary, PageCursor, SearchPage
+from mail_dock.presentation import strings
 from mail_dock.presentation.models.message_table_model import (
     MessageQueryWorker,
     MessageTableModel,
@@ -193,3 +194,47 @@ def test_columns_render_summary_values(qtbot: object) -> None:
         "件名",
         "2.0 KB",
     ]
+
+
+def _model_with_summary(summary: MessageSummary) -> MessageTableModel:
+    worker = FakeQueryWorker()
+    model = MessageTableModel(cast(MessageQueryWorker, worker))
+    model.fetchMore()
+    worker.emit_page(1, SearchPage((summary,), None, True))
+    return model
+
+
+def test_status_roles_render_from_summary(qtbot: object) -> None:
+    del qtbot
+    flagged = _model_with_summary(replace(_summary(), imap_flags="\\Seen \\Flagged"))
+    index = flagged.index(0, 4)
+    assert flagged.data(index, Qt.ItemDataRole.DecorationRole) is not None
+    assert flagged.data(index, Qt.ItemDataRole.ToolTipRole) == strings.STATUS_FLAGGED
+
+    unread = _model_with_summary(replace(_summary(), imap_flags="\\Flagged"))
+    assert unread.data(index, Qt.ItemDataRole.ToolTipRole) == strings.TOOLTIP_UNREAD
+
+    deleted = _model_with_summary(
+        replace(_summary(), remote_state="deleted", local_state="purged")
+    )
+    assert deleted.data(index, Qt.ItemDataRole.ForegroundRole).color().name() == "#808080"
+    assert deleted.data(index, Qt.ItemDataRole.DisplayRole) == strings.STATUS_LOCAL_PURGED
+    assert deleted.data(index, Qt.ItemDataRole.DecorationRole) is not None
+
+
+def test_status_display_and_tooltips_cover_moved_and_oversize(qtbot: object) -> None:
+    del qtbot
+    moved = _model_with_summary(
+        replace(_summary(), remote_state="moved", moved_to_folder_display_name="アーカイブ")
+    )
+    assert moved.data(moved.index(0, 0), Qt.ItemDataRole.ToolTipRole) == (
+        strings.STATUS_REMOTE_MOVED.format(folder="アーカイブ")
+    )
+
+    oversize = _model_with_summary(replace(_summary(), failure_class="oversize"))
+    assert oversize.data(oversize.index(0, 4), Qt.ItemDataRole.DisplayRole) == (
+        f"件名 [{strings.STATUS_OVERSIZE}]"
+    )
+    assert oversize.data(oversize.index(0, 0), Qt.ItemDataRole.ToolTipRole) == (
+        strings.STATUS_OVERSIZE
+    )

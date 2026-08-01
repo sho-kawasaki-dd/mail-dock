@@ -13,6 +13,8 @@ from PySide6.QtCore import (
     QPersistentModelIndex,
     Qt,
 )
+from PySide6.QtGui import QBrush, QColor, QIcon
+from PySide6.QtWidgets import QApplication, QStyle
 
 from mail_dock.domain.search import (
     MessageFilter,
@@ -77,6 +79,33 @@ _HEADERS = (
     strings.TABLE_HEADER_SUBJECT,
     strings.TABLE_HEADER_SIZE,
 )
+_STATUS_COLUMN = 4
+_DELETED_BRUSH = QBrush(QColor("#808080"))
+
+
+def _standard_icon(theme_name: str, fallback: QStyle.StandardPixmap) -> QIcon:
+    """Return a themed status icon with a platform-provided fallback."""
+
+    icon = QIcon.fromTheme(theme_name)
+    if not icon.isNull():
+        return icon
+    return QApplication.style().standardIcon(fallback)
+
+
+def _has_imap_flag(flags: str | None, expected: str) -> bool:
+    return expected in (flags or "").split()
+
+
+def _status_icon(summary: MessageSummary) -> QIcon | None:
+    if summary.remote_state == "deleted":
+        return _standard_icon("edit-delete", QStyle.StandardPixmap.SP_TrashIcon)
+    if not _has_imap_flag(summary.imap_flags, "\\Seen"):
+        return _standard_icon(
+            "mail-unread", QStyle.StandardPixmap.SP_MessageBoxInformation
+        )
+    if _has_imap_flag(summary.imap_flags, "\\Flagged"):
+        return _standard_icon("starred", QStyle.StandardPixmap.SP_DialogApplyButton)
+    return None
 
 
 class MessageTableModel(QAbstractTableModel):
@@ -182,6 +211,14 @@ class MessageTableModel(QAbstractTableModel):
         summary = self._items[index.row()]
         if role == Qt.ItemDataRole.DisplayRole:
             return self._display_value(summary, index.column())
+        if role == Qt.ItemDataRole.DecorationRole and index.column() == _STATUS_COLUMN:
+            return _status_icon(summary)
+        if role == Qt.ItemDataRole.ForegroundRole:
+            if summary.remote_state == "deleted":
+                return _DELETED_BRUSH
+            return None
+        if role == Qt.ItemDataRole.ToolTipRole:
+            return self._tooltip_value(summary)
         if role == Qt.ItemDataRole.UserRole:
             return summary
         return None
@@ -286,10 +323,34 @@ class MessageTableModel(QAbstractTableModel):
             summary.account_id,
             summary.folder_display_name,
             summary.sender,
-            summary.subject,
+            (
+                strings.STATUS_LOCAL_PURGED
+                if summary.local_state == "purged"
+                else (
+                    f"{summary.subject} [{strings.STATUS_OVERSIZE}]"
+                    if summary.failure_class == "oversize"
+                    else summary.subject
+                )
+            ),
             _format_size(summary.size_bytes),
         )
         return values[column] if 0 <= column < len(values) else ""
+
+    @staticmethod
+    def _tooltip_value(summary: MessageSummary) -> str | None:
+        if summary.remote_state == "moved" and summary.moved_to_folder_display_name:
+            return strings.STATUS_REMOTE_MOVED.format(
+                folder=summary.moved_to_folder_display_name
+            )
+        if summary.failure_class == "oversize":
+            return strings.STATUS_OVERSIZE
+        if not _has_imap_flag(summary.imap_flags, "\\Seen"):
+            return strings.TOOLTIP_UNREAD
+        if _has_imap_flag(summary.imap_flags, "\\Flagged"):
+            return strings.STATUS_FLAGGED
+        if summary.local_state == "purged":
+            return strings.STATUS_LOCAL_PURGED
+        return None
 
 
 def _format_datetime(value: datetime | None) -> str:

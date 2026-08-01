@@ -209,14 +209,14 @@
 
 #### **B-2. 視覚的ステータス表示（F-9）**
 
-- [ ] `remote_state='deleted'`: `ForegroundRole` でグレーアウト ＋ 削除済みアイコン
-- [ ] `remote_state='moved'`: `ToolTipRole` に移動先フォルダ名
-- [ ] `local_state='purged'`: 「実体なし」表示
-- [ ] `imap_flags` に `\Seen` が無い: 未読アイコン ＋ 「同期時点のスナップショット」ツールチップ
-- [ ] `imap_flags` に `\Flagged`: スターアイコン
-- [ ] `sync_failures` の `oversize`: 「未取得（サイズ上限超過）」バッジ
-- [ ] 上記情報をすべて `MessageSummary` から描画し、行ごとの追加DB問い合わせを行わない（B-0）
-- [ ] フラグを変更する導線を作らない（D-17）
+- [x] `remote_state='deleted'`: `ForegroundRole` でグレーアウト ＋ 削除済みアイコン
+- [x] `remote_state='moved'`: `ToolTipRole` に移動先フォルダ名
+- [x] `local_state='purged'`: 「実体なし」表示
+- [x] `imap_flags` に `\Seen` が無い: 未読アイコン ＋ 「同期時点のスナップショット」ツールチップ
+- [x] `imap_flags` に `\Flagged`: スターアイコン
+- [x] `sync_failures` の `oversize`: 「未取得（サイズ上限超過）」バッジ
+- [x] 上記情報をすべて `MessageSummary` から描画し、行ごとの追加DB問い合わせを行わない（B-0）
+- [x] フラグを変更する導線を作らない（D-17）
 
 #### **B-3. `presentation/models/folder_tree_model.py`**
 
