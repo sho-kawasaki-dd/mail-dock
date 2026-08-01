@@ -227,10 +227,10 @@
 
 #### **B-4. `presentation/viewmodels/message_list_viewmodel.py`**
 
-- [ ] 現在の `MessageFilter`・検索クエリ・検索モード・選択メッセージIDを保持する
-- [ ] フィルタ変更・検索実行・行選択を Signal として公開する
-- [ ] `QueryWorker` への要求発行と結果の受け取りを担当する
-- [ ] `sqlite3` / infrastructure を import しない（F-26）
+- [x] 現在の `MessageFilter`・検索クエリ・検索モード・選択メッセージIDを保持する
+- [x] フィルタ変更・検索実行・行選択を Signal として公開する
+- [x] `QueryWorker` への要求発行と結果の受け取りを担当する
+- [x] `sqlite3` / infrastructure を import しない（F-26）
 
 #### **B-5. 検索ボックスの配線**
 
