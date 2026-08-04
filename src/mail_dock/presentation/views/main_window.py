@@ -446,13 +446,16 @@ class MainWindow(QMainWindow):
             return
         self._pending_attachment_plan = plan
         name_was_changed = any(warning != "executable_extension" for warning in plan.warnings)
-        if name_was_changed and not ConfirmationDialog(
-            strings.SAVE_ATTACHMENT_SANITIZED.format(
-                original=request.filename or "attachment",
-                sanitized=plan.filename,
-            ),
-            self,
-        ).confirmed():
+        if (
+            name_was_changed
+            and not ConfirmationDialog(
+                strings.SAVE_ATTACHMENT_SANITIZED.format(
+                    original=request.filename or "attachment",
+                    sanitized=plan.filename,
+                ),
+                self,
+            ).confirmed()
+        ):
             self._pending_attachment_request = None
             self._pending_attachment_plan = None
             self._file_token = None

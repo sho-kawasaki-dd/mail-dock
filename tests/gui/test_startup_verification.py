@@ -89,9 +89,7 @@ def test_main_window_is_built_only_after_verification_finishes(
     context.build_main_window = build_main_window
     application = QApplication.instance()
     assert application is not None
-    _thread, result = app._start_verification(
-        application, cast(Any, session), cast(Any, context)
-    )
+    _thread, result = app._start_verification(application, cast(Any, session), cast(Any, context))
 
     assert result["window"] is None
     assert built == []

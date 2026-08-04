@@ -164,9 +164,7 @@ def test_read_verified_rejects_path_replacement_during_read(
         def __getattr__(self, name: str) -> object:
             return getattr(self._file, name)
 
-    def open_with_replacement(
-        path: Path, *args: Any, **kwargs: Any
-    ) -> BinaryIO | ReplacingReader:
+    def open_with_replacement(path: Path, *args: Any, **kwargs: Any) -> BinaryIO | ReplacingReader:
         file = original_open(path, *args, **kwargs)
         return ReplacingReader(file) if path == target else file
 

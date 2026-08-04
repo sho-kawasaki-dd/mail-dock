@@ -49,9 +49,7 @@ def test_renderer_decodes_declared_japanese_charset() -> None:
 def test_renderer_decodes_html_in_declared_japanese_charsets(charset: str) -> None:
     body = "<p>日本語の本文</p>"
     raw = (
-        f"Content-Type: text/html; charset={charset}\r\n"
-        "Content-Transfer-Encoding: 8bit\r\n"
-        "\r\n"
+        f"Content-Type: text/html; charset={charset}\r\nContent-Transfer-Encoding: 8bit\r\n\r\n"
     ).encode("ascii") + body.encode(charset)
 
     rendered = extract_render_parts(raw)

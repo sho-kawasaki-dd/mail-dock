@@ -283,9 +283,7 @@ class DetailView(QWidget):
 
         self._attachment_list = QListWidget(self)
         self._attachment_list.setMinimumHeight(80)
-        self._attachment_list.itemSelectionChanged.connect(
-            self._update_attachment_save_button
-        )
+        self._attachment_list.itemSelectionChanged.connect(self._update_attachment_save_button)
         self._attachment_save_button = QPushButton(strings.DETAIL_ATTACHMENT_SAVE, self)
         self._attachment_save_button.setEnabled(False)
         self._attachment_save_button.clicked.connect(self._request_attachment_save)
@@ -428,8 +426,7 @@ class DetailView(QWidget):
 
     def _update_attachment_save_button(self) -> None:
         self._attachment_save_button.setEnabled(
-            self._current_detail is not None
-            and self._attachment_list.currentItem() is not None
+            self._current_detail is not None and self._attachment_list.currentItem() is not None
         )
 
     def _request_attachment_save(self) -> None:
@@ -441,14 +438,11 @@ class DetailView(QWidget):
         if not isinstance(part_index, int):
             return
         filename = None
-        if (
-            self._current_rendered is not None
-            and 0 <= part_index < len(self._current_rendered.parts)
+        if self._current_rendered is not None and 0 <= part_index < len(
+            self._current_rendered.parts
         ):
             filename = self._current_rendered.parts[part_index].filename
-        self.attachment_save_requested.emit(
-            AttachmentSaveRequest(detail, part_index, filename)
-        )
+        self.attachment_save_requested.emit(AttachmentSaveRequest(detail, part_index, filename))
 
     def _show_state(self, message: str) -> None:
         self._state_label.setText(message)

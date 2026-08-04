@@ -98,9 +98,7 @@ def test_prepare_reports_path_reserved_and_trailing_name_warnings(tmp_path: Path
     )
 
     assert plan.filename == "CON_.txt"
-    assert {"path_component", "reserved_name", "trailing_character"}.issubset(
-        plan.warnings
-    )
+    assert {"path_component", "reserved_name", "trailing_character"}.issubset(plan.warnings)
 
 
 def test_commit_rejects_a_destination_symlink_created_after_prepare(tmp_path: Path) -> None:

@@ -15,9 +15,7 @@ class ConfirmationDialog(QMessageBox):
         self.setIcon(QMessageBox.Icon.Warning)
         self.setWindowTitle(strings.DIALOG_CONFIRM_TITLE)
         self.setText(message)
-        self.setStandardButtons(
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
+        self.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         self.setDefaultButton(QMessageBox.StandardButton.No)
 
     def confirmed(self) -> bool:

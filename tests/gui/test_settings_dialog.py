@@ -40,9 +40,7 @@ def test_active_settings_are_saved_and_phase4_controls_are_absent(qtbot: Any) ->
     dialog._max_message_size.setValue(12)
     dialog._block_remote_images.setChecked(False)
     dialog._sync_on_startup.setChecked(False)
-    dialog._startup_verification.setCurrentIndex(
-        dialog._startup_verification.findData("full")
-    )
+    dialog._startup_verification.setCurrentIndex(dialog._startup_verification.findData("full"))
 
     assert dialog._save_settings()
     assert context.saved[-1].max_message_bytes == 12 * 1024 * 1024
