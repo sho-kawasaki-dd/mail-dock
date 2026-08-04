@@ -597,7 +597,7 @@
 
 各項目の完了を確認したうえで、対応するタスクのチェックボックスを埋めること。
 
-- [ ] V-1. `uv sync` → `uv run ruff format --check .` → `uv run ruff check .` → `uv run mypy` がすべて成功する
+- [x] V-1. `uv sync` → `uv run ruff format --check .` → `uv run ruff check .` → `uv run mypy` がすべて成功する
 - [x] V-2. `uv run pytest -m "not docker and not gui"` が全緑になり、`domain` + `usecases` のカバレッジが 80% 以上である
 - [x] V-3. GUIテストがローカルで全緑になる（`gui` マーカーのオプトイン実行）
 - [ ] V-4. 起動導線: `mail-dock gui` とサブコマンド無しの `mail-dock` で GUI が起動し、既存の CLI サブコマンド（`migrate` / `verify` / `account` / `folders` / `sync` / `reparse` / `search`）の挙動が変わらない
