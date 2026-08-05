@@ -5,9 +5,40 @@ mail-dock is a desktop application for backing up mail from IMAP servers to a lo
 
 ## Storage and backup prerequisites
 
-- The storage root is intended for an external drive encrypted with BitLocker To Go. Keep the drive encrypted when it is detached or transported.
-- Follow the 3-2-1 backup rule: keep at least three copies, on two different media, with one copy off-site.
-- The archive is designed so that a drive-wide copy of the storage root is sufficient for backup. Keep the root structure together, including the EML files, manifests, and metadata database.
+- Block-level encryption is recommended for the storage root, but encryption is not a hard requirement. The setup wizard records one of `encrypted`, `unencrypted`, or `unknown` as a user declaration and keeps that status visible. The application does not attempt to detect the encryption product or prove that the storage is encrypted.
+- Keep mail credentials on the PC side in the approved OS credential store (or in the process-only `session_only` mode). Never put credentials under the storage root.
+- Follow the [3-2-1 backup rule](docs/ローカルメールバックアップand閲覧アプリ開発計画書.md#57): keep at least three copies, on two different media, with one copy off-site.
+- For a device-encrypted volume, a normal file copy of the mounted storage root is sufficient. Keep the root structure together, including the EML files, manifests, and metadata database. For a VeraCrypt file container, stop mail-dock, unmount the volume, and copy the container file in full. Do not use differential backups or copy a container while it is mounted. If the backup destination has weaker encryption than the source, keep `db_backup_to_local_disk` disabled unless you explicitly accept the warning.
+
+## Storage encryption guide
+
+### Three storage safety levels
+
+| Level | Recommendation | Examples | Operational meaning |
+| --- | --- | --- | --- |
+| Supported | Recommended | BitLocker To Go, VeraCrypt, LUKS, encrypted APFS | The mounted volume is a normal file system. The application still runs a storage compatibility self-test for locking, replacement, fsync, WAL, case behavior, and long paths. |
+| Unsupported | Do not use unless the self-test reports otherwise | Cryptomator, gocryptfs, rclone crypt, Boxcryptor, and similar virtual file systems | Atomic replacement, exclusive locks, fsync, and SQLite behavior depend on the implementation. The product name is not detected; a failed capability test is reported as `UNSUPPORTED` or `DEGRADED`. |
+| Unencrypted | Self-responsibility | An unencrypted local or removable volume | Explicitly declare `unencrypted`. mail-dock permits the choice, shows the warning continuously, and asks for confirmation once immediately before the first sync. |
+
+The self-test is a compatibility probe, not a security guarantee. A successful one-off I/O operation cannot prove full atomicity, durability, or WAL safety. The test uses temporary files under the storage root's `tmp/` directory and never modifies the production lock, database, EML, or manifest files.
+
+### OS-specific setup
+
+- **Windows Pro:** Use BitLocker To Go for a removable drive. Turn on BitLocker for the volume, store the recovery key separately from the drive, and unlock the volume before starting mail-dock.
+- **Windows Home:** Use VeraCrypt or another block-level encryption option that provides a normal mounted file system. Windows Home can unlock and read/write a drive that was already encrypted with BitLocker, but it cannot create or manage BitLocker encryption in the same way as Pro.
+- **macOS:** Use an encrypted APFS external volume, created with Disk Utility or the equivalent system workflow. Unlock and mount it before starting mail-dock, and keep the recovery information separate from the archive drive.
+- **Linux:** Use LUKS for the device or volume, then mount a normal file system inside the unlocked volume. VeraCrypt is also supported when its mounted volume behaves as a normal local file system.
+
+### VeraCrypt requirements
+
+For a dedicated external SSD, encrypt the whole device rather than using a file container. If a file container is needed to share the drive with other uses, all four conditions are mandatory:
+
+1. Use a fixed-size container. Do not use a dynamic container because the host file system can run out of space without the application seeing the true limit.
+2. Keep the container outside cloud-synchronization folders and network shares.
+3. Disable automatic unmounting, including unmount-on-screen-saver or idle-timeout behavior.
+4. Back up the VeraCrypt volume header separately and verify that the recovery procedure works.
+
+Disable vault idle auto-lock and VeraCrypt automatic unmount while mail-dock is running. A multi-hour initial sync can be interrupted by either event just like a physical drive removal. Before shutting down or transporting the drive, stop synchronization, close mail-dock, and explicitly unmount the encrypted volume.
 
 ## Development setup
 
