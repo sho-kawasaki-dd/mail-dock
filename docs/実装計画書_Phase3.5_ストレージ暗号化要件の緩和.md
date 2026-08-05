@@ -174,32 +174,32 @@
 
 #### **B-1. `domain/errors.py` — 例外の追加**
 
-- [ ] `StorageUnsupportedError(StorageError)` を追加する（保管先が本アプリの安全要件を満たさないことを表す）
-- [ ] 既存の `StorageError` 配下の並びに合わせ、docstring で「必須の排他ロックまたは上書き配置操作が成立しない保管先」であることを1行で示す
-- [ ] `root_uuid: str` と `capability_level: str` を読み取り専用属性として持たせる。infrastructure の `StorageCapabilities` / `CapabilityLevel` は保持せず、詳細は保存済み `storage_profiles` から取得する
+- [x] `StorageUnsupportedError(StorageError)` を追加する（保管先が本アプリの安全要件を満たさないことを表す）
+- [x] 既存の `StorageError` 配下の並びに合わせ、docstring で「必須の排他ロックまたは上書き配置操作が成立しない保管先」であることを1行で示す
+- [x] `root_uuid: str` と `capability_level: str` を読み取り専用属性として持たせる。infrastructure の `StorageCapabilities` / `CapabilityLevel` は保持せず、詳細は保存済み `storage_profiles` から取得する
 
 #### **B-2. `infrastructure/storage/capabilities.py` — ストレージ適合性セルフテスト（*本フェーズの中核*）**
 
-- [ ] `class CapabilityLevel(StrEnum)` に `OK` / `DEGRADED` / `UNSUPPORTED` を定義する
-- [ ] `@dataclass(frozen=True) class StorageCapabilities` を定義する
-  - [ ] フィールド: `exclusive_lock: bool` / `replace_overwrite: bool` / `wal_supported: bool` / `fsync_supported: bool` / `case_sensitive: bool` / `long_path_ok: bool` / `checked_at: str`（UTC ISO8601）。`replace_overwrite` は操作の成功だけを表し、原子性の完全な証明を意味しない
-  - [ ] `as_dict() -> dict[str, JSONValue]` と `from_dict(...) -> StorageCapabilities | None` を実装する（`config.json` とのラウンドトリップ用。不正な辞書は `None` を返して再測定させる）
-- [ ] `probe_capabilities(root: Path) -> StorageCapabilities` を実装する
-  - [ ] すべての一時ファイルを `root/tmp/.captest-{uuid4}*` として作成し、`finally` で確実に削除する（D-8）
-  - [ ] **排他ロック**: `tmp/.captest-{uuid}.lock` を親プロセスでロックしたまま、標準ライブラリの別プロセスから同じ範囲の非ブロッキングロック取得を試み、競合側が失敗することを確認する。Windows は `msvcrt.locking(LK_NBLCK, 1)`、POSIX は `fcntl.flock(LOCK_EX | LOCK_NB)` を使用する。子プロセスの終了時間を制限し、必ず回収する。**本番の `.lock` には触れない**
-  - [ ] **`os.replace` 上書き**: `tmp/.captest-{uuid}.a` を、既に存在する `tmp/.captest-{uuid}.b` へ上書き配置する。**宛先を開いたままのケースはテストしない**（D-9）
-  - [ ] **WAL**: `tmp/.captest-{uuid}.db` へ `sqlite3.connect` し、`PRAGMA journal_mode=wal` の**戻り値**が `wal` であることを検証する。**本番の `metadata.db` には触れない**
-  - [ ] **fsync**: ファイルの `os.fsync` を実行し、POSIX ではディレクトリの fsync も実行する
-  - [ ] **大文字小文字の区別**: `tmp/.captest-{uuid}A` と `tmp/.captest-{uuid}a` を作り分けられるか測定する（記録のみ。判定には使わない）
-  - [ ] **長パス**: `tmp/.captest-{uuid}/` 以下だけで、`eml/{account_id}/{YYYY}/{MM}/{hash32}.eml` の想定最大長に相当する深さ・長さのパスを再現して作成できるか測定する
-  - [ ] すべてのI/Oを `detach.storage_io()` で包む。個別テストの失敗は例外にせず `False` として記録し、`StorageDetachedError` だけは上位へ送出する
-- [ ] `capability_level(capabilities: StorageCapabilities) -> CapabilityLevel` を実装する
-  - [ ] `exclusive_lock` または `replace_overwrite` が `False` → `UNSUPPORTED`
-  - [ ] `wal_supported` または `fsync_supported` が `False` → `DEGRADED`
-  - [ ] それ以外 → `OK`
-- [ ] `journal_mode_for(capabilities: StorageCapabilities, *, network_drive: bool) -> str` を実装する。`network_drive=True` または `wal_supported=False` なら `"DELETE"`、それ以外は `"WAL"` とする
-- [ ] `storage_fingerprint(root: Path) -> str` を実装する。Windowsはボリュームシリアル、POSIXは `st_dev` と正規化パスを使用し、媒体識別値を取得できない場合は正規化パスへフォールバックする。暗号化状態の推測には使用しない
-- [ ] モジュール docstring に「**製品名ではなく能力を測る既知の非互換性検出用プローブであり、安全性を完全には証明しない。`tmp/` 配下以外に一切書き込まない**」と明記する
+- [x] `class CapabilityLevel(StrEnum)` に `OK` / `DEGRADED` / `UNSUPPORTED` を定義する
+- [x] `@dataclass(frozen=True) class StorageCapabilities` を定義する
+  - [x] フィールド: `exclusive_lock: bool` / `replace_overwrite: bool` / `wal_supported: bool` / `fsync_supported: bool` / `case_sensitive: bool` / `long_path_ok: bool` / `checked_at: str`（UTC ISO8601）。`replace_overwrite` は操作の成功だけを表し、原子性の完全な証明を意味しない
+  - [x] `as_dict() -> dict[str, JSONValue]` と `from_dict(...) -> StorageCapabilities | None` を実装する（`config.json` とのラウンドトリップ用。不正な辞書は `None` を返して再測定させる）
+- [x] `probe_capabilities(root: Path) -> StorageCapabilities` を実装する
+  - [x] すべての一時ファイルを `root/tmp/.captest-{uuid4}*` として作成し、`finally` で確実に削除する（D-8）
+  - [x] **排他ロック**: `tmp/.captest-{uuid}.lock` を親プロセスでロックしたまま、標準ライブラリの別プロセスから同じ範囲の非ブロッキングロック取得を試み、競合側が失敗することを確認する。Windows は `msvcrt.locking(LK_NBLCK, 1)`、POSIX は `fcntl.flock(LOCK_EX | LOCK_NB)` を使用する。子プロセスの終了時間を制限し、必ず回収する。**本番の `.lock` には触れない**
+  - [x] **`os.replace` 上書き**: `tmp/.captest-{uuid}.a` を、既に存在する `tmp/.captest-{uuid}.b` へ上書き配置する。**宛先を開いたままのケースはテストしない**（D-9）
+  - [x] **WAL**: `tmp/.captest-{uuid}.db` へ `sqlite3.connect` し、`PRAGMA journal_mode=wal` の**戻り値**が `wal` であることを検証する。**本番の `metadata.db` には触れない**
+  - [x] **fsync**: ファイルの `os.fsync` を実行し、POSIX ではディレクトリの fsync も実行する
+  - [x] **大文字小文字の区別**: `tmp/.captest-{uuid}A` と `tmp/.captest-{uuid}a` を作り分けられるか測定する（記録のみ。判定には使わない）
+  - [x] **長パス**: `tmp/.captest-{uuid}/` 以下だけで、`eml/{account_id}/{YYYY}/{MM}/{hash32}.eml` の想定最大長に相当する深さ・長さのパスを再現して作成できるか測定する
+  - [x] すべてのI/Oを `detach.storage_io()` で包む。個別テストの失敗は例外にせず `False` として記録し、`StorageDetachedError` だけは上位へ送出する
+- [x] `capability_level(capabilities: StorageCapabilities) -> CapabilityLevel` を実装する
+  - [x] `exclusive_lock` または `replace_overwrite` が `False` → `UNSUPPORTED`
+  - [x] `wal_supported` または `fsync_supported` が `False` → `DEGRADED`
+  - [x] それ以外 → `OK`
+- [x] `journal_mode_for(capabilities: StorageCapabilities, *, network_drive: bool) -> str` を実装する。`network_drive=True` または `wal_supported=False` なら `"DELETE"`、それ以外は `"WAL"` とする
+- [x] `storage_fingerprint(root: Path) -> str` を実装する。Windowsはボリュームシリアル、POSIXは `st_dev` と正規化パスを使用し、媒体識別値を取得できない場合は正規化パスへフォールバックする。暗号化状態の推測には使用しない
+- [x] モジュール docstring に「**製品名ではなく能力を測る既知の非互換性検出用プローブであり、安全性を完全には証明しない。`tmp/` 配下以外に一切書き込まない**」と明記する
 
 #### **B-3. `config.py` — schema v2 への拡張（*B-2 と並行可*）**
 
