@@ -26,6 +26,25 @@ class StorageError(MailDockError):
     """Base class for errors involving the local mail storage."""
 
 
+class StorageUnsupportedError(StorageError):
+    """Raised when exclusive locking or atomic replacement is unavailable."""
+
+    def __init__(self, root_uuid: str, capability_level: str) -> None:
+        self._root_uuid = root_uuid
+        self._capability_level = capability_level
+        super().__init__(
+            f"Storage root {root_uuid} is unsupported ({capability_level})"
+        )
+
+    @property
+    def root_uuid(self) -> str:
+        return self._root_uuid
+
+    @property
+    def capability_level(self) -> str:
+        return self._capability_level
+
+
 class StorageDetachedError(StorageError):
     """Raised when a storage device becomes unavailable during an operation."""
 
