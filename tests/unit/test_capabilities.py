@@ -74,6 +74,10 @@ def test_probe_uses_only_tmp_and_cleans_up(tmp_path: Path) -> None:
     assert measured.replace_overwrite
     assert measured.wal_supported
     assert measured.fsync_supported
+    assert isinstance(measured.case_sensitive, bool)
+    assert isinstance(measured.long_path_ok, bool)
+    assert measured.checked_at.endswith("+00:00")
+    assert capability_level(measured) is CapabilityLevel.OK
     assert (root / ".lock").read_text(encoding="ascii") == "untouched"
     assert (root / "metadata.db").read_text(encoding="ascii") == "untouched"
     assert list((root / "tmp").glob(".captest-*")) == []
