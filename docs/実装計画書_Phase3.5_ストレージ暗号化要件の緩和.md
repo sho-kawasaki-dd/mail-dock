@@ -353,13 +353,13 @@
 
 #### **F-5. `tests/unit/test_main.py` の拡張**
 
-- [ ] `UNSUPPORTED` かつ未承認では、測定結果が `config.json` へ保存された**後**に、`root_uuid` と文字列レベルだけを持つ `StorageUnsupportedError` が送出されることを検証する
-- [ ] 承認済みなら続行できることを検証する
-- [ ] UUID・正規化パス・ストレージ指紋が一致する有効なキャッシュではセルフテストを再実行せず、パスまたは指紋が変われば同じUUIDでも再実行することを検証する（D-17）
-- [ ] `storage_root_candidates` に対応しない `root_uuid` エントリが掃除されることを検証する
-- [ ] 許可外バックエンド検出時に `SessionCredentialStore` へフォールバックすることを検証する
-- [ ] CLIと`AppContext`が `StorageSession` 所有の同じ資格情報ストアを使用し、独自の `KeyringCredentialStore` を生成しないことを検証する
-- [ ] `StorageUnsupportedError` の終了コードが3であることを検証する
+- [x] `UNSUPPORTED` かつ未承認では、測定結果が `config.json` へ保存された**後**に、`root_uuid` と文字列レベルだけを持つ `StorageUnsupportedError` が送出されることを検証する
+- [x] 承認済みなら続行できることを検証する
+- [x] UUID・正規化パス・ストレージ指紋が一致する有効なキャッシュではセルフテストを再実行せず、パスまたは指紋が変われば同じUUIDでも再実行することを検証する（D-17）
+- [x] `storage_root_candidates` に対応しない `root_uuid` エントリが掃除されることを検証する
+- [x] 許可外バックエンド検出時に `SessionCredentialStore` へフォールバックすることを検証する
+- [x] CLIと`AppContext`が `StorageSession` 所有の同じ資格情報ストアを使用し、独自の `KeyringCredentialStore` を生成しないことを検証する
+- [x] `StorageUnsupportedError` の終了コードが3であることを検証する
 
 #### **F-6. GUIテストの拡張（`gui` マーカー）**
 

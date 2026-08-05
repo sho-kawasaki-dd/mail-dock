@@ -10,6 +10,8 @@ from mail_dock import config
 from mail_dock.__main__ import StorageSession, _build_parser, _exit_code, _run_search_command
 from mail_dock.domain.errors import SearchQueryError, StorageUnsupportedError
 from mail_dock.domain.search import MessageSummary, PageCursor, SearchPage
+from mail_dock.infrastructure.security.keyring_store import KeyringBackendStatus
+from mail_dock.infrastructure.security.session_store import SessionCredentialStore
 from mail_dock.infrastructure.storage.capabilities import CapabilityLevel, StorageCapabilities
 from mail_dock.infrastructure.storage.storage_root import StorageLock
 
@@ -265,6 +267,187 @@ def test_storage_session_reuses_matching_capability_cache(
     with StorageSession(settings, tmp_storage_root) as session:
         assert session.capabilities == capabilities
         assert session.capability_level is CapabilityLevel.OK
+
+
+def test_storage_session_continues_with_acknowledged_unsupported_cache(
+    tmp_storage_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = main.initialize_root(tmp_storage_root)
+    checked_path = main._normalized_storage_path(tmp_storage_root)
+    fingerprint = "posix:test:" + checked_path
+    capabilities = StorageCapabilities(
+        exclusive_lock=False,
+        replace_overwrite=True,
+        wal_supported=True,
+        fsync_supported=True,
+        case_sensitive=True,
+        long_path_ok=True,
+        checked_at="2026-08-05T00:00:00+00:00",
+    )
+    settings = config.AppConfig(
+        storage_root_uuid=marker.root_uuid,
+        credential_storage="session_only",
+        storage_profiles={
+            marker.root_uuid: {
+                "capabilities": capabilities.as_dict(),
+                "capability_level": CapabilityLevel.UNSUPPORTED.value,
+                "checked_path": checked_path,
+                "storage_fingerprint": fingerprint,
+                "capability_ack_at": "2026-08-05T00:01:00+00:00",
+            }
+        },
+    )
+    monkeypatch.setattr(main, "check_free_space", lambda path: None)
+    monkeypatch.setattr(main, "storage_fingerprint", lambda root: fingerprint)
+    monkeypatch.setattr(
+        main,
+        "probe_capabilities",
+        lambda root: pytest.fail("acknowledged unsupported cache must be reused"),
+    )
+
+    with StorageSession(settings, tmp_storage_root) as session:
+        assert session.capability_level is CapabilityLevel.UNSUPPORTED
+        assert session.credential_storage_mode == "session_only"
+
+
+@pytest.mark.parametrize("mismatch", ["path", "fingerprint"])
+def test_storage_session_reprobes_when_cache_identity_changes(
+    tmp_storage_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mismatch: str,
+) -> None:
+    marker = main.initialize_root(tmp_storage_root)
+    checked_path = main._normalized_storage_path(tmp_storage_root)
+    fingerprint = "posix:test:" + checked_path
+    capabilities = StorageCapabilities(
+        exclusive_lock=True,
+        replace_overwrite=True,
+        wal_supported=True,
+        fsync_supported=True,
+        case_sensitive=True,
+        long_path_ok=True,
+        checked_at="2026-08-05T00:00:00+00:00",
+    )
+    profile_path = "other-path" if mismatch == "path" else checked_path
+    profile_fingerprint = "other-fingerprint" if mismatch == "fingerprint" else fingerprint
+    settings = config.AppConfig(
+        storage_root_uuid=marker.root_uuid,
+        storage_profiles={
+            marker.root_uuid: {
+                "capabilities": capabilities.as_dict(),
+                "capability_level": CapabilityLevel.OK.value,
+                "checked_path": profile_path,
+                "storage_fingerprint": profile_fingerprint,
+            }
+        },
+    )
+    probed: list[Path] = []
+    monkeypatch.setattr(main, "check_free_space", lambda path: None)
+    monkeypatch.setattr(main, "storage_fingerprint", lambda root: fingerprint)
+    monkeypatch.setattr(
+        main,
+        "probe_capabilities",
+        lambda root: probed.append(root) or capabilities,
+    )
+
+    with StorageSession(settings, tmp_storage_root) as session:
+        assert session.capabilities == capabilities
+
+    assert probed == [tmp_storage_root]
+
+
+def test_storage_session_removes_profiles_for_other_paths_on_save(
+    tmp_storage_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = main.initialize_root(tmp_storage_root)
+    checked_path = main._normalized_storage_path(tmp_storage_root)
+    fingerprint = "posix:test:" + checked_path
+    capabilities = StorageCapabilities(
+        exclusive_lock=True,
+        replace_overwrite=True,
+        wal_supported=True,
+        fsync_supported=True,
+        case_sensitive=True,
+        long_path_ok=True,
+        checked_at="2026-08-05T00:00:00+00:00",
+    )
+    settings = config.AppConfig(
+        storage_root_uuid=marker.root_uuid,
+        storage_profiles={
+            marker.root_uuid: {
+                "capabilities": capabilities.as_dict(),
+                "capability_level": CapabilityLevel.OK.value,
+                "checked_path": checked_path,
+                "storage_fingerprint": fingerprint,
+            },
+            "stale-root": {
+                "checked_path": "other-path",
+                "storage_fingerprint": "other-fingerprint",
+            },
+        },
+    )
+    saved: list[config.AppConfig] = []
+    monkeypatch.setattr(config, "save", saved.append)
+    monkeypatch.setattr(main, "check_free_space", lambda path: None)
+    monkeypatch.setattr(main, "storage_fingerprint", lambda root: fingerprint)
+    monkeypatch.setattr(
+        main,
+        "probe_capabilities",
+        lambda root: pytest.fail("matching capability cache must be reused"),
+    )
+
+    with StorageSession(settings, tmp_storage_root):
+        pass
+
+    assert set(saved[-1].storage_profiles) == {marker.root_uuid}
+
+
+def test_storage_session_falls_back_to_session_store_for_unsupported_keyring(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = StorageSession(config.AppConfig(), Path("storage"))
+    monkeypatch.setattr(main, "detect_backend", lambda: KeyringBackendStatus.UNSUPPORTED)
+
+    store = session._create_credential_store()
+
+    assert isinstance(store, SessionCredentialStore)
+    assert session.credential_storage_mode == "session_only"
+
+
+def test_cli_passes_storage_session_credential_store(
+    tmp_storage_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = config.AppConfig(credential_storage="session_only")
+    received: list[object] = []
+
+    def fake_run_application_command(
+        args: object,
+        repo: object,
+        search_repo: object,
+        storage_root: Path,
+        received_settings: config.AppConfig,
+        credential_store: object,
+    ) -> int:
+        del args, repo, search_repo, storage_root, received_settings
+        received.append(credential_store)
+        return 0
+
+    monkeypatch.setattr(main, "check_free_space", lambda path: None)
+    monkeypatch.setattr(main, "_run_application_command", fake_run_application_command)
+
+    result = main._run_command(
+        settings,
+        tmp_storage_root,
+        "account",
+        _build_parser().parse_args(["account", "list"]),
+    )
+
+    assert result == 0
+    assert len(received) == 1
+    assert isinstance(received[0], SessionCredentialStore)
 
 
 def test_storage_unsupported_error_uses_storage_exit_code() -> None:
