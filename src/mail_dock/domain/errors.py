@@ -32,9 +32,7 @@ class StorageUnsupportedError(StorageError):
     def __init__(self, root_uuid: str, capability_level: str) -> None:
         self._root_uuid = root_uuid
         self._capability_level = capability_level
-        super().__init__(
-            f"Storage root {root_uuid} is unsupported ({capability_level})"
-        )
+        super().__init__(f"Storage root {root_uuid} is unsupported ({capability_level})")
 
     @property
     def root_uuid(self) -> str:

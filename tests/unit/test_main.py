@@ -211,8 +211,9 @@ def test_storage_session_persists_unsupported_probe_before_raising(
     monkeypatch.setattr(main, "check_free_space", lambda path: None)
     monkeypatch.setattr(main, "probe_capabilities", lambda root: capabilities)
 
-    with pytest.raises(StorageUnsupportedError) as raised, StorageSession(
-        settings, tmp_storage_root
+    with (
+        pytest.raises(StorageUnsupportedError) as raised,
+        StorageSession(settings, tmp_storage_root),
     ):
         raise AssertionError("unsupported storage must not open a session")
 

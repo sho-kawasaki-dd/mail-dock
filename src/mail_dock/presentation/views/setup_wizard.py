@@ -124,9 +124,7 @@ class SetupWizard(QWizard):
             "unknown",
         )
         self._encryption_combo.setCurrentIndex(2)
-        self._encryption_combo.currentIndexChanged.connect(
-            self._update_encryption_confirmation
-        )
+        self._encryption_combo.currentIndexChanged.connect(self._update_encryption_confirmation)
         encryption_help = QLabel(strings.WIZARD_ENCRYPTION_DECLARATION_HELP)
         encryption_help.setWordWrap(True)
         self._encryption_confirmation = QCheckBox(

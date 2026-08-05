@@ -526,8 +526,7 @@ class StorageSession:
         profiles = {
             profile_uuid: profile
             for profile_uuid, profile in self.settings.storage_profiles.items()
-            if isinstance(profile, dict)
-            and profile.get("checked_path") == current_normalized_path
+            if isinstance(profile, dict) and profile.get("checked_path") == current_normalized_path
         }
         updated_settings = replace(
             self.settings,

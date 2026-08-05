@@ -286,12 +286,7 @@ def probe_capabilities(root: Path) -> StorageCapabilities:
                 base_path.with_name(f"{prefix}A"), base_path.with_name(f"{prefix}a")
             ),
             long_path_ok=_probe_long_path(
-                base_path
-                / "eml"
-                / ("a" * 255)
-                / "2026"
-                / "08"
-                / ("a" * 32 + ".eml")
+                base_path / "eml" / ("a" * 255) / "2026" / "08" / ("a" * 32 + ".eml")
             ),
             checked_at=checked_at,
         )
