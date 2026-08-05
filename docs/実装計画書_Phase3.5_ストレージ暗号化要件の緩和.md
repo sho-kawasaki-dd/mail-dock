@@ -345,11 +345,11 @@
 
 #### **F-4. `tests/unit/test_keyring_store.py` の拡張と `tests/unit/test_session_store.py`（新規）**
 
-- [ ] 許可外バックエンドが `UNSUPPORTED` として検出されることを検証する
-- [ ] 許可外バックエンドで `set_password` が資格情報を保存せず `CredentialStoreError` になることを検証する
-- [ ] `SessionCredentialStore` の保存・取得・削除の挙動を検証する
-- [ ] `SessionCredentialStore` がファイルを一切作成しないこと、`__repr__` に値が現れないことを検証する
-- [ ] プロセス再起動相当の新しい `SessionCredentialStore` には資格情報が無く、再入力後はそのインスタンスからだけ取得できることを検証する
+- [x] 許可外バックエンドが `UNSUPPORTED` として検出されることを検証する
+- [x] 許可外バックエンドで `set_password` が資格情報を保存せず `CredentialStoreError` になることを検証する
+- [x] `SessionCredentialStore` の保存・取得・削除の挙動を検証する
+- [x] `SessionCredentialStore` がファイルを一切作成しないこと、`__repr__` に値が現れないことを検証する
+- [x] プロセス再起動相当の新しい `SessionCredentialStore` には資格情報が無く、再入力後はそのインスタンスからだけ取得できることを検証する
 
 #### **F-5. `tests/unit/test_main.py` の拡張**
 
