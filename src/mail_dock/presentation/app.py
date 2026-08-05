@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import sys
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,10 +19,16 @@ from mail_dock.__main__ import (
     _verify_database,
     _verify_fts_database,
 )
-from mail_dock.domain.errors import MailDockError, StorageForeignRootError
+from mail_dock.domain.errors import (
+    ConfigError,
+    MailDockError,
+    StorageForeignRootError,
+    StorageUnsupportedError,
+)
 from mail_dock.infrastructure.storage.storage_root import RootProbe, resolve_root
 from mail_dock.presentation import strings
 from mail_dock.presentation.context import AppContext
+from mail_dock.presentation.views.dialogs.confirmation_dialog import ConfirmationDialog
 from mail_dock.presentation.views.dialogs.error_dialog import show_error
 from mail_dock.presentation.views.setup_wizard import SetupWizard
 from mail_dock.presentation.web.schemes import register_schemes
@@ -73,6 +80,27 @@ def _available_root(settings: config.AppConfig, requested_root: Path | None) -> 
 
 def _show_error(error: BaseException) -> None:
     show_error(error)
+
+
+def _confirm_storage_unsupported(error: StorageUnsupportedError) -> bool:
+    del error
+    return ConfirmationDialog(strings.DIALOG_CONFIRM_STORAGE_UNSUPPORTED).confirmed()
+
+
+def _acknowledge_storage_unsupported(
+    settings: config.AppConfig,
+    error: StorageUnsupportedError,
+) -> config.AppConfig:
+    profiles = dict(settings.storage_profiles)
+    raw_profile = profiles.get(error.root_uuid)
+    if not isinstance(raw_profile, dict):
+        raise ConfigError("Storage capability result is missing from configuration")
+    profile = dict(raw_profile)
+    profile["capability_ack_at"] = datetime.now(UTC).isoformat()
+    profiles[error.root_uuid] = profile
+    acknowledged = replace(settings, storage_profiles=profiles)
+    config.save(acknowledged)
+    return config.load()
 
 
 def _stop_window(window: Any, context: AppContext | None) -> None:
@@ -139,13 +167,14 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
     verification_result: dict[str, Any] = {"error": None, "window": None}
     session_error: BaseException | None = None
     try:
-        root = _available_root(settings, requested_root)
+        active_settings = settings
+        root = _available_root(active_settings, requested_root)
         setup_wizard: SetupWizard | None = None
         if root is None:
 
             def start_session(selected_root: Path) -> AppContext:
                 nonlocal session, context
-                session = StorageSession(settings, selected_root)
+                session = StorageSession(active_settings, selected_root)
                 session.__enter__()
                 context = AppContext(session, session.settings)
                 updated_settings = replace(
@@ -158,7 +187,7 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
 
             setup_wizard = SetupWizard(
                 initial_root=requested_root,
-                expected_root_uuid=settings.storage_root_uuid,
+                expected_root_uuid=active_settings.storage_root_uuid,
                 on_root_confirmed=start_session,
             )
             if setup_wizard.exec() != QDialog.DialogCode.Accepted:
@@ -167,8 +196,23 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
             if root is None or session is None or context is None:
                 return 1
         else:
-            session = StorageSession(settings, root)
-            session.__enter__()
+            unsupported_acknowledged = False
+            while True:
+                session = StorageSession(active_settings, root)
+                try:
+                    session.__enter__()
+                except StorageUnsupportedError as unsupported_error:
+                    if unsupported_acknowledged or not _confirm_storage_unsupported(
+                        unsupported_error
+                    ):
+                        session_error = unsupported_error
+                        return _exit_code(unsupported_error)
+                    active_settings = _acknowledge_storage_unsupported(
+                        session.settings, unsupported_error
+                    )
+                    unsupported_acknowledged = True
+                    continue
+                break
             context = AppContext(session, session.settings)
         verification_thread, verification_result = _start_verification(app, session, context)
         event_code = app.exec()

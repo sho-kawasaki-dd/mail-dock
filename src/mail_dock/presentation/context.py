@@ -54,6 +54,14 @@ class AppContext:
         self.settings = settings
         self.storage_lock = session.storage_lock
         self.connection_manager = session.connection_manager
+        self.capabilities = (
+            session.capabilities.as_dict() if session.capabilities is not None else None
+        )
+        self.capability_level = (
+            session.capability_level.value if session.capability_level is not None else None
+        )
+        self.encryption_declaration = session.encryption_declaration
+        self.credential_storage = session.credential_storage_mode
         self._session = session
         self._renderer_factory = renderer_factory
 

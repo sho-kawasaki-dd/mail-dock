@@ -265,11 +265,11 @@
 
 #### **D-2. `presentation/app.py` — GUI側の合成ルート更新**
 
-- [ ] `ConnectionManager` 生成箇所を `journal_mode` へ差し替える
-- [ ] `StorageSession` が保持する適合性・暗号化申告・資格情報ストアの選択結果を `AppContext` 経由で `MainWindow` へ渡す
-- [ ] 既存ルートが `UNSUPPORTED` かつ未承認の場合、保存済みの測定結果を指す構造化 `StorageUnsupportedError` を捕捉して**続行確認ダイアログ**を出す。承認されたら `capability_ack_at` を保存し、`config.load()` で設定を再ロードして `StorageSession` を再生成する（D-5）
-- [ ] 承認後のセッション再生成は1回だけ許可し、再度 `StorageUnsupportedError` になった場合はループせず終了する
-- [ ] 承認されなかった場合は終了コード **3**（既存の `StorageLockedError` と同じ規約）で終了する
+- [x] `ConnectionManager` 生成箇所を `journal_mode` へ差し替える
+- [x] `StorageSession` が保持する適合性・暗号化申告・資格情報ストアの選択結果を `AppContext` 経由で `MainWindow` へ渡す
+- [x] 既存ルートが `UNSUPPORTED` かつ未承認の場合、保存済みの測定結果を指す構造化 `StorageUnsupportedError` を捕捉して**続行確認ダイアログ**を出す。承認されたら `capability_ack_at` を保存し、`config.load()` で設定を再ロードして `StorageSession` を再生成する（D-5）
+- [x] 承認後のセッション再生成は1回だけ許可し、再度 `StorageUnsupportedError` になった場合はループせず終了する
+- [x] 承認されなかった場合は終了コード **3**（既存の `StorageLockedError` と同じ規約）で終了する
 
 ---
 

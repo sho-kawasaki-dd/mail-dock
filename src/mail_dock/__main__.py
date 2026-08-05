@@ -351,6 +351,7 @@ class StorageSession:
         self.capabilities: StorageCapabilities | None = None
         self.capability_level: CapabilityLevel | None = None
         self.encryption_declaration = "unknown"
+        self.credential_storage_mode: str | None = None
         self.credential_store: BaseCredentialStore | None = None
         self.manager: ConnectionManager | None = None
         self._lock: StorageLock | None = None
@@ -504,14 +505,17 @@ class StorageSession:
     def _create_credential_store(self) -> BaseCredentialStore:
         if self.settings.credential_storage == "session_only":
             LOGGER.warning("Using session-only credential storage by configuration")
+            self.credential_storage_mode = "session_only"
             return SessionCredentialStore()
         backend_status = detect_backend()
         if backend_status is KeyringBackendStatus.SUPPORTED:
+            self.credential_storage_mode = "keyring"
             return KeyringCredentialStore()
         LOGGER.warning(
             "Keyring backend is %s; falling back to session-only credential storage",
             backend_status.value,
         )
+        self.credential_storage_mode = "session_only"
         return SessionCredentialStore()
 
     def _save_settings(self) -> None:

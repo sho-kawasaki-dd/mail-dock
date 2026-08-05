@@ -30,6 +30,10 @@ def test_app_context_borrows_session_resources_and_builds_thread_local_factories
         assert context.storage_root == session.root
         assert context.storage_lock is session.storage_lock
         assert context.connection_manager is session.connection_manager
+        assert context.capabilities == session.capabilities.as_dict()
+        assert context.capability_level == session.capability_level.value
+        assert context.encryption_declaration == session.encryption_declaration
+        assert context.credential_storage == session.credential_storage_mode
         assert context.credential_store is session.active_credential_store
         assert isinstance(context.create_message_repository(), SqliteMessageRepository)
         assert isinstance(context.create_search_repository(), SqliteSearchRepository)

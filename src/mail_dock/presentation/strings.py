@@ -153,6 +153,11 @@ RECOVERY_CHECK_CREDENTIAL_STORE = "OSの資格情報ストアを確認してか�
 RECOVERY_RETRY = "しばらく待ってから再試行してください。"
 
 DIALOG_CONFIRM_TITLE = "確認"
+DIALOG_CONFIRM_STORAGE_UNSUPPORTED = (
+    "この保管先では排他ロックまたは既存ファイルへの上書き配置を保証できません。\n"
+    "同期中にデータ破損や同時実行による不整合が発生する可能性があります。\n"
+    "安全性を確認できない保管先で続行しますか?"
+)
 DIALOG_CONFIRM_EXTERNAL_LINK = "外部ブラウザでこのリンクを開きますか?\n{url}"
 DIALOG_CONFIRM_SAVE_EXECUTABLE = (
     "このファイルは実行可能ファイルです。本当に保存しますか?\n{filename}"
