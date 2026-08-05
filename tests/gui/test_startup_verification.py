@@ -50,7 +50,7 @@ def test_startup_verification_runs_quick_and_full_checks(
     monkeypatch.setattr(
         app,
         "_verify_fts_database",
-        lambda _path, *, network_drive: calls.append(f"full:{network_drive}"),
+        lambda _path, *, journal_mode: calls.append(f"full:{journal_mode}"),
     )
 
     quick = _Session("quick", tmp_path)
@@ -60,9 +60,10 @@ def test_startup_verification_runs_quick_and_full_checks(
     assert quick.connection_manager.closed == 1
 
     full = _Session("full", tmp_path)
+    full.journal_mode = "DELETE"
     full_worker = app._StartupVerificationWorker(cast(Any, full), "full")
     full_worker.run()
-    assert calls == ["quick", "quick", "full:False"]
+    assert calls == ["quick", "quick", "full:DELETE"]
     assert full.connection_manager.closed == 1
 
 

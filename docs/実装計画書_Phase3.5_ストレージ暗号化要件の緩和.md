@@ -250,18 +250,18 @@
 
 #### **D-1. `__main__.py` — `StorageSession` へのセルフテスト統合**
 
-- [ ] `ensure_layout(root)` / `cleanup_tmp(root)` の直後に現在の正規化パスとストレージ指紋を取得し、`config.storage_profiles[root_uuid]` のキャッシュが有効か検証する。記録が無い／不正、パス不一致、指紋不一致の場合だけ `probe_capabilities(root)` を実行する（D-17）
-- [ ] 新たに測定した `capabilities` / `capability_level` / `checked_path` / `storage_fingerprint` は、通常終了時の `_save_settings()` に依存せず、判定直後に専用処理で `config.json` へ原子的に保存する
-- [ ] `capability_level` が `UNSUPPORTED` かつ `capability_ack_at` が未記録の場合、測定結果の保存成功後に限り、`StorageUnsupportedError(root_uuid, capability_level.value)` を送出する（D-5 / D-10）
-- [ ] `journal_mode_for(capabilities, network_drive=self.network_drive)` の結果を `ConnectionManager` へ渡す
-- [ ] `self.network_drive` は削除せず、`DriveKind.NETWORK` 検出時の警告ログ用として維持する
-- [ ] `self.capabilities` / `self.capability_level` / `self.encryption_declaration` を公開属性として持たせ、GUI から参照できるようにする
-- [ ] `_save_settings` で暗号化申告・承認等の `storage_profiles` 更新を保持する。掃除はUUIDだけで媒体を同定できない前提で行い、現在の候補パスに対応しないエントリだけを削除する
-- [ ] `config.credential_storage` と `detect_backend()` から資格情報ストアを1回だけ選択し、`StorageSession` が `BaseCredentialStore` として所有する。`keyring` 指定でバックエンドが許可外なら `SessionCredentialStore` へフォールバックし、警告をログへ出す（D-12 / D-13）
-- [ ] CLIと`AppContext`は独自に `KeyringCredentialStore` を生成せず、`StorageSession.credential_store` を共有する
-- [ ] CLIで `session_only` を使用し、資格情報が無いアカウントへのネットワーク操作を開始する場合は `getpass` で再入力してセッションストアへ保存する。非対話環境で入力できない場合は `CredentialStoreError` とし、引数・環境変数による秘密情報の受け渡しは追加しない
-- [ ] `_exit_code` で `StorageUnsupportedError` を `StorageLockedError` と同じ終了コード3へ割り当てる
-- [ ] CLI から承認を発行する引数・環境変数を**追加しない**ことをコメントで明記する（D-10）
+- [x] `ensure_layout(root)` / `cleanup_tmp(root)` の直後に現在の正規化パスとストレージ指紋を取得し、`config.storage_profiles[root_uuid]` のキャッシュが有効か検証する。記録が無い／不正、パス不一致、指紋不一致の場合だけ `probe_capabilities(root)` を実行する（D-17）
+- [x] 新たに測定した `capabilities` / `capability_level` / `checked_path` / `storage_fingerprint` は、通常終了時の `_save_settings()` に依存せず、判定直後に専用処理で `config.json` へ原子的に保存する
+- [x] `capability_level` が `UNSUPPORTED` かつ `capability_ack_at` が未記録の場合、測定結果の保存成功後に限り、`StorageUnsupportedError(root_uuid, capability_level.value)` を送出する（D-5 / D-10）
+- [x] `journal_mode_for(capabilities, network_drive=self.network_drive)` の結果を `ConnectionManager` へ渡す
+- [x] `self.network_drive` は削除せず、`DriveKind.NETWORK` 検出時の警告ログ用として維持する
+- [x] `self.capabilities` / `self.capability_level` / `self.encryption_declaration` を公開属性として持たせ、GUI から参照できるようにする
+- [x] `_save_settings` で暗号化申告・承認等の `storage_profiles` 更新を保持する。掃除はUUIDだけで媒体を同定できない前提で行い、現在の候補パスに対応しないエントリだけを削除する
+- [x] `config.credential_storage` と `detect_backend()` から資格情報ストアを1回だけ選択し、`StorageSession` が `BaseCredentialStore` として所有する。`keyring` 指定でバックエンドが許可外なら `SessionCredentialStore` へフォールバックし、警告をログへ出す（D-12 / D-13）
+- [x] CLIと`AppContext`は独自に `KeyringCredentialStore` を生成せず、`StorageSession.credential_store` を共有する
+- [x] CLIで `session_only` を使用し、資格情報が無いアカウントへのネットワーク操作を開始する場合は `getpass` で再入力してセッションストアへ保存する。非対話環境で入力できない場合は `CredentialStoreError` とし、引数・環境変数による秘密情報の受け渡しは追加しない
+- [x] `_exit_code` で `StorageUnsupportedError` を `StorageLockedError` と同じ終了コード3へ割り当てる
+- [x] CLI から承認を発行する引数・環境変数を**追加しない**ことをコメントで明記する（D-10）
 
 #### **D-2. `presentation/app.py` — GUI側の合成ルート更新**
 

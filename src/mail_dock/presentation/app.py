@@ -49,7 +49,7 @@ class _StartupVerificationWorker(QObject):
             if self._mode == "full":
                 _verify_fts_database(
                     self._session.root / "metadata.db",
-                    journal_mode="DELETE" if self._session.network_drive else "WAL",
+                    journal_mode=self._session.journal_mode or "DELETE",
                 )
         except BaseException as error:
             self.failed.emit(error)
@@ -147,9 +147,9 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
                 nonlocal session, context
                 session = StorageSession(settings, selected_root)
                 session.__enter__()
-                context = AppContext(session, settings)
+                context = AppContext(session, session.settings)
                 updated_settings = replace(
-                    settings,
+                    session.settings,
                     storage_root_uuid=session.root_uuid,
                     storage_root_candidates=(str(selected_root.resolve(strict=False)),),
                 )
@@ -169,7 +169,7 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
         else:
             session = StorageSession(settings, root)
             session.__enter__()
-            context = AppContext(session, settings)
+            context = AppContext(session, session.settings)
         verification_thread, verification_result = _start_verification(app, session, context)
         event_code = app.exec()
         window = verification_result["window"]

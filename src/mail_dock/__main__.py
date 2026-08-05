@@ -6,6 +6,7 @@ import argparse
 import getpass
 import json
 import logging
+import os
 import signal
 import sqlite3
 import sys
@@ -19,6 +20,7 @@ from mail_dock import __version__, config
 from mail_dock.domain.errors import (
     AuthenticationError,
     ConfigError,
+    CredentialStoreError,
     DatabaseError,
     FetchError,
     MailDockError,
@@ -28,8 +30,10 @@ from mail_dock.domain.errors import (
     StorageForeignRootError,
     StorageLockedError,
     StorageRootMissingError,
+    StorageUnsupportedError,
 )
 from mail_dock.domain.fetcher import CancelToken
+from mail_dock.domain.ports import BaseCredentialStore
 from mail_dock.domain.repository import MessageRecord
 from mail_dock.domain.search import MessageFilter, MessageSummary, PageCursor, SearchPage
 from mail_dock.infrastructure.database.connection import ConnectionManager, connect
@@ -39,7 +43,20 @@ from mail_dock.infrastructure.database.migrator import migrate
 from mail_dock.infrastructure.database.search_repository import SqliteSearchRepository
 from mail_dock.infrastructure.fetchers.onamae_imap import OnamaeImapFetcher
 from mail_dock.infrastructure.logging_config import set_storage_log_target, setup_logging
-from mail_dock.infrastructure.security.keyring_store import KeyringCredentialStore
+from mail_dock.infrastructure.security.keyring_store import (
+    KeyringBackendStatus,
+    KeyringCredentialStore,
+    detect_backend,
+)
+from mail_dock.infrastructure.security.session_store import SessionCredentialStore
+from mail_dock.infrastructure.storage.capabilities import (
+    CapabilityLevel,
+    StorageCapabilities,
+    capability_level,
+    journal_mode_for,
+    probe_capabilities,
+    storage_fingerprint,
+)
 from mail_dock.infrastructure.storage.detach import storage_io
 from mail_dock.infrastructure.storage.eml_storage import EmlStorage, cleanup_tmp
 from mail_dock.infrastructure.storage.manifest import ManifestWriter
@@ -103,6 +120,7 @@ def _date_end(value: date | None) -> datetime | None:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    # CLI intentionally has no option or environment variable for capability acknowledgement.
     common = _common_parser()
     parser = argparse.ArgumentParser(
         prog="mail-dock",
@@ -272,6 +290,10 @@ def _select_root(
     return root, marker.root_uuid
 
 
+def _normalized_storage_path(root: Path) -> str:
+    return os.path.normcase(str(root.expanduser().resolve(strict=False)))
+
+
 def _verify_database(connection: sqlite3.Connection) -> None:
     try:
         with storage_io():
@@ -325,6 +347,11 @@ class StorageSession:
         self._root: Path | None = None
         self.root_uuid: str | None = None
         self.network_drive = False
+        self.journal_mode: str | None = None
+        self.capabilities: StorageCapabilities | None = None
+        self.capability_level: CapabilityLevel | None = None
+        self.encryption_declaration = "unknown"
+        self.credential_store: BaseCredentialStore | None = None
         self.manager: ConnectionManager | None = None
         self._lock: StorageLock | None = None
         self._storage_logging_enabled = False
@@ -345,14 +372,40 @@ class StorageSession:
             lock.acquire()
             ensure_layout(root)
             cleanup_tmp(root)
+            checked_path = _normalized_storage_path(root)
+            fingerprint = storage_fingerprint(root)
+            profile = self._profile(root_uuid)
+            cached = self._cached_capabilities(profile, checked_path, fingerprint)
+            if cached is None:
+                capabilities = probe_capabilities(root)
+                level = capability_level(capabilities)
+                self._persist_capabilities(
+                    root_uuid,
+                    capabilities,
+                    level,
+                    checked_path,
+                    fingerprint,
+                )
+                profile = self._profile(root_uuid)
+            else:
+                capabilities, level = cached
+            self.capabilities = capabilities
+            self.capability_level = level
+            self.encryption_declaration = self._encryption_from_profile(profile)
+            capability_ack_at = profile.get("capability_ack_at") if profile else None
+            if level is CapabilityLevel.UNSUPPORTED and not capability_ack_at:
+                raise StorageUnsupportedError(root_uuid, level.value)
             check_free_space(root)
             set_storage_log_target(root / "logs")
             self._storage_logging_enabled = True
+            journal_mode = journal_mode_for(capabilities, network_drive=self.network_drive)
+            self.journal_mode = journal_mode
+            self.credential_store = self._create_credential_store()
 
             self.manager = ConnectionManager(
                 root / "metadata.db",
                 readonly=self.readonly,
-                journal_mode="DELETE" if self.network_drive else "WAL",
+                journal_mode=self.journal_mode,
             )
             connection = self.manager.get_connection()
             if self.readonly:
@@ -360,7 +413,7 @@ class StorageSession:
                 self.manager.close_current_thread()
                 _verify_fts_database(
                     root / "metadata.db",
-                    journal_mode="DELETE" if self.network_drive else "WAL",
+                    journal_mode=journal_mode,
                 )
                 LOGGER.info("Database verification succeeded")
             else:
@@ -380,15 +433,106 @@ class StorageSession:
         finally:
             self._cleanup()
 
+    @staticmethod
+    def _encryption_from_profile(profile: dict[str, config.JSONValue] | None) -> str:
+        if profile is None:
+            return "unknown"
+        encryption = profile.get("encryption")
+        return encryption if isinstance(encryption, str) else "unknown"
+
+    def _profile(self, root_uuid: str) -> dict[str, config.JSONValue] | None:
+        raw_profile = self.settings.storage_profiles.get(root_uuid)
+        if not isinstance(raw_profile, dict):
+            return None
+        return dict(raw_profile)
+
+    @staticmethod
+    def _cached_capabilities(
+        profile: dict[str, config.JSONValue] | None,
+        checked_path: str,
+        fingerprint: str,
+    ) -> tuple[StorageCapabilities, CapabilityLevel] | None:
+        if profile is None:
+            return None
+        if profile.get("checked_path") != checked_path:
+            return None
+        if profile.get("storage_fingerprint") != fingerprint:
+            return None
+        raw_capabilities = profile.get("capabilities")
+        raw_level = profile.get("capability_level")
+        if not isinstance(raw_capabilities, dict) or not isinstance(raw_level, str):
+            return None
+        capabilities = StorageCapabilities.from_dict(raw_capabilities)
+        if capabilities is None:
+            return None
+        try:
+            level = CapabilityLevel(raw_level)
+        except ValueError:
+            return None
+        if capability_level(capabilities) is not level:
+            return None
+        return capabilities, level
+
+    def _persist_capabilities(
+        self,
+        root_uuid: str,
+        capabilities: StorageCapabilities,
+        level: CapabilityLevel,
+        checked_path: str,
+        fingerprint: str,
+    ) -> None:
+        profiles = dict(self.settings.storage_profiles)
+        profile = self._profile(root_uuid) or {}
+        profile.update(
+            {
+                "capabilities": capabilities.as_dict(),
+                "capability_level": level.value,
+                "checked_path": checked_path,
+                "storage_fingerprint": fingerprint,
+            }
+        )
+        profiles[root_uuid] = profile
+        updated_settings = replace(
+            self.settings,
+            storage_root_uuid=root_uuid,
+            storage_root_candidates=(checked_path,),
+            storage_profiles=profiles,
+        )
+        config.save(updated_settings)
+        self.settings = updated_settings
+
+    def _create_credential_store(self) -> BaseCredentialStore:
+        if self.settings.credential_storage == "session_only":
+            LOGGER.warning("Using session-only credential storage by configuration")
+            return SessionCredentialStore()
+        backend_status = detect_backend()
+        if backend_status is KeyringBackendStatus.SUPPORTED:
+            return KeyringCredentialStore()
+        LOGGER.warning(
+            "Keyring backend is %s; falling back to session-only credential storage",
+            backend_status.value,
+        )
+        return SessionCredentialStore()
+
     def _save_settings(self) -> None:
         if self._root is None or self.root_uuid is None:
             return
+        current_path = str(self._root.resolve(strict=False))
+        current_normalized_path = _normalized_storage_path(self._root)
+        profiles = {
+            profile_uuid: profile
+            for profile_uuid, profile in self.settings.storage_profiles.items()
+            if isinstance(profile, dict)
+            and profile.get("checked_path") == current_normalized_path
+        }
         updated_settings = replace(
             self.settings,
             storage_root_uuid=self.root_uuid,
-            storage_root_candidates=(str(self._root.resolve(strict=False)),),
+            storage_root_candidates=(current_path,),
+            storage_profiles=profiles,
         )
         config.save(updated_settings)
+        self.settings = updated_settings
 
     @property
     def root(self) -> Path:
@@ -421,6 +565,14 @@ class StorageSession:
         return self.manager
 
     @property
+    def active_credential_store(self) -> BaseCredentialStore:
+        """Return the credential store selected for this session."""
+
+        if self.credential_store is None or not self._entered or self._closed:
+            raise RuntimeError("StorageSession is not active")
+        return self.credential_store
+
+    @property
     def storage_lock(self) -> StorageLock:
         """Return the active lock borrowed by the GUI composition context."""
 
@@ -445,7 +597,7 @@ def _account_id(account: MessageRecord) -> str:
 
 def _account_fetcher(
     account: MessageRecord,
-    credential_store: KeyringCredentialStore,
+    credential_store: BaseCredentialStore,
     settings: config.AppConfig,
 ) -> OnamaeImapFetcher:
     account_id = _account_id(account)
@@ -461,10 +613,24 @@ def _account_fetcher(
     return OnamaeImapFetcher(
         host,
         username,
-        load_credentials(credential_store, account_id),
+        _load_cli_credentials(credential_store, account_id),
         port=port,
         remote_trash_folder=settings.remote_trash_folder,
     )
+
+
+def _load_cli_credentials(credential_store: BaseCredentialStore, account_id: str) -> str:
+    try:
+        return load_credentials(credential_store, account_id)
+    except AuthenticationError:
+        if not isinstance(credential_store, SessionCredentialStore):
+            raise
+        try:
+            password = getpass.getpass("IMAP password: ")
+        except (EOFError, OSError) as error:
+            raise CredentialStoreError("Credentials are required for this operation") from error
+        credential_store.set_password(account_id, password)
+        return password
 
 
 def _format_bytes(value: int) -> str:
@@ -647,7 +813,7 @@ def _run_search_command(
 def _run_account_command(
     args: argparse.Namespace,
     repo: SqliteMessageRepository,
-    credential_store: KeyringCredentialStore,
+    credential_store: BaseCredentialStore,
 ) -> None:
     account_command = getattr(args, "account_command", None)
     if account_command == "add":
@@ -673,7 +839,7 @@ def _run_account_command(
 def _run_folders_command(
     args: argparse.Namespace,
     repo: SqliteMessageRepository,
-    credential_store: KeyringCredentialStore,
+    credential_store: BaseCredentialStore,
     settings: config.AppConfig,
 ) -> None:
     account_id = args.account
@@ -694,7 +860,7 @@ def _run_folders_command(
 def _run_sync_command(
     args: argparse.Namespace,
     repo: SqliteMessageRepository,
-    credential_store: KeyringCredentialStore,
+    credential_store: BaseCredentialStore,
     storage_root: Path,
     settings: config.AppConfig,
 ) -> int:
@@ -766,8 +932,8 @@ def _run_application_command(
     search_repo: SqliteSearchRepository,
     storage_root: Path,
     settings: config.AppConfig,
+    credential_store: BaseCredentialStore,
 ) -> int:
-    credential_store = KeyringCredentialStore()
     command = getattr(args, "command", None)
     if command == "account":
         _run_account_command(args, repo, credential_store)
@@ -803,7 +969,8 @@ def _run_command(
                 repository,
                 search_repository,
                 session.root,
-                settings,
+                session.settings,
+                session.active_credential_store,
             )
     return result
 
@@ -817,7 +984,7 @@ def _run_gui(settings: config.AppConfig, requested_root: Path | None) -> int:
 
 
 def _exit_code(error: MailDockError) -> int:
-    if isinstance(error, StorageLockedError):
+    if isinstance(error, StorageLockedError | StorageUnsupportedError):
         return 3
     if isinstance(error, DatabaseError):
         return 4

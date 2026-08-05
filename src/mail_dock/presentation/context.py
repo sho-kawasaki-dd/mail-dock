@@ -21,7 +21,6 @@ from mail_dock.domain.search import BaseSearchRepository
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
 from mail_dock.infrastructure.database.search_repository import SqliteSearchRepository
 from mail_dock.infrastructure.fetchers.onamae_imap import OnamaeImapFetcher
-from mail_dock.infrastructure.security.keyring_store import KeyringCredentialStore
 from mail_dock.infrastructure.storage.eml_storage import EmlStorage
 from mail_dock.infrastructure.storage.manifest import ManifestWriter
 from mail_dock.usecases.register_account import load_credentials
@@ -56,7 +55,6 @@ class AppContext:
         self.storage_lock = session.storage_lock
         self.connection_manager = session.connection_manager
         self._session = session
-        self._credential_store: KeyringCredentialStore | None = None
         self._renderer_factory = renderer_factory
 
     @property
@@ -69,9 +67,7 @@ class AppContext:
     def credential_store(self) -> BaseCredentialStore:
         """Return the shared credential-store adapter."""
 
-        if self._credential_store is None:
-            self._credential_store = KeyringCredentialStore()
-        return self._credential_store
+        return self._session.active_credential_store
 
     def create_message_repository(self) -> SqliteMessageRepository:
         """Create a message repository for the calling thread."""

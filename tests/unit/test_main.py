@@ -8,8 +8,9 @@ import pytest
 import mail_dock.__main__ as main
 from mail_dock import config
 from mail_dock.__main__ import StorageSession, _build_parser, _exit_code, _run_search_command
-from mail_dock.domain.errors import SearchQueryError
+from mail_dock.domain.errors import SearchQueryError, StorageUnsupportedError
 from mail_dock.domain.search import MessageSummary, PageCursor, SearchPage
+from mail_dock.infrastructure.storage.capabilities import CapabilityLevel, StorageCapabilities
 from mail_dock.infrastructure.storage.storage_root import StorageLock
 
 
@@ -189,6 +190,84 @@ def test_storage_session_migrates_saves_settings_and_releases_lock(
     assert saved[0].storage_root_uuid is not None
     with StorageLock(tmp_storage_root) as lock:
         assert lock.held
+
+
+def test_storage_session_persists_unsupported_probe_before_raising(
+    tmp_storage_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = config.AppConfig()
+    saved: list[config.AppConfig] = []
+    capabilities = StorageCapabilities(
+        exclusive_lock=False,
+        replace_overwrite=True,
+        wal_supported=True,
+        fsync_supported=True,
+        case_sensitive=True,
+        long_path_ok=True,
+        checked_at="2026-08-05T00:00:00+00:00",
+    )
+    monkeypatch.setattr(config, "save", saved.append)
+    monkeypatch.setattr(main, "check_free_space", lambda path: None)
+    monkeypatch.setattr(main, "probe_capabilities", lambda root: capabilities)
+
+    with pytest.raises(StorageUnsupportedError) as raised, StorageSession(
+        settings, tmp_storage_root
+    ):
+        raise AssertionError("unsupported storage must not open a session")
+
+    assert raised.value.root_uuid is not None
+    assert raised.value.capability_level == CapabilityLevel.UNSUPPORTED.value
+    assert len(saved) == 1
+    profile = saved[0].storage_profiles[raised.value.root_uuid]
+    assert isinstance(profile, dict)
+    assert profile["capability_level"] == CapabilityLevel.UNSUPPORTED.value
+    assert profile["capabilities"] == capabilities.as_dict()
+
+
+def test_storage_session_reuses_matching_capability_cache(
+    tmp_storage_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = main.initialize_root(tmp_storage_root)
+    checked_path = main._normalized_storage_path(tmp_storage_root)
+    fingerprint = "posix:test:" + checked_path
+    capabilities = StorageCapabilities(
+        exclusive_lock=True,
+        replace_overwrite=True,
+        wal_supported=True,
+        fsync_supported=True,
+        case_sensitive=True,
+        long_path_ok=True,
+        checked_at="2026-08-05T00:00:00+00:00",
+    )
+    settings = config.AppConfig(
+        storage_root_uuid=marker.root_uuid,
+        storage_profiles={
+            marker.root_uuid: {
+                "capabilities": capabilities.as_dict(),
+                "capability_level": CapabilityLevel.OK.value,
+                "checked_path": checked_path,
+                "storage_fingerprint": fingerprint,
+                "encryption": "unknown",
+            }
+        },
+    )
+    monkeypatch.setattr(main, "check_free_space", lambda path: None)
+    monkeypatch.setattr(main, "storage_fingerprint", lambda root: fingerprint)
+    monkeypatch.setattr(
+        main,
+        "probe_capabilities",
+        lambda root: pytest.fail("matching capability cache must be reused"),
+    )
+
+    with StorageSession(settings, tmp_storage_root) as session:
+        assert session.capabilities == capabilities
+        assert session.capability_level is CapabilityLevel.OK
+
+
+def test_storage_unsupported_error_uses_storage_exit_code() -> None:
+    assert _exit_code(StorageUnsupportedError("root-1", "unsupported")) == 3
 
 
 def test_search_command_builds_filters_and_prints_json(capsys: Any) -> None:

@@ -9,7 +9,6 @@ from mail_dock import config
 from mail_dock.__main__ import StorageSession
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
 from mail_dock.infrastructure.database.search_repository import SqliteSearchRepository
-from mail_dock.infrastructure.security.keyring_store import KeyringCredentialStore
 from mail_dock.infrastructure.storage.eml_storage import EmlStorage
 from mail_dock.infrastructure.storage.manifest import ManifestWriter
 from mail_dock.presentation.context import AppContext
@@ -31,7 +30,7 @@ def test_app_context_borrows_session_resources_and_builds_thread_local_factories
         assert context.storage_root == session.root
         assert context.storage_lock is session.storage_lock
         assert context.connection_manager is session.connection_manager
-        assert isinstance(context.credential_store, KeyringCredentialStore)
+        assert context.credential_store is session.active_credential_store
         assert isinstance(context.create_message_repository(), SqliteMessageRepository)
         assert isinstance(context.create_search_repository(), SqliteSearchRepository)
         assert isinstance(context.create_eml_storage(), EmlStorage)
