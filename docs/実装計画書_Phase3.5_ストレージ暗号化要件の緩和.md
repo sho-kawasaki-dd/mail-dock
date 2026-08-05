@@ -319,15 +319,15 @@
 
 #### **F-1. `tests/unit/test_capabilities.py`（新規）**
 
-- [ ] 各能力の失敗を monkeypatch で個別に注入し、`CapabilityLevel` の分岐（`OK` / `DEGRADED` / `UNSUPPORTED`）を固定する
-- [ ] `journal_mode_for` が `wal_supported` に応じて `WAL` / `DELETE` を返すことを検証する
-- [ ] `network_drive=True` ではWALプローブが成功しても `journal_mode_for` が必ず `DELETE` を返すことを検証する
-- [ ] 親プロセスが保持するロックを別プロセスが取得できないこと、および子プロセスが必ず終了・回収されることを検証する
-- [ ] テスト実行後に `tmp/` へ残骸が残らないことを検証する（例外発生経路も含む）
-- [ ] 本番の `.lock` / `metadata.db` / `eml/` / `manifests/` / `tmp/pstimp/` に触れないことを検証する（D-8）
-- [ ] `StorageDetachedError` が握り潰されずに送出されることを検証する
-- [ ] `StorageCapabilities.from_dict` が不正な辞書に対して `None` を返すことを検証する
-- [ ] Qt を import しないこと（通常CIで実行できること）を確認する
+- [x] 各能力の失敗を monkeypatch で個別に注入し、`CapabilityLevel` の分岐（`OK` / `DEGRADED` / `UNSUPPORTED`）を固定する
+- [x] `journal_mode_for` が `wal_supported` に応じて `WAL` / `DELETE` を返すことを検証する
+- [x] `network_drive=True` ではWALプローブが成功しても `journal_mode_for` が必ず `DELETE` を返すことを検証する
+- [x] 親プロセスが保持するロックを別プロセスが取得できないこと、および子プロセスが必ず終了・回収されることを検証する
+- [x] テスト実行後に `tmp/` へ残骸が残らないことを検証する（例外発生経路も含む）
+- [x] 本番の `.lock` / `metadata.db` / `eml/` / `manifests/` / `tmp/pstimp/` に触れないことを検証する（D-8）
+- [x] `StorageDetachedError` が握り潰されずに送出されることを検証する
+- [x] `StorageCapabilities.from_dict` が不正な辞書に対して `None` を返すことを検証する
+- [x] Qt を import しないこと（通常CIで実行できること）を確認する
 
 #### **F-2. `tests/unit/test_config.py` の拡張**
 
