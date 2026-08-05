@@ -35,7 +35,10 @@ from mail_dock.infrastructure.storage.capabilities import (
 from mail_dock.infrastructure.storage.eml_storage import cleanup_tmp
 from mail_dock.infrastructure.storage.storage_root import (
     RootProbe,
+    check_free_space,
+    drive_kind,
     ensure_layout,
+    free_space,
     initialize_root,
     resolve_root,
 )
@@ -260,6 +263,10 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
                 expected_root_uuid=active_settings.storage_root_uuid,
                 on_root_confirmed=start_session,
                 on_root_probe=probe_root,
+                root_initializer=lambda path: initialize_root(path).root_uuid,
+                check_root_space=lambda path: check_free_space(path).value,
+                resolve_drive_kind=lambda path: drive_kind(path).value,
+                resolve_free_space=free_space,
             )
             if setup_wizard.exec() != QDialog.DialogCode.Accepted:
                 return 0

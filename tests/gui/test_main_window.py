@@ -10,6 +10,7 @@ from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.ports import BaseEmlStorage, BaseManifestWriter
 from mail_dock.domain.repository import BaseMessageRepository
 from mail_dock.domain.search import BaseSearchRepository, MessageFilter, SearchPage
+from mail_dock.presentation import strings
 from mail_dock.presentation.views.main_window import MainWindow
 
 pytestmark = pytest.mark.gui
@@ -69,11 +70,22 @@ class _Fetcher:
 
 
 class _Context:
-    def __init__(self) -> None:
-        self.settings = config.AppConfig()
+    def __init__(self, *, profile: dict[str, config.JSONValue] | None = None) -> None:
+        self.root_uuid = "root-1" if profile is not None else None
+        self.settings = config.AppConfig(
+            storage_root_uuid=self.root_uuid,
+            storage_profiles={self.root_uuid: profile} if self.root_uuid else {},
+        )
         self.connection_manager = None
+        self.encryption_declaration = (
+            profile.get("encryption", "unknown") if profile is not None else "unknown"
+        )
+        self.capability_level = profile.get("capability_level") if profile is not None else None
+        self.credential_storage = "keyring"
+        self.credential_store = _CredentialStore()
         self.folder_tree_roots: tuple[object, ...] = ()
         self.stop_calls = 0
+        self.saved: list[config.AppConfig] = []
 
     @staticmethod
     def create_message_repository() -> BaseMessageRepository:
@@ -105,6 +117,18 @@ class _Context:
 
     def stop_workers(self) -> None:
         self.stop_calls += 1
+
+    def save_settings(self, settings: config.AppConfig) -> None:
+        self.saved.append(settings)
+        self.settings = settings
+
+
+class _CredentialStore:
+    def get_password(self, _account_id: str) -> str | None:
+        return "stored-password"
+
+    def set_password(self, _account_id: str, _password: str) -> None:
+        return None
 
 
 def test_main_window_builds_three_panes_and_prevents_sync_reentry(qtbot: Any) -> None:
@@ -142,3 +166,85 @@ def test_stop_workers_is_idempotent_and_waits_for_worker_shutdown(qtbot: Any) ->
 
     assert context.stop_calls == 1
     assert window._workers_stopped
+
+
+def test_status_bar_displays_encryption_and_capability_state(qtbot: Any) -> None:
+    context = _Context(profile={"encryption": "unknown", "capability_level": "degraded"})
+    window = MainWindow(cast(Any, context))
+    qtbot.addWidget(window)
+
+    assert "unknown" in window._encryption_status_label.text()
+    assert "DEGRADED" in window._storage_status_label.text()
+    assert window.encryption_help_action.text() == "保管先の暗号化について"
+    window.stop_workers()
+
+
+def test_first_sync_confirmation_is_before_queue_and_only_once(
+    qtbot: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _Context(profile={"encryption": "unknown", "capability_level": "ok"})
+    events: list[str] = []
+
+    class _Confirmation:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            events.append("confirm")
+
+        def confirmed(self) -> bool:
+            return True
+
+    monkeypatch.setattr(
+        "mail_dock.presentation.views.main_window.ConfirmationDialog",
+        _Confirmation,
+    )
+    window = MainWindow(cast(Any, context))
+    qtbot.addWidget(window)
+
+    def queue_sync() -> CancelToken:
+        events.append("queue")
+        return CancelToken()
+
+    cast(Any, window.sync_worker).sync_all_accounts = queue_sync
+    window.start_startup_sync()
+    assert events == ["confirm", "queue"]
+    profile = context.saved[-1].storage_profiles["root-1"]
+    assert isinstance(profile, dict)
+    assert profile.get("first_sync_confirmed_at")
+
+    window._sync_token = None
+    window.start_startup_sync()
+    assert events == ["confirm", "queue", "queue"]
+    window.stop_workers()
+
+
+def test_session_only_password_cancel_does_not_queue_sync(
+    qtbot: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _Context(profile={"encryption": "encrypted", "capability_level": "ok"})
+    context.credential_storage = "session_only"
+
+    class _EmptyCredentialStore(_CredentialStore):
+        def get_password(self, _account_id: str) -> str | None:
+            return None
+
+    context.credential_store = _EmptyCredentialStore()
+    monkeypatch.setattr(
+        "mail_dock.presentation.views.main_window.QInputDialog.getText",
+        lambda *_args, **_kwargs: ("", False),
+    )
+    window = MainWindow(cast(Any, context))
+    qtbot.addWidget(window)
+    queued: list[str] = []
+
+    def queue_sync() -> CancelToken:
+        queued.append("queue")
+        return CancelToken()
+
+    cast(Any, window.sync_worker).sync_all_accounts = queue_sync
+
+    window.start_startup_sync()
+
+    assert queued == []
+    assert window._status_label.text() == strings.STATUS_CREDENTIAL_REQUIRED
+    window.stop_workers()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -24,14 +25,6 @@ from mail_dock.domain.accounts import validate_account_id
 from mail_dock.domain.errors import MailDockError, StorageForeignRootError
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.repository import MessageRecord
-from mail_dock.infrastructure.storage.storage_root import (
-    DriveKind,
-    SpaceStatus,
-    check_free_space,
-    drive_kind,
-    free_space,
-    initialize_root,
-)
 from mail_dock.presentation import strings
 from mail_dock.presentation.errors import present_error
 from mail_dock.presentation.threads.worker import Worker
@@ -42,6 +35,10 @@ from .dialogs.progress_dialog import ProgressDialog
 
 RootContextFactory = Callable[[Path], Any]
 RootCapabilityProbe = Callable[[Path, str], Mapping[str, object]]
+RootInitializer = Callable[[Path], str]
+RootSpaceChecker = Callable[[Path], str]
+RootDriveKindResolver = Callable[[Path], str]
+RootFreeSpaceResolver = Callable[[Path], int]
 
 
 def _text(widget: QLineEdit) -> str:
@@ -65,6 +62,10 @@ class SetupWizard(QWizard):
         expected_root_uuid: str | None = None,
         on_root_confirmed: RootContextFactory | None = None,
         on_root_probe: RootCapabilityProbe | None = None,
+        root_initializer: RootInitializer | None = None,
+        check_root_space: RootSpaceChecker | None = None,
+        resolve_drive_kind: RootDriveKindResolver | None = None,
+        resolve_free_space: RootFreeSpaceResolver | None = None,
     ) -> None:
         super().__init__()
         self.setWindowTitle(strings.WIZARD_TITLE)
@@ -73,6 +74,10 @@ class SetupWizard(QWizard):
         self._expected_root_uuid = expected_root_uuid
         self._on_root_confirmed = on_root_confirmed
         self._on_root_probe = on_root_probe
+        self._root_initializer = root_initializer
+        self._check_root_space = check_root_space
+        self._resolve_drive_kind = resolve_drive_kind
+        self._resolve_free_space = resolve_free_space
         self._root_confirmed = context is not None
         self._worker: Worker | None = None
         self._progress_dialog: ProgressDialog | None = None
@@ -238,20 +243,24 @@ class SetupWizard(QWizard):
             return False
         root = Path(value).expanduser()
         try:
-            marker = initialize_root(root)
             if (
-                self._expected_root_uuid is not None
-                and marker.root_uuid != self._expected_root_uuid
+                self._root_initializer is None
+                or self._check_root_space is None
+                or self._resolve_drive_kind is None
+                or self._resolve_free_space is None
             ):
+                raise MailDockError("Storage root operations are not configured")
+            root_uuid = self._root_initializer(root)
+            if self._expected_root_uuid is not None and root_uuid != self._expected_root_uuid:
                 raise StorageForeignRootError(strings.ERROR_FOREIGN_ROOT)
-            status = check_free_space(root)
+            status = self._check_root_space(root)
         except Exception as error:
             self._show_inline_error(self._root_status, error)
             return False
 
         self._selected_root = root.resolve(strict=False)
-        self._drive_kind_label.setText(_drive_kind_text(drive_kind(root)))
-        self._free_space_label.setText(_format_bytes(free_space(root)))
+        self._drive_kind_label.setText(_drive_kind_text(self._resolve_drive_kind(root)))
+        self._free_space_label.setText(_format_bytes(self._resolve_free_space(root)))
         encryption = self._encryption_declaration()
         if encryption == "unencrypted" and not self._encryption_confirmation.isChecked():
             self._root_status.setText(strings.WIZARD_ENCRYPTION_UNENCRYPTED_CONFIRM_REQUIRED)
@@ -276,7 +285,7 @@ class SetupWizard(QWizard):
         else:
             status_text = (
                 strings.WIZARD_WARNING_SPACE
-                if status is SpaceStatus.WARNING
+                if status == "warning"
                 else strings.WIZARD_STATUS_ROOT_READY
             )
         self._root_status.setText(status_text)
@@ -521,8 +530,8 @@ def _test_connection(
         return None
 
 
-def _drive_kind_text(kind: DriveKind) -> str:
-    return kind.value
+def _drive_kind_text(kind: str | StrEnum) -> str:
+    return kind.value if isinstance(kind, StrEnum) else kind
 
 
 def _capability_text(level: str) -> str:

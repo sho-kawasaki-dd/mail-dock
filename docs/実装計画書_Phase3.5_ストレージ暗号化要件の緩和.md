@@ -363,9 +363,9 @@
 
 #### **F-6. GUIテストの拡張（`gui` マーカー）**
 
-- [ ] `tests/gui/test_setup_wizard.py`: 注入コールバック経由で測定しViewがinfrastructureをimportしないこと、`UNSUPPORTED` で次へ進めないこと、`DEGRADED` では警告付きで進めること、暗号化申告が `config` へ保存されること、`未暗号化` 選択時に確認チェックが必須になること
-- [ ] `tests/gui/test_main_window.py`: ステータスバーへ暗号化状態と適合性が表示されること、初回同期確認がワーカーへのジョブ投入前に1回だけ出て記録されること、`session_only` の資格情報再入力をキャンセルした場合は操作が開始されないこと
-- [ ] `tests/gui/test_settings_dialog.py`: 再申告の保存、資格情報の保存方式の切り替え、`keyring` 不可環境での選択肢無効化、再検査ボタンの動作
+- [x] `tests/gui/test_setup_wizard.py`: 注入コールバック経由で測定しViewがinfrastructureをimportしないこと、`UNSUPPORTED` で次へ進めないこと、`DEGRADED` では警告付きで進めること、暗号化申告が `config` へ保存されること、`未暗号化` 選択時に確認チェックが必須になること
+- [x] `tests/gui/test_main_window.py`: ステータスバーへ暗号化状態と適合性が表示されること、初回同期確認がワーカーへのジョブ投入前に1回だけ出て記録されること、`session_only` の資格情報再入力をキャンセルした場合は操作が開始されないこと
+- [x] `tests/gui/test_settings_dialog.py`: 再申告の保存、資格情報の保存方式の切り替え、`keyring` 不可環境での選択肢無効化、再検査ボタンの動作
 
 ---
 
@@ -427,7 +427,7 @@
 - [ ] V-2. `uv run pytest -m "not docker and not gui"` が全緑になり、既存テストが回帰していない（特に `test_connection.py` / `test_main.py` / `test_config.py`）
 - [ ] V-3. `uv run pytest tests/unit/test_capabilities.py -v` で、全能力の失敗注入ケースが期待どおり `OK` / `DEGRADED` / `UNSUPPORTED` へ分岐する
 - [ ] V-4. セルフテストが Qt を import せず、`gui` マーカー外の通常CIで実行される（F-20）
-- [ ] V-5. GUIテストがローカルで全緑になる（`gui` マーカーのオプトイン実行）
+- [x] V-5. GUIテストがローカルで全緑になる（`gui` マーカーのオプトイン実行）
 - [ ] V-6. 設定の後方互換: schema v1 の既存 `config.json` を持つ環境で起動し、v2 へ無損失アップグレードされ、未知キーが保持される。schema v0 は v0 → v1 → v2 を順に通る（N-4）
 - [ ] V-7. 通常のローカルドライブでウィザードを一周し、セルフテストが `OK`、`journal_mode=WAL` が適用される。セルフテストの所要時間が1秒以内である（N-1）
 - [ ] V-8. UUID・正規化パス・ストレージ指紋が一致する2回目以降の起動ではセルフテストが再実行されず、起動時間が3秒以内を維持する。同じUUIDでもパスまたは指紋が変われば再実行される（N-2 / D-17）
