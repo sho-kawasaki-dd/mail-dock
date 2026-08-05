@@ -19,12 +19,15 @@ from platformdirs import user_config_dir
 
 from mail_dock.domain.errors import ConfigError, ConfigVersionTooNewError
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 CONFIG_FILENAME = "config.json"
 
 REMOTE_DELETE_MODES = frozenset({"trash", "permanent"})
 PURGE_MODES = frozenset({"manual", "grace", "immediate"})
 STARTUP_VERIFICATION_MODES = frozenset({"quick", "full"})
+ENCRYPTION_DECLARATIONS = frozenset({"encrypted", "unencrypted", "unknown"})
+CREDENTIAL_STORAGE_MODES = frozenset({"keyring", "session_only"})
+CAPABILITY_LEVELS = frozenset({"ok", "degraded", "unsupported"})
 
 type JSONValue = str | int | float | bool | list[JSONValue] | dict[str, JSONValue] | None
 
@@ -61,7 +64,11 @@ class AppConfig:
     heartbeat_interval_sec: int = 5
     reprobe_attempts: int = 3
     sync_log_retention_days: int = 90
+    # Phase 4 will warn when the backup destination has weaker encryption and
+    # keep this off by default.
     db_backup_to_local_disk: bool = False
+    storage_profiles: Mapping[str, JSONValue] = field(default_factory=dict)
+    credential_storage: str = "keyring"
     extra: Mapping[str, JSONValue] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -75,11 +82,22 @@ type _ConfigUpgrade = Callable[[dict[str, JSONValue]], dict[str, JSONValue]]
 
 def _upgrade_v0_to_v1(data: dict[str, JSONValue]) -> dict[str, JSONValue]:
     upgraded = dict(data)
-    upgraded["schema_version"] = CURRENT_SCHEMA_VERSION
+    upgraded["schema_version"] = 1
     return upgraded
 
 
-_CONFIG_UPGRADERS: dict[int, _ConfigUpgrade] = {0: _upgrade_v0_to_v1}
+def _upgrade_v1_to_v2(data: dict[str, JSONValue]) -> dict[str, JSONValue]:
+    upgraded = dict(data)
+    upgraded.setdefault("storage_profiles", {})
+    upgraded.setdefault("credential_storage", "keyring")
+    upgraded["schema_version"] = 2
+    return upgraded
+
+
+_CONFIG_UPGRADERS: dict[int, _ConfigUpgrade] = {
+    0: _upgrade_v0_to_v1,
+    1: _upgrade_v1_to_v2,
+}
 
 
 _KNOWN_FIELDS = frozenset(
@@ -101,6 +119,8 @@ _KNOWN_FIELDS = frozenset(
         "reprobe_attempts",
         "sync_log_retention_days",
         "db_backup_to_local_disk",
+        "storage_profiles",
+        "credential_storage",
     }
 )
 
@@ -155,6 +175,66 @@ def _require_mode(value: object, field_name: str, allowed: frozenset[str]) -> st
     return mode
 
 
+def _is_json_value(value: object) -> bool:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return True
+    if isinstance(value, list):
+        return all(_is_json_value(item) for item in value)
+    if isinstance(value, dict):
+        return all(isinstance(key, str) and _is_json_value(item) for key, item in value.items())
+    return False
+
+
+def _validate_storage_profile(profile: dict[str, JSONValue], root_uuid: str) -> None:
+    capabilities = profile.get("capabilities")
+    if capabilities is not None and not isinstance(capabilities, dict):
+        raise _config_error(f"storage_profiles[{root_uuid}].capabilities must be an object")
+
+    capability_level = profile.get("capability_level")
+    if capability_level is not None:
+        _require_mode(
+            capability_level,
+            f"storage_profiles[{root_uuid}].capability_level",
+            CAPABILITY_LEVELS,
+        )
+
+    for field_name in ("checked_path", "storage_fingerprint"):
+        value = profile.get(field_name)
+        if value is not None:
+            _require_string(value, f"storage_profiles[{root_uuid}].{field_name}")
+
+    for field_name in (
+        "capability_ack_at",
+        "encryption_declared_at",
+        "first_sync_confirmed_at",
+    ):
+        _require_optional_string(
+            profile.get(field_name), f"storage_profiles[{root_uuid}].{field_name}"
+        )
+
+    encryption = profile.get("encryption")
+    if encryption is not None:
+        _require_mode(
+            encryption,
+            f"storage_profiles[{root_uuid}].encryption",
+            ENCRYPTION_DECLARATIONS,
+        )
+
+
+def _validated_storage_profiles(value: object) -> Mapping[str, JSONValue]:
+    if not isinstance(value, Mapping):
+        raise _config_error("storage_profiles must be an object")
+    for root_uuid, raw_profile in value.items():
+        if not isinstance(root_uuid, str) or not root_uuid:
+            raise _config_error("storage_profiles keys must be non-empty strings")
+        if not isinstance(raw_profile, dict):
+            raise _config_error(f"storage_profiles[{root_uuid}] must be an object")
+        if not _is_json_value(raw_profile):
+            raise _config_error(f"storage_profiles[{root_uuid}] must contain JSON values")
+        _validate_storage_profile(cast(dict[str, JSONValue], raw_profile), root_uuid)
+    return cast(Mapping[str, JSONValue], value)
+
+
 def _validate_config(config: AppConfig) -> None:
     schema_version = _require_int(config.schema_version, "schema_version")
     if schema_version < 1:
@@ -181,6 +261,8 @@ def _validate_config(config: AppConfig) -> None:
     _require_non_negative(config.reprobe_attempts, "reprobe_attempts")
     _require_non_negative(config.sync_log_retention_days, "sync_log_retention_days")
     _require_bool(config.db_backup_to_local_disk, "db_backup_to_local_disk")
+    _validated_storage_profiles(config.storage_profiles)
+    _require_mode(config.credential_storage, "credential_storage", CREDENTIAL_STORAGE_MODES)
 
 
 def _as_object(value: object) -> dict[str, JSONValue]:
@@ -274,6 +356,14 @@ def _decode(data: dict[str, JSONValue]) -> AppConfig:
             known.get("db_backup_to_local_disk", defaults.db_backup_to_local_disk),
             "db_backup_to_local_disk",
         ),
+        storage_profiles=_validated_storage_profiles(
+            known.get("storage_profiles", defaults.storage_profiles)
+        ),
+        credential_storage=_require_mode(
+            known.get("credential_storage", defaults.credential_storage),
+            "credential_storage",
+            CREDENTIAL_STORAGE_MODES,
+        ),
         extra=extra,
     )
 
@@ -314,6 +404,8 @@ def _encode(config: AppConfig) -> dict[str, JSONValue]:
             "reprobe_attempts": config.reprobe_attempts,
             "sync_log_retention_days": config.sync_log_retention_days,
             "db_backup_to_local_disk": config.db_backup_to_local_disk,
+            "storage_profiles": dict(config.storage_profiles),
+            "credential_storage": config.credential_storage,
         }
     )
     return values
