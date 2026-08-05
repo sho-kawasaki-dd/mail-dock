@@ -14,7 +14,7 @@ from typing import Any
 from PySide6.QtCore import QCoreApplication, QObject, QThread, Signal, Slot
 from PySide6.QtWidgets import QApplication, QDialog
 
-from mail_dock import config
+from mail_dock import config as config
 from mail_dock.__main__ import (
     StorageSession,
     _exit_code,

@@ -149,12 +149,15 @@ def test_degraded_capability_and_unencrypted_declaration_require_confirmation(
         lambda _root: DriveKind.LOCAL,
     )
     declarations: list[str] = []
+
+    def on_root_probe(_root: Path, encryption: str) -> dict[str, object]:
+        declarations.append(encryption)
+        return {"capability_level": "degraded"}
+
     context = _Context()
     wizard = SetupWizard(
         initial_root=tmp_path / "mail-root",
-        on_root_probe=lambda _root, encryption: (
-            declarations.append(encryption) or {"capability_level": "degraded"}
-        ),
+        on_root_probe=on_root_probe,
         on_root_confirmed=lambda _root: context,
     )
     qtbot.addWidget(wizard)

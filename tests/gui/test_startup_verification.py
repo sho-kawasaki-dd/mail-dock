@@ -31,6 +31,7 @@ class _Session:
         self.root = root
         self.network_drive = False
         self.connection_manager = _ConnectionManager()
+        self.journal_mode: str | None = None
 
 
 class _Window:

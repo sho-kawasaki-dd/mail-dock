@@ -25,6 +25,8 @@ def test_app_context_borrows_session_resources_and_builds_thread_local_factories
     monkeypatch.setattr(config, "save", saved.append)
 
     with StorageSession(settings, tmp_storage_root) as session:
+        assert session.capabilities is not None
+        assert session.capability_level is not None
         context = AppContext(session, settings, renderer_factory=lambda: renderer)
 
         assert context.storage_root == session.root

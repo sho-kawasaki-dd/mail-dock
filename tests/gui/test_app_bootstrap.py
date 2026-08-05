@@ -233,10 +233,15 @@ def test_run_gui_acknowledges_unsupported_existing_root_once_and_recreates_sessi
     monkeypatch.setattr(app, "_available_root", lambda _settings, _requested: Path("/attached"))
     monkeypatch.setattr(app, "StorageSession", _FakeSession)
     monkeypatch.setattr(app, "AppContext", _FakeContext)
+
+    def acknowledge(error: StorageUnsupportedError) -> bool:
+        acknowledged.append(error)
+        return True
+
     monkeypatch.setattr(
         app,
         "_confirm_storage_unsupported",
-        lambda error: acknowledged.append(error) or True,
+        acknowledge,
     )
     monkeypatch.setattr(
         app,
