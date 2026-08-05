@@ -291,6 +291,9 @@ class MainWindow(QMainWindow):
         if mode == "session_only":
             self._credential_status_label.setText(strings.STATUS_CREDENTIAL_STORAGE_SESSION_ONLY)
             self._credential_status_label.setVisible(True)
+        else:
+            self._credential_status_label.clear()
+            self._credential_status_label.setVisible(False)
 
     def _prepare_sync(self, account_ids: Sequence[str]) -> bool:
         """Run confirmation and credential gates before queueing a sync."""
@@ -651,6 +654,16 @@ class MainWindow(QMainWindow):
             return
         self.sync_worker.set_sync_options(SyncOptions(max_message_bytes=settings.max_message_bytes))
         self.detail_view.set_block_remote_images(settings.block_remote_images)
+        root_uuid = getattr(self.context, "root_uuid", None)
+        raw_profile = (
+            settings.storage_profiles.get(root_uuid) if isinstance(root_uuid, str) else None
+        )
+        profile = raw_profile if isinstance(raw_profile, dict) else {}
+        self.set_storage_encryption(
+            profile.get("encryption", getattr(self.context, "encryption_declaration", "unknown"))
+        )
+        self.set_storage_capability(getattr(self.context, "capability_level", None))
+        self._set_credential_storage_status(settings.credential_storage)
         self.sync_worker.load_folder_tree()
 
     def _open_log_folder(self) -> None:

@@ -7,7 +7,9 @@ this context only exposes their active lifetime to the presentation layer.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
+from dataclasses import replace
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -21,6 +23,16 @@ from mail_dock.domain.search import BaseSearchRepository
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
 from mail_dock.infrastructure.database.search_repository import SqliteSearchRepository
 from mail_dock.infrastructure.fetchers.onamae_imap import OnamaeImapFetcher
+from mail_dock.infrastructure.security.keyring_store import (
+    KeyringBackendStatus,
+    backend_name,
+    detect_backend,
+)
+from mail_dock.infrastructure.storage.capabilities import (
+    capability_level,
+    probe_capabilities,
+    storage_fingerprint,
+)
 from mail_dock.infrastructure.storage.eml_storage import EmlStorage
 from mail_dock.infrastructure.storage.manifest import ManifestWriter
 from mail_dock.usecases.register_account import load_credentials
@@ -63,6 +75,8 @@ class AppContext:
         )
         self.encryption_declaration = session.encryption_declaration
         self.credential_storage = session.credential_storage_mode
+        self.credential_backend_name = backend_name()
+        self.keyring_supported = detect_backend() is KeyringBackendStatus.SUPPORTED
         self._session = session
         self._renderer_factory = renderer_factory
 
@@ -167,6 +181,42 @@ class AppContext:
         config.save(settings)
         self.settings = settings
         self._session.settings = settings
+
+    def reprobe_storage(self) -> dict[str, object]:
+        """Re-measure the active root and persist its current capability profile."""
+
+        capabilities = probe_capabilities(self.storage_root)
+        level = capability_level(capabilities)
+        checked_path = os.path.normcase(str(self.storage_root.expanduser().resolve(strict=False)))
+        fingerprint = storage_fingerprint(self.storage_root)
+        if self.root_uuid is None:
+            raise ConfigError("Active storage root has no UUID")
+        profiles = dict(self.settings.storage_profiles)
+        raw_profile = profiles.get(self.root_uuid)
+        profile = dict(raw_profile) if isinstance(raw_profile, dict) else {}
+        profile.update(
+            {
+                "capabilities": capabilities.as_dict(),
+                "capability_level": level.value,
+                "checked_path": checked_path,
+                "storage_fingerprint": fingerprint,
+            }
+        )
+        profiles[self.root_uuid] = profile
+        updated = replace(self.settings, storage_profiles=profiles)
+        config.save(updated)
+        self.settings = updated
+        self._session.settings = updated
+        self.capabilities = capabilities.as_dict()
+        self.capability_level = level.value
+        self._session.capabilities = capabilities
+        self._session.capability_level = level
+        return {
+            "capabilities": capabilities.as_dict(),
+            "capability_level": level.value,
+            "checked_path": checked_path,
+            "storage_fingerprint": fingerprint,
+        }
 
     def build_main_window(self) -> Any:
         """Construct the main window through the presentation composition root."""

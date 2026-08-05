@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QStandardItemModel
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -259,8 +260,67 @@ class SettingsDialog(QDialog):
         self._accounts: tuple[MessageRecord, ...] = ()
         self._folders: tuple[MessageRecord, ...] = ()
         self._selected_account_id: str | None = None
+        self._keyring_supported = bool(getattr(context, "keyring_supported", True))
         self._build_ui()
         self._load_accounts()
+
+    def _active_storage_profile(self) -> dict[str, config.JSONValue]:
+        root_uuid = getattr(self._context, "root_uuid", None) or self._settings.storage_root_uuid
+        raw_profile = (
+            self._settings.storage_profiles.get(root_uuid) if isinstance(root_uuid, str) else None
+        )
+        return dict(raw_profile) if isinstance(raw_profile, dict) else {}
+
+    def _encryption_declaration(self) -> str:
+        value = self._encryption_combo.currentData()
+        return value if isinstance(value, str) else "unknown"
+
+    def _credential_storage_mode(self) -> str:
+        value = self._credential_storage_combo.currentData()
+        return value if isinstance(value, str) else "session_only"
+
+    def _set_capability_label(self, level: object) -> None:
+        capability = level.lower() if isinstance(level, str) else "unknown"
+        if capability == "ok":
+            display = "OK"
+        elif capability == "degraded":
+            display = "DEGRADED (制限あり)"
+        elif capability == "unsupported":
+            display = "UNSUPPORTED (非対応)"
+        else:
+            display = capability
+        self._capability_label.setText(f"{strings.SETTINGS_LABEL_STORAGE_CAPABILITY}: {display}")
+
+    def _update_keyring_help(self) -> None:
+        self._keyring_backend_label.setText(
+            f"{strings.SETTINGS_LABEL_KEYRING_BACKEND}: "
+            f"{getattr(self._context, 'credential_backend_name', 'unknown')}"
+        )
+        if self._keyring_supported:
+            self._credential_storage_help.setText("")
+        else:
+            self._credential_storage_help.setText(
+                strings.SETTINGS_WARNING_KEYRING_BACKEND_UNSUPPORTED
+            )
+
+    def _reprobe_storage(self) -> None:
+        reprobe = getattr(self._context, "reprobe_storage", None)
+        if not callable(reprobe):
+            self._folder_status.setText(strings.SETTINGS_STATUS_REPROBE_UNAVAILABLE)
+            return
+        self._reprobe_button.setEnabled(False)
+        self._capability_label.setText(strings.SETTINGS_STATUS_REPROBING_STORAGE)
+        try:
+            result = reprobe()
+        except Exception as error:
+            self._reprobe_button.setEnabled(True)
+            self._capability_label.setText(present_error(error).message)
+            return
+        self._reprobe_button.setEnabled(True)
+        if isinstance(result, Mapping):
+            self._set_capability_label(result.get("capability_level"))
+        self._settings = getattr(self._context, "settings", self._settings)
+        self._folder_status.setText(strings.SETTINGS_STATUS_REPROBE_COMPLETE)
 
     def _build_ui(self) -> None:
         self.setWindowTitle(strings.SETTINGS_TITLE)
@@ -285,6 +345,57 @@ class SettingsDialog(QDialog):
         self._startup_verification.addItem(strings.SETTINGS_VERIFICATION_FULL, "full")
         index = self._startup_verification.findData(self._settings.startup_verification)
         self._startup_verification.setCurrentIndex(max(0, index))
+        self._encryption_combo = QComboBox(settings_group)
+        self._encryption_combo.setObjectName("encryptionDeclarationComboBox")
+        self._encryption_combo.addItem(strings.WIZARD_ENCRYPTION_ENCRYPTED, "encrypted")
+        self._encryption_combo.addItem(strings.WIZARD_ENCRYPTION_UNENCRYPTED, "unencrypted")
+        self._encryption_combo.addItem(strings.WIZARD_ENCRYPTION_UNKNOWN, "unknown")
+        encryption = self._active_storage_profile().get(
+            "encryption",
+            getattr(self._context, "encryption_declaration", "unknown"),
+        )
+        encryption_index = self._encryption_combo.findData(encryption)
+        self._encryption_combo.setCurrentIndex(max(0, encryption_index))
+
+        self._capability_label = QLabel(settings_group)
+        self._capability_label.setObjectName("storageCapabilityLabel")
+        self._set_capability_label(self._active_storage_profile().get("capability_level"))
+        self._reprobe_button = QPushButton(strings.SETTINGS_BUTTON_REPROBE_STORAGE, settings_group)
+        self._reprobe_button.setObjectName("reprobeStorageButton")
+        self._reprobe_button.clicked.connect(self._reprobe_storage)
+
+        self._credential_storage_combo = QComboBox(settings_group)
+        self._credential_storage_combo.setObjectName("credentialStorageComboBox")
+        self._credential_storage_combo.addItem(
+            strings.SETTINGS_CREDENTIAL_STORAGE_KEYRING,
+            "keyring",
+        )
+        self._credential_storage_combo.addItem(
+            strings.SETTINGS_CREDENTIAL_STORAGE_SESSION_ONLY,
+            "session_only",
+        )
+        if not self._keyring_supported:
+            keyring_index = self._credential_storage_combo.findData("keyring")
+            model = cast(QStandardItemModel, self._credential_storage_combo.model())
+            if keyring_index >= 0:
+                model.item(keyring_index).setEnabled(False)
+        credential_storage = getattr(
+            self._context,
+            "credential_storage",
+            self._settings.credential_storage,
+        )
+        credential_index = self._credential_storage_combo.findData(credential_storage)
+        if credential_index < 0 or (
+            not self._keyring_supported and credential_storage == "keyring"
+        ):
+            credential_index = self._credential_storage_combo.findData("session_only")
+        self._credential_storage_combo.setCurrentIndex(max(0, credential_index))
+        self._credential_storage_help = QLabel(settings_group)
+        self._credential_storage_help.setWordWrap(True)
+        self._keyring_backend_label = QLabel(settings_group)
+        self._keyring_backend_label.setObjectName("keyringBackendLabel")
+        self._update_keyring_help()
+
         settings_form.addRow(strings.SETTINGS_LABEL_MAX_MESSAGE_SIZE, self._max_message_size)
         settings_form.addRow(strings.SETTINGS_LABEL_BLOCK_REMOTE_IMAGES, self._block_remote_images)
         settings_form.addRow(strings.SETTINGS_LABEL_SYNC_ON_STARTUP, self._sync_on_startup)
@@ -292,6 +403,17 @@ class SettingsDialog(QDialog):
             strings.SETTINGS_LABEL_STARTUP_VERIFICATION,
             self._startup_verification,
         )
+        settings_form.addRow(strings.SETTINGS_LABEL_ENCRYPTION, self._encryption_combo)
+        capability_controls = QHBoxLayout()
+        capability_controls.addWidget(self._capability_label, 1)
+        capability_controls.addWidget(self._reprobe_button)
+        settings_form.addRow(capability_controls)
+        settings_form.addRow(
+            strings.SETTINGS_LABEL_CREDENTIAL_STORAGE,
+            self._credential_storage_combo,
+        )
+        settings_form.addRow(self._keyring_backend_label)
+        settings_form.addRow(self._credential_storage_help)
         layout.addWidget(settings_group)
 
         accounts_group = QGroupBox(strings.SETTINGS_GROUP_ACCOUNTS, self)
@@ -524,12 +646,25 @@ class SettingsDialog(QDialog):
         if startup_verification not in config.STARTUP_VERIFICATION_MODES:
             startup_verification = self._settings.startup_verification
         startup_verification = cast(str, startup_verification)
+        storage_profiles = dict(self._settings.storage_profiles)
+        root_uuid = getattr(self._context, "root_uuid", None) or self._settings.storage_root_uuid
+        if isinstance(root_uuid, str) and root_uuid:
+            profile = self._active_storage_profile()
+            profile.update(
+                {
+                    "encryption": self._encryption_declaration(),
+                    "encryption_declared_at": datetime.now(UTC).isoformat(),
+                }
+            )
+            storage_profiles[root_uuid] = profile
         return replace(
             self._settings,
             max_message_bytes=self._max_message_size.value() * _MEGABYTE,
             block_remote_images=self._block_remote_images.isChecked(),
             sync_on_startup=self._sync_on_startup.isChecked(),
             startup_verification=startup_verification,
+            storage_profiles=storage_profiles,
+            credential_storage=self._credential_storage_mode(),
         )
 
     def _save_settings(self) -> bool:
