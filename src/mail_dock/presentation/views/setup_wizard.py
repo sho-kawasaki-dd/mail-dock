@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QFormLayout,
     QLabel,
@@ -40,6 +41,7 @@ from mail_dock.usecases.sync_folders import refresh_folders, set_sync_target
 from .dialogs.progress_dialog import ProgressDialog
 
 RootContextFactory = Callable[[Path], Any]
+RootCapabilityProbe = Callable[[Path, str], Mapping[str, object]]
 
 
 def _text(widget: QLineEdit) -> str:
@@ -62,6 +64,7 @@ class SetupWizard(QWizard):
         context: Any | None = None,
         expected_root_uuid: str | None = None,
         on_root_confirmed: RootContextFactory | None = None,
+        on_root_probe: RootCapabilityProbe | None = None,
     ) -> None:
         super().__init__()
         self.setWindowTitle(strings.WIZARD_TITLE)
@@ -69,6 +72,7 @@ class SetupWizard(QWizard):
         self._context = context
         self._expected_root_uuid = expected_root_uuid
         self._on_root_confirmed = on_root_confirmed
+        self._on_root_probe = on_root_probe
         self._root_confirmed = context is not None
         self._worker: Worker | None = None
         self._progress_dialog: ProgressDialog | None = None
@@ -106,14 +110,56 @@ class SetupWizard(QWizard):
 
         self._drive_kind_label = QLabel("-")
         self._free_space_label = QLabel("-")
-        self._encryption_label = QLabel(strings.WIZARD_WARNING_ENCRYPTION_UNKNOWN)
+        self._encryption_combo = QComboBox()
+        self._encryption_combo.addItem(
+            strings.WIZARD_ENCRYPTION_ENCRYPTED,
+            "encrypted",
+        )
+        self._encryption_combo.addItem(
+            strings.WIZARD_ENCRYPTION_UNENCRYPTED,
+            "unencrypted",
+        )
+        self._encryption_combo.addItem(
+            strings.WIZARD_ENCRYPTION_UNKNOWN,
+            "unknown",
+        )
+        self._encryption_combo.setCurrentIndex(2)
+        self._encryption_combo.currentIndexChanged.connect(
+            self._update_encryption_confirmation
+        )
+        encryption_help = QLabel(strings.WIZARD_ENCRYPTION_DECLARATION_HELP)
+        encryption_help.setWordWrap(True)
+        self._encryption_confirmation = QCheckBox(
+            strings.WIZARD_ENCRYPTION_UNENCRYPTED_CONFIRM_REQUIRED
+        )
+        self._encryption_confirmation.toggled.connect(self._update_root_page_state)
+        self._update_encryption_confirmation()
+        self._capability_label = QLabel("-")
+        self._capability_label.setWordWrap(True)
         self._root_status = QLabel()
         self._root_status.setWordWrap(True)
         layout.addRow(strings.WIZARD_LABEL_DRIVE_KIND, self._drive_kind_label)
         layout.addRow(strings.WIZARD_LABEL_FREE_SPACE, self._free_space_label)
-        layout.addRow(strings.WIZARD_LABEL_ENCRYPTION, self._encryption_label)
+        layout.addRow(strings.WIZARD_LABEL_ENCRYPTION, self._encryption_combo)
+        layout.addRow(encryption_help)
+        layout.addRow(self._encryption_confirmation)
+        layout.addRow(strings.WIZARD_LABEL_STORAGE_CAPABILITY, self._capability_label)
         layout.addRow(self._root_status)
         self._root_page_id = self.addPage(self._root_page)
+
+    def _encryption_declaration(self) -> str:
+        value = self._encryption_combo.currentData()
+        return value if isinstance(value, str) else "unknown"
+
+    def _update_encryption_confirmation(self, *_args: object) -> None:
+        required = self._encryption_declaration() == "unencrypted"
+        self._encryption_confirmation.setVisible(required)
+        self._encryption_confirmation.setEnabled(required)
+        if not required:
+            self._encryption_confirmation.setChecked(False)
+
+    def _update_root_page_state(self, *_args: object) -> None:
+        self._root_page.completeChanged.emit()
 
     def _build_account_page(self) -> None:
         self._account_page = QWizardPage()
@@ -208,12 +254,34 @@ class SetupWizard(QWizard):
         self._selected_root = root.resolve(strict=False)
         self._drive_kind_label.setText(_drive_kind_text(drive_kind(root)))
         self._free_space_label.setText(_format_bytes(free_space(root)))
-        self._encryption_label.setText(strings.WIZARD_WARNING_ENCRYPTION_UNKNOWN)
-        self._root_status.setText(
-            strings.WIZARD_WARNING_SPACE
-            if status is SpaceStatus.WARNING
-            else strings.WIZARD_STATUS_ROOT_READY
-        )
+        encryption = self._encryption_declaration()
+        if encryption == "unencrypted" and not self._encryption_confirmation.isChecked():
+            self._root_status.setText(strings.WIZARD_ENCRYPTION_UNENCRYPTED_CONFIRM_REQUIRED)
+            return False
+        capability_level = None
+        if self._on_root_probe is not None:
+            try:
+                result = self._on_root_probe(self._selected_root, encryption)
+                capability_level = result.get("capability_level")
+                if not isinstance(capability_level, str):
+                    raise MailDockError("Storage capability result is invalid")
+            except Exception as error:
+                self._show_inline_error(self._root_status, error)
+                return False
+            self._capability_label.setText(_capability_text(capability_level))
+            if capability_level == "unsupported":
+                self._root_status.setText(strings.WIZARD_CAPABILITY_UNSUPPORTED_DESCRIPTION)
+                return False
+
+        if capability_level == "degraded":
+            status_text = strings.WIZARD_CAPABILITY_DEGRADED_DESCRIPTION
+        else:
+            status_text = (
+                strings.WIZARD_WARNING_SPACE
+                if status is SpaceStatus.WARNING
+                else strings.WIZARD_STATUS_ROOT_READY
+            )
+        self._root_status.setText(status_text)
         if not self._root_confirmed and self._on_root_confirmed is not None:
             try:
                 self._context = self._on_root_confirmed(self._selected_root)
@@ -457,6 +525,15 @@ def _test_connection(
 
 def _drive_kind_text(kind: DriveKind) -> str:
     return kind.value
+
+
+def _capability_text(level: str) -> str:
+    labels = {
+        "ok": strings.WIZARD_CAPABILITY_OK,
+        "degraded": strings.WIZARD_CAPABILITY_DEGRADED,
+        "unsupported": strings.WIZARD_CAPABILITY_UNSUPPORTED,
+    }
+    return labels.get(level, level)
 
 
 def _format_bytes(value: int) -> str:

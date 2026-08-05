@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from mail_dock.infrastructure.storage.storage_root import DriveKind, SpaceStatus
+from mail_dock.presentation import strings
 from mail_dock.presentation.views.setup_wizard import SetupWizard
 
 pytestmark = pytest.mark.gui
@@ -97,3 +98,75 @@ def test_folder_validation_requires_selection_and_persists_selected_targets(qtbo
         ("account-1", "INBOX", False),
         ("account-1", "Archive", True),
     ]
+
+
+def test_unsupported_capability_blocks_root_confirmation(
+    tmp_path: Path,
+    qtbot: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "mail_dock.presentation.views.setup_wizard.check_free_space",
+        lambda _root: SpaceStatus.OK,
+    )
+    monkeypatch.setattr(
+        "mail_dock.presentation.views.setup_wizard.free_space",
+        lambda _root: 1024 * 1024 * 1024,
+    )
+    monkeypatch.setattr(
+        "mail_dock.presentation.views.setup_wizard.drive_kind",
+        lambda _root: DriveKind.LOCAL,
+    )
+    confirmed: list[Path] = []
+    wizard = SetupWizard(
+        initial_root=tmp_path / "mail-root",
+        on_root_confirmed=lambda root: confirmed.append(root),
+        on_root_probe=lambda _root, _encryption: {"capability_level": "unsupported"},
+    )
+    qtbot.addWidget(wizard)
+    wizard.show()
+
+    assert not wizard.validateCurrentPage()
+    assert wizard._capability_label.text() == strings.WIZARD_CAPABILITY_UNSUPPORTED
+    assert confirmed == []
+
+
+def test_degraded_capability_and_unencrypted_declaration_require_confirmation(
+    tmp_path: Path,
+    qtbot: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "mail_dock.presentation.views.setup_wizard.check_free_space",
+        lambda _root: SpaceStatus.OK,
+    )
+    monkeypatch.setattr(
+        "mail_dock.presentation.views.setup_wizard.free_space",
+        lambda _root: 1024 * 1024 * 1024,
+    )
+    monkeypatch.setattr(
+        "mail_dock.presentation.views.setup_wizard.drive_kind",
+        lambda _root: DriveKind.LOCAL,
+    )
+    declarations: list[str] = []
+    context = _Context()
+    wizard = SetupWizard(
+        initial_root=tmp_path / "mail-root",
+        on_root_probe=lambda _root, encryption: (
+            declarations.append(encryption) or {"capability_level": "degraded"}
+        ),
+        on_root_confirmed=lambda _root: context,
+    )
+    qtbot.addWidget(wizard)
+    wizard.show()
+    wizard._encryption_combo.setCurrentIndex(1)
+
+    assert not wizard.validateCurrentPage()
+    assert declarations == []
+    assert wizard._encryption_confirmation.isVisible()
+
+    wizard._encryption_confirmation.setChecked(True)
+    assert wizard.validateCurrentPage()
+    assert declarations == ["unencrypted"]
+    assert wizard._capability_label.text() == strings.WIZARD_CAPABILITY_DEGRADED
+    assert wizard._root_status.text() == strings.WIZARD_CAPABILITY_DEGRADED_DESCRIPTION

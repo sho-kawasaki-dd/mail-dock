@@ -7,6 +7,7 @@ import pytest
 
 from mail_dock import config
 from mail_dock.domain.errors import StorageUnsupportedError
+from mail_dock.infrastructure.storage.capabilities import CapabilityLevel, StorageCapabilities
 from mail_dock.presentation import app
 
 pytestmark = pytest.mark.gui
@@ -136,6 +137,38 @@ def test_run_gui_starts_session_only_after_root_confirmation(
     assert _FakeSession.instances[0].exit_calls == 1
     assert _FakeContext.instances[0].save_calls == 1
     assert window.stop_calls == 1
+
+
+def test_setup_root_probe_persists_capabilities_and_encryption_declaration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = config.AppConfig()
+    saved: list[config.AppConfig] = []
+    capabilities = StorageCapabilities(
+        exclusive_lock=True,
+        replace_overwrite=True,
+        wal_supported=False,
+        fsync_supported=True,
+        case_sensitive=True,
+        long_path_ok=True,
+        checked_at="2026-08-05T00:00:00+00:00",
+    )
+    monkeypatch.setattr(app, "probe_capabilities", lambda _root: capabilities)
+    monkeypatch.setattr(app, "capability_level", lambda _capabilities: CapabilityLevel.DEGRADED)
+    monkeypatch.setattr(app, "storage_fingerprint", lambda _root: "device:1")
+    monkeypatch.setattr(app.config, "save", saved.append)
+    monkeypatch.setattr(app.config, "load", lambda: saved[-1])
+
+    loaded, result = app._probe_setup_root(settings, tmp_path / "root", "unknown")
+
+    assert result["capability_level"] == "degraded"
+    assert result["encryption"] == "unknown"
+    assert loaded.storage_root_uuid is not None
+    profile = loaded.storage_profiles[loaded.storage_root_uuid]
+    assert isinstance(profile, dict)
+    assert profile["capability_level"] == "degraded"
+    assert profile["encryption"] == "unknown"
 
 
 def test_run_gui_cancelled_wizard_does_not_create_session(

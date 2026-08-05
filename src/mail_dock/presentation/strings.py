@@ -51,6 +51,10 @@ WIZARD_ENCRYPTION_UNENCRYPTED_DESCRIPTION = (
 WIZARD_ENCRYPTION_UNKNOWN_DESCRIPTION = (
     "暗号化状態がわからない保管先です。暗号化の有無を確認できないまま使用します。"
 )
+WIZARD_ENCRYPTION_UNENCRYPTED_CONFIRM_REQUIRED = (
+    "暗号化されていない保管先で続行するには、確認チェックボックスを選択してください。"
+)
+WIZARD_STATUS_TESTING_STORAGE = "ストレージの適合性を確認しています..."
 WIZARD_LABEL_STORAGE_CAPABILITY = "ストレージ適合性"
 WIZARD_CAPABILITY_OK = "OK"
 WIZARD_CAPABILITY_DEGRADED = "DEGRADED (制限あり)"
@@ -60,7 +64,9 @@ WIZARD_CAPABILITY_DEGRADED_DESCRIPTION = (
     "一部の永続性またはSQLite機能を確認できません。続行できますが、注意が必要です。"
 )
 WIZARD_CAPABILITY_UNSUPPORTED_DESCRIPTION = (
-    "排他ロックまたは既存ファイルへの上書き配置を確認できません。次へ進めません。"
+    "排他ロックまたは既存ファイルへの上書き配置を確認できません。"
+    "ファイル単位暗号化ツールや仮想ファイルシステム上の保管先でないか確認してください。"
+    "次へ進めません。"
 )
 WIZARD_STATUS_ROOT_READY = "保存先を確認しました。"
 WIZARD_STATUS_TESTING_CONNECTION = "接続をテストしています..."

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,7 +27,18 @@ from mail_dock.domain.errors import (
     StorageForeignRootError,
     StorageUnsupportedError,
 )
-from mail_dock.infrastructure.storage.storage_root import RootProbe, resolve_root
+from mail_dock.infrastructure.storage.capabilities import (
+    capability_level,
+    probe_capabilities,
+    storage_fingerprint,
+)
+from mail_dock.infrastructure.storage.eml_storage import cleanup_tmp
+from mail_dock.infrastructure.storage.storage_root import (
+    RootProbe,
+    ensure_layout,
+    initialize_root,
+    resolve_root,
+)
 from mail_dock.presentation import strings
 from mail_dock.presentation.context import AppContext
 from mail_dock.presentation.views.dialogs.confirmation_dialog import ConfirmationDialog
@@ -103,6 +116,54 @@ def _acknowledge_storage_unsupported(
     return config.load()
 
 
+def _probe_setup_root(
+    settings: config.AppConfig,
+    root: Path,
+    encryption: str,
+) -> tuple[config.AppConfig, dict[str, object]]:
+    """Probe a newly selected root and persist its primitive result."""
+
+    marker = initialize_root(root)
+    ensure_layout(root)
+    cleanup_tmp(root)
+    checked_path = _normalized_storage_path(root)
+    fingerprint = storage_fingerprint(root)
+    capabilities = probe_capabilities(root)
+    level = capability_level(capabilities)
+    profiles = dict(settings.storage_profiles)
+    raw_profile = profiles.get(marker.root_uuid)
+    profile = dict(raw_profile) if isinstance(raw_profile, dict) else {}
+    profile.update(
+        {
+            "capabilities": capabilities.as_dict(),
+            "capability_level": level.value,
+            "checked_path": checked_path,
+            "storage_fingerprint": fingerprint,
+            "encryption": encryption,
+            "encryption_declared_at": datetime.now(UTC).isoformat(),
+        }
+    )
+    profiles[marker.root_uuid] = profile
+    updated = replace(
+        settings,
+        storage_root_uuid=marker.root_uuid,
+        storage_root_candidates=(checked_path,),
+        storage_profiles=profiles,
+    )
+    config.save(updated)
+    return config.load(), {
+        "capabilities": capabilities.as_dict(),
+        "capability_level": level.value,
+        "checked_path": checked_path,
+        "storage_fingerprint": fingerprint,
+        "encryption": encryption,
+    }
+
+
+def _normalized_storage_path(root: Path) -> str:
+    return os.path.normcase(str(root.expanduser().resolve(strict=False)))
+
+
 def _stop_window(window: Any, context: AppContext | None) -> None:
     stop_workers = getattr(window, "stop_workers", None)
     if callable(stop_workers):
@@ -172,6 +233,15 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
         setup_wizard: SetupWizard | None = None
         if root is None:
 
+            def probe_root(selected_root: Path, encryption: str) -> Mapping[str, object]:
+                nonlocal active_settings
+                active_settings, result = _probe_setup_root(
+                    active_settings,
+                    selected_root,
+                    encryption,
+                )
+                return result
+
             def start_session(selected_root: Path) -> AppContext:
                 nonlocal session, context
                 session = StorageSession(active_settings, selected_root)
@@ -189,6 +259,7 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
                 initial_root=requested_root,
                 expected_root_uuid=active_settings.storage_root_uuid,
                 on_root_confirmed=start_session,
+                on_root_probe=probe_root,
             )
             if setup_wizard.exec() != QDialog.DialogCode.Accepted:
                 return 0

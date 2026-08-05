@@ -286,14 +286,14 @@
 
 #### **E-2. `presentation/views/setup_wizard.py` — ルートページの拡張（*E-1 に依存*）**
 
-- [ ] `presentation/app.py` から注入されたコールバックを `_validate_root` で呼び、プリミティブ値だけの測定結果を新設の `_capability_label` へ表示する。Viewから `infrastructure.storage.capabilities` を直接importしない
-- [ ] 注入コールバックはルートを測定し、`capabilities` / `capability_level` / `checked_path` / `storage_fingerprint` と暗号化申告を `config.json` へ保存する。新規ルートの `UNSUPPORTED` は保存後もセッションを開始しない
-- [ ] `UNSUPPORTED` の場合は `_on_root_confirmed` を呼ばず `False` を返し、**次のページへ進ませない**（D-5）。理由と対処（ファイル単位暗号化ツール上ではないかの確認）をインラインで提示する
-- [ ] `DEGRADED` の場合は警告を表示したうえで続行を許可する
-- [ ] 暗号化申告用の `QComboBox`（暗号化済み / 未暗号化 / わからない）を追加する
-- [ ] `未暗号化` を選択した場合のみ、確認チェックボックス（「暗号化されていないことを理解しました」）のチェックを必須にする
-- [ ] `_encryption_label` の固定文言表示を廃止し、申告結果とセルフテスト結果を `config.storage_profiles` へ保存する
-- [ ] `drive_kind()` / `free_space()` の既存表示はそのまま維持する（D-7）
+- [x] `presentation/app.py` から注入されたコールバックを `_validate_root` で呼び、プリミティブ値だけの測定結果を新設の `_capability_label` へ表示する。Viewから `infrastructure.storage.capabilities` を直接importしない
+- [x] 注入コールバックはルートを測定し、`capabilities` / `capability_level` / `checked_path` / `storage_fingerprint` と暗号化申告を `config.json` へ保存する。新規ルートの `UNSUPPORTED` は保存後もセッションを開始しない
+- [x] `UNSUPPORTED` の場合は `_on_root_confirmed` を呼ばず `False` を返し、**次のページへ進ませない**（D-5）。理由と対処（ファイル単位暗号化ツール上ではないかの確認）をインラインで提示する
+- [x] `DEGRADED` の場合は警告を表示したうえで続行を許可する
+- [x] 暗号化申告用の `QComboBox`（暗号化済み / 未暗号化 / わからない）を追加する
+- [x] `未暗号化` を選択した場合のみ、確認チェックボックス（「暗号化されていないことを理解しました」）のチェックを必須にする
+- [x] `_encryption_label` の固定文言表示を廃止し、申告結果とセルフテスト結果を `config.storage_profiles` へ保存する
+- [x] `drive_kind()` / `free_space()` の既存表示はそのまま維持する（D-7）
 
 #### **E-3. `presentation/views/main_window.py` — ステータス常時表示と初回同期確認（*E-1 に依存*）**
 
