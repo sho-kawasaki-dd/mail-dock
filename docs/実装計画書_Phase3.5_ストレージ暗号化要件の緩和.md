@@ -277,12 +277,12 @@
 
 #### **E-1. `presentation/strings.py` — 文言の追加**
 
-- [ ] 暗号化申告の3値ラベルと説明文を追加する
-- [ ] セルフテスト結果（`OK` / `DEGRADED` / `UNSUPPORTED`）の表示文言を追加する
-- [ ] `UNSUPPORTED` の続行確認ダイアログ本文（何が保証できなくなるかを具体的に記述）を追加する
-- [ ] 未暗号化での初回同期確認ダイアログ本文を追加する
-- [ ] keyring バックエンド警告と `session_only` の説明文を追加する
-- [ ] 既存の `WIZARD_WARNING_ENCRYPTION_UNKNOWN` / `WIZARD_ENCRYPTION_UNKNOWN` を新しい3値モデルの文言へ置き換える
+- [x] 暗号化申告の3値ラベルと説明文を追加する
+- [x] セルフテスト結果（`OK` / `DEGRADED` / `UNSUPPORTED`）の表示文言を追加する
+- [x] `UNSUPPORTED` の続行確認ダイアログ本文（何が保証できなくなるかを具体的に記述）を追加する
+- [x] 未暗号化での初回同期確認ダイアログ本文を追加する
+- [x] keyring バックエンド警告と `session_only` の説明文を追加する
+- [x] 既存の `WIZARD_WARNING_ENCRYPTION_UNKNOWN` / `WIZARD_ENCRYPTION_UNKNOWN` を新しい3値モデルの文言へ置き換える
 
 #### **E-2. `presentation/views/setup_wizard.py` — ルートページの拡張（*E-1 に依存*）**
 

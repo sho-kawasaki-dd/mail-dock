@@ -26,14 +26,42 @@ WIZARD_BUTTON_FINISH = "完了"
 WIZARD_BUTTON_CANCEL = "キャンセル"
 WIZARD_DIALOG_SELECT_ROOT = "ストレージルートを選択"
 WIZARD_WARNING_ENCRYPTION_UNKNOWN = (
-    "暗号化状態が確認できません。BitLocker To Go で暗号化されていることを確認してください。"
+    "暗号化状態は自動検出していません。保管先の暗号化状態を申告してください。"
+)
+WIZARD_WARNING_ENCRYPTION_UNENCRYPTED = (
+    "この保管先は暗号化されていないと申告されています。メールデータが保護されない可能性があります。"
 )
 WIZARD_WARNING_INSUFFICIENT_SPACE = "空き容量が不足しています。"
 WIZARD_WARNING_SPACE = "空き容量が少なくなっています。"
 WIZARD_LABEL_DRIVE_KIND = "ドライブ種別"
 WIZARD_LABEL_FREE_SPACE = "空き容量"
-WIZARD_LABEL_ENCRYPTION = "暗号化"
-WIZARD_ENCRYPTION_UNKNOWN = "確認できません"
+WIZARD_LABEL_ENCRYPTION = "保管先の暗号化状態 (申告)"
+WIZARD_ENCRYPTION_ENCRYPTED = "暗号化済み"
+WIZARD_ENCRYPTION_UNENCRYPTED = "未暗号化"
+WIZARD_ENCRYPTION_UNKNOWN = "わからない"
+WIZARD_ENCRYPTION_DECLARATION_HELP = (
+    "暗号化状態は自動検出せず、ユーザーの申告として記録します。"
+)
+WIZARD_ENCRYPTION_ENCRYPTED_DESCRIPTION = (
+    "BitLocker To Go、VeraCrypt、LUKS、APFS暗号化などで保護された保管先です。"
+)
+WIZARD_ENCRYPTION_UNENCRYPTED_DESCRIPTION = (
+    "暗号化されていない保管先です。紛失・盗難時にメールデータを保護できません。"
+)
+WIZARD_ENCRYPTION_UNKNOWN_DESCRIPTION = (
+    "暗号化状態がわからない保管先です。暗号化の有無を確認できないまま使用します。"
+)
+WIZARD_LABEL_STORAGE_CAPABILITY = "ストレージ適合性"
+WIZARD_CAPABILITY_OK = "OK"
+WIZARD_CAPABILITY_DEGRADED = "DEGRADED (制限あり)"
+WIZARD_CAPABILITY_UNSUPPORTED = "UNSUPPORTED (非対応)"
+WIZARD_CAPABILITY_OK_DESCRIPTION = "必須のファイル操作を確認しました。"
+WIZARD_CAPABILITY_DEGRADED_DESCRIPTION = (
+    "一部の永続性またはSQLite機能を確認できません。続行できますが、注意が必要です。"
+)
+WIZARD_CAPABILITY_UNSUPPORTED_DESCRIPTION = (
+    "排他ロックまたは既存ファイルへの上書き配置を確認できません。次へ進めません。"
+)
 WIZARD_STATUS_ROOT_READY = "保存先を確認しました。"
 WIZARD_STATUS_TESTING_CONNECTION = "接続をテストしています..."
 WIZARD_STATUS_CONNECTION_OK = "接続に成功しました。"
@@ -52,6 +80,7 @@ MAIN_MENU_EXIT = "終了"
 MAIN_MENU_VIEW = "表示"
 MAIN_MENU_THREAD_VIEW = "スレッド表示"
 MAIN_MENU_HELP = "ヘルプ"
+MAIN_MENU_HELP_ENCRYPTION = "保管先の暗号化について"
 MAIN_MENU_OPEN_LOG_FOLDER = "ログフォルダを開く"
 MAIN_TOOLBAR_SYNC = "同期"
 MAIN_TOOLBAR_REFRESH_FOLDERS = "フォルダを再取得"
@@ -154,9 +183,14 @@ RECOVERY_RETRY = "しばらく待ってから再試行してください。"
 
 DIALOG_CONFIRM_TITLE = "確認"
 DIALOG_CONFIRM_STORAGE_UNSUPPORTED = (
-    "この保管先では排他ロックまたは既存ファイルへの上書き配置を保証できません。\n"
-    "同期中にデータ破損や同時実行による不整合が発生する可能性があります。\n"
-    "安全性を確認できない保管先で続行しますか?"
+    "この保管先では排他ロックまたは既存ファイルへの上書き配置が成立しません。\n"
+    "メール保存の原子性や同時実行時の整合性を保証できず、データが破損する可能性があります。\n"
+    "この保管先で続行しますか?"
+)
+DIALOG_CONFIRM_FIRST_SYNC_WITHOUT_ENCRYPTION = (
+    "保管先は暗号化されていない、または暗号化状態がわからないと申告されています。\n"
+    "暗号化されていない保管先では、ドライブの紛失・盗難時にメールデータを保護できません。\n"
+    "この保管先への初回同期を開始しますか?"
 )
 DIALOG_CONFIRM_EXTERNAL_LINK = "外部ブラウザでこのリンクを開きますか?\n{url}"
 DIALOG_CONFIRM_SAVE_EXECUTABLE = (
@@ -175,6 +209,25 @@ SETTINGS_LABEL_MAX_MESSAGE_SIZE = "1通あたりサイズ上限 (MB)"
 SETTINGS_LABEL_BLOCK_REMOTE_IMAGES = "外部画像をブロック"
 SETTINGS_LABEL_SYNC_ON_STARTUP = "起動時に同期"
 SETTINGS_LABEL_STARTUP_VERIFICATION = "起動時の整合性チェック"
+SETTINGS_LABEL_ENCRYPTION = "保管先の暗号化状態 (申告)"
+SETTINGS_LABEL_CREDENTIAL_STORAGE = "資格情報の保存方式"
+SETTINGS_LABEL_KEYRING_BACKEND = "keyringバックエンド"
+SETTINGS_CREDENTIAL_STORAGE_KEYRING = "keyring (OSの資格情報ストア)"
+SETTINGS_CREDENTIAL_STORAGE_SESSION_ONLY = "session_only (このプロセスのメモリのみ)"
+SETTINGS_CREDENTIAL_STORAGE_SESSION_ONLY_HELP = (
+    "資格情報はファイルやデータベースへ保存せず、このプロセスのメモリにだけ保持します。"
+    "アプリを終了すると再入力が必要です。"
+)
+SETTINGS_WARNING_KEYRING_BACKEND_UNSUPPORTED = (
+    "現在のkeyringバックエンドは許可されていないため、資格情報を保存できません。"
+    "session_onlyを使用してください。"
+)
+SETTINGS_STATUS_KEYRING_BACKEND_UNAVAILABLE = (
+    "許可されたkeyringバックエンドを利用できないため、session_onlyへ切り替えました。"
+)
+STATUS_STORAGE_CAPABILITY = "ストレージ適合性: {level}"
+STATUS_STORAGE_ENCRYPTION = "暗号化: {state} (申告)"
+STATUS_CREDENTIAL_STORAGE_SESSION_ONLY = "資格情報: session_only (このプロセスのメモリのみ)"
 SETTINGS_VERIFICATION_QUICK = "簡易"
 SETTINGS_VERIFICATION_FULL = "完全"
 SETTINGS_BUTTON_OK = "OK"
