@@ -35,7 +35,7 @@ Phase 1 以降（IMAPコア / 検索 / GUI / 切断対応 / PSTアーカイブ�
 | D-6 | storage_root | **最小版を Phase 0 に含める**（`.maildock_root` のUUID照合・`.lock`・I/O例外分類）。状態機械・デバイス監視は Phase 4 |
 | D-7 | 設定ファイル | `platformdirs` 配下に **JSON**（`config.json`、原子的書き込み、`schema_version` 付き） |
 | D-8 | 静的解析 | ruff `E,F,I,N,UP,B,SIM,PTH,RUF` + formatter、line-length 100 / **mypy `strict = true`**（`presentation` 層のみ緩和） |
-| D-9 | `metadata.db.bak` の内蔵ディスク複製 | **Phase 0 では `AppConfig` に設定項目の枠だけ定義**し、実処理は Phase 4。既定はOFF（C:のBitLocker有効時のみの明示的オプトイン） |
+| D-9 | `metadata.db.bak` の内蔵ディスク複製 | **Phase 0 では `AppConfig` に設定項目の枠だけ定義**し、実処理は Phase 4。複製先の暗号化状態が保管元より弱い場合は警告し、既定はOFFとする |
 | D-10 | CLI | `--storage-root` / `--debug` / `--version` の最小 argparse に加え、**`migrate` / `verify` をサブコマンドとして常設**する（将来GUI起動が既定になっても残す） |
 
 ### **2.2 機能要件**
@@ -120,7 +120,7 @@ tests/unit/ tests/integration/ tests/support/ tests/fixtures/eml/ tests/docker/
 - [x] `THIRD-PARTY-LICENSES.md` を作成し、PySide6(Qt) / keyring / beautifulsoup4 / charset-normalizer / platformdirs の欄を用意する（readpst欄は Phase 4.5 で追記する旨をコメントで明記）
 - [x] `README.md` に以下を記載する
   - [x] プロジェクトの目的と概要
-  - [x] **前提条件: ストレージルートの BitLocker To Go による暗号化（5.3）**
+  - [x] **保管先の暗号化: BitLocker To Go 等のブロックレベル暗号化を推奨し、暗号化なしもユーザー申告のうえで許可する3層モデル（5.3）**
   - [x] **バックアップ方針: 3-2-1ルールの推奨とドライブ丸ごとコピーで完結する構造（5.7）**
   - [x] 開発セットアップ手順（`uv sync` / `uv run ruff check .` / `uv run mypy` / `uv run pytest -m "not docker"`）
   - [x] WSL上でのDockerテスト手順
@@ -196,7 +196,7 @@ MailDockError
 | `heartbeat_interval_sec: int` | `5` |
 | `reprobe_attempts: int` | `3` |
 | `sync_log_retention_days: int` | `90` |
-| `db_backup_to_local_disk: bool` | `False` ※D-9。**枠のみ定義し Phase 0 では未使用** |
+| `db_backup_to_local_disk: bool` | `False` ※D-9。**枠のみ定義し Phase 0 では未使用。複製先の暗号化状態が保管元より弱い場合は警告し、既定でOFF** |
 
 - [x] `load() -> AppConfig` を実装する（ファイル不在時は既定値を返す）
 - [x] `save(config: AppConfig) -> None` を**原子的に**実装する（同一ディレクトリの一時ファイルへ書き込み → `flush` + `os.fsync` → `os.replace`）
@@ -440,5 +440,5 @@ DDLは開発計画書の記述をそのまま使用する。
 * Dovecot コンテナの追加要否（SPECIAL-USE / UIDVALIDITY操作 / 同時接続数制限の再現）を Phase 1 冒頭で判断する。
 * `tests/fixtures/eml/` のコーパス（壊れたMIME、ISO-2022-JP / CP932 / EUC-JP、RFC2231分割ファイル名、Outlook非標準形式、Message-ID欠損、巨大添付、インライン画像）を Phase 1 で蓄積する。
 * `manifests/` への追記実装（JSONL + 行末CRC32、fsync、末尾torn行の切り離し）を Phase 1 で行う。
-* `AppConfig.db_backup_to_local_disk` の実処理（C:のBitLocker有効時のみのオプトイン）を Phase 4 で実装する。
+* `AppConfig.db_backup_to_local_disk` の実処理（複製先の暗号化状態が保管元より弱い場合は警告し、既定OFF。明示的に有効化した場合だけ実行）を Phase 4 で実装する。
 * `set_storage_log_target(None)` / `ConnectionManager.request_close_all()` / `ConnectionManager.assert_all_closed()` / `checkpoint_truncate()` は、Phase 4 の「安全な取り外し」および `DETACHED` 遷移から呼び出す。
