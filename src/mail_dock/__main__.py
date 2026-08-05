@@ -68,9 +68,9 @@ from mail_dock.infrastructure.storage.storage_root import (
     check_free_space,
     drive_kind,
     ensure_layout,
-    initialize_root as initialize_root,
     resolve_root,
 )
+from mail_dock.infrastructure.storage.storage_root import initialize_root as initialize_root
 from mail_dock.usecases.register_account import (
     list_accounts,
     load_credentials,

@@ -423,21 +423,21 @@
 
 各項目の完了を確認したうえで、対応するタスクのチェックボックスを埋めること。
 
-- [ ] V-1. `uv sync` → `uv run ruff format --check .` → `uv run ruff check .` → `uv run mypy` がすべて成功する
-- [ ] V-2. `uv run pytest -m "not docker and not gui"` が全緑になり、既存テストが回帰していない（特に `test_connection.py` / `test_main.py` / `test_config.py`）
-- [ ] V-3. `uv run pytest tests/unit/test_capabilities.py -v` で、全能力の失敗注入ケースが期待どおり `OK` / `DEGRADED` / `UNSUPPORTED` へ分岐する
-- [ ] V-4. セルフテストが Qt を import せず、`gui` マーカー外の通常CIで実行される（F-20）
+- [x] V-1. `uv sync` → `uv run ruff format --check .` → `uv run ruff check .` → `uv run mypy` がすべて成功する
+- [x] V-2. `uv run pytest -m "not docker and not gui"` が全緑になり、既存テストが回帰していない（特に `test_connection.py` / `test_main.py` / `test_config.py`）
+- [x] V-3. `uv run pytest tests/unit/test_capabilities.py -v` で、全能力の失敗注入ケースが期待どおり `OK` / `DEGRADED` / `UNSUPPORTED` へ分岐する
+- [x] V-4. セルフテストが Qt を import せず、`gui` マーカー外の通常CIで実行される（F-20）
 - [x] V-5. GUIテストがローカルで全緑になる（`gui` マーカーのオプトイン実行）
-- [ ] V-6. 設定の後方互換: schema v1 の既存 `config.json` を持つ環境で起動し、v2 へ無損失アップグレードされ、未知キーが保持される。schema v0 は v0 → v1 → v2 を順に通る（N-4）
+- [x] V-6. 設定の後方互換: schema v1 の既存 `config.json` を持つ環境で起動し、v2 へ無損失アップグレードされ、未知キーが保持される。schema v0 は v0 → v1 → v2 を順に通る（N-4）
 - [ ] V-7. 通常のローカルドライブでウィザードを一周し、セルフテストが `OK`、`journal_mode=WAL` が適用される。セルフテストの所要時間が1秒以内である（N-1）
 - [ ] V-8. UUID・正規化パス・ストレージ指紋が一致する2回目以降の起動ではセルフテストが再実行されず、起動時間が3秒以内を維持する。同じUUIDでもパスまたは指紋が変われば再実行される（N-2 / D-17）
 - [ ] V-9. ネットワークドライブ（SMB共有）をルートに指定すると、WALプローブの戻り値にかかわらず `journal_mode=DELETE` が適用される
-- [ ] V-10. 非破壊性: セルフテストの実行前後で `.lock` / `metadata.db` / `eml/` / `manifests/` / `tmp/pstimp/` が変化せず、`tmp/` に残骸が残らない（N-3 / F-4）
-- [ ] V-11. 暗号化申告: ウィザードで3値を申告でき、`未暗号化` では確認チェックが必須になり、結果が `config.json` の `storage_profiles` へ `root_uuid` 紐付けで保存される。ストレージルート配下には書き込まれない（F-11）
-- [ ] V-12. 未暗号化での運用: 初回同期の開始直前に確認モーダルが**1回だけ**表示され、確認後は繰り返されず、ステータスバーに状態が常時表示される（F-14）
-- [ ] V-13. CLI の安全性: `UNSUPPORTED` かつ未承認の状態では、測定結果が先に `config.json` へ保存された後、構造化 `StorageUnsupportedError` で終了コード3となる。CLIから承認を発行する手段が存在しない（F-8）
-- [ ] V-14. 資格情報: 許可外の keyring バックエンドを模擬した状態で、資格情報が保存されず `session_only` へフォールバックし、警告が表示される。`SessionCredentialStore` がファイルを一切作成せず、GUI／CLIともネットワーク操作前に既存アカウントのパスワードを再入力できる（F-16 〜 F-18）
-- [ ] V-15. 依存関係: `pyproject.toml` に新しい依存が追加されていない（F-22）
+- [x] V-10. 非破壊性: セルフテストの実行前後で `.lock` / `metadata.db` / `eml/` / `manifests/` / `tmp/pstimp/` が変化せず、`tmp/` に残骸が残らない（N-3 / F-4）
+- [x] V-11. 暗号化申告: ウィザードで3値を申告でき、`未暗号化` では確認チェックが必須になり、結果が `config.json` の `storage_profiles` へ `root_uuid` 紐付けで保存される。ストレージルート配下には書き込まれない（F-11）
+- [x] V-12. 未暗号化での運用: 初回同期の開始直前に確認モーダルが**1回だけ**表示され、確認後は繰り返されず、ステータスバーに状態が常時表示される（F-14）
+- [x] V-13. CLI の安全性: `UNSUPPORTED` かつ未承認の状態では、測定結果が先に `config.json` へ保存された後、構造化 `StorageUnsupportedError` で終了コード3となる。CLIから承認を発行する手段が存在しない（F-8）
+- [x] V-14. 資格情報: 許可外の keyring バックエンドを模擬した状態で、資格情報が保存されず `session_only` へフォールバックし、警告が表示される。`SessionCredentialStore` がファイルを一切作成せず、GUI／CLIともネットワーク操作前に既存アカウントのパスワードを再入力できる（F-16 〜 F-18）
+- [x] V-15. 依存関係: `pyproject.toml` に新しい依存が追加されていない（F-22）
 - [ ] V-16. ドキュメント: 開発計画書 5.3 / 2.4 / 5.7 / 5.7.1 / 5.10 / 5.11 / 7章 / 8章と README が改訂され、「BitLocker To Go を必須の前提条件とする」という記述がリポジトリ内に残っていない（F-1 / F-2 / F-19 / F-21）
 - [ ] V-17. 実測（可能なら）: Cryptomator Vault をストレージルートに指定し、`OK` / `DEGRADED` / `UNSUPPORTED` の実測結果を本書「7.」へ記録する。`OK` でも安全性が保証されたとは扱わず、互換性プローブの検出限界として開発計画書 5.3 とUIへ反映する
 - [ ] V-18. 実測（可能なら）: VeraCrypt の固定サイズファイルコンテナをストレージルートに指定し、セルフテストが `OK`、`journal_mode=WAL`、空き容量チェックが正しい値を返すことを確認する

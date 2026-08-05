@@ -345,10 +345,15 @@ def test_storage_session_reprobes_when_cache_identity_changes(
     probed: list[Path] = []
     monkeypatch.setattr(main, "check_free_space", lambda path: None)
     monkeypatch.setattr(main, "storage_fingerprint", lambda root: fingerprint)
+
+    def fake_probe(root: Path) -> StorageCapabilities:
+        probed.append(root)
+        return capabilities
+
     monkeypatch.setattr(
         main,
         "probe_capabilities",
-        lambda root: probed.append(root) or capabilities,
+        fake_probe,
     )
 
     with StorageSession(settings, tmp_storage_root) as session:
