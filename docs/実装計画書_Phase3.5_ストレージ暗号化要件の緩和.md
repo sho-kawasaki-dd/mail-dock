@@ -203,17 +203,17 @@
 
 #### **B-3. `config.py` — schema v2 への拡張（*B-2 と並行可*）**
 
-- [ ] `CURRENT_SCHEMA_VERSION` を `2` へ変更する
-- [ ] `_upgrade_v1_to_v2` を実装し、`_CONFIG_UPGRADERS` へ登録する（新フィールドの既定値を補うだけ。既存値を書き換えない）
-- [ ] `_upgrade_v0_to_v1` が `CURRENT_SCHEMA_VERSION` ではなくリテラル `1` を設定するよう修正し、v0 → v1 → v2 のアップグレードを順に通す
-- [ ] `AppConfig` に `storage_profiles: Mapping[str, JSONValue]` を追加する
-  - [ ] キーは `root_uuid`、値は `{capabilities, capability_level, checked_path, storage_fingerprint, capability_ack_at, encryption, encryption_declared_at, first_sync_confirmed_at}`
-  - [ ] `encryption` の許可値を `ENCRYPTION_DECLARATIONS = frozenset({"encrypted", "unencrypted", "unknown"})` として定義する
-- [ ] `AppConfig` に `credential_storage: str = "keyring"` を追加し、`CREDENTIAL_STORAGE_MODES = frozenset({"keyring", "session_only"})` を定義する
-- [ ] `_KNOWN_FIELDS` へ両フィールドを追加する
-- [ ] `_validate_config` に検証を追加する（`storage_profiles` の構造・キーの型・値の型・列挙値、`credential_storage` の許可値）。**不正値を既定へ黙って倒さず `ConfigError` を送出する**
-- [ ] `db_backup_to_local_disk` のコメントを D-16 の一般化された条件へ更新する（実処理は Phase 4 のまま）
-- [ ] 未知キーの `extra` 保持がスキーマ変更後も機能することを維持する
+- [x] `CURRENT_SCHEMA_VERSION` を `2` へ変更する
+- [x] `_upgrade_v1_to_v2` を実装し、`_CONFIG_UPGRADERS` へ登録する（新フィールドの既定値を補うだけ。既存値を書き換えない）
+- [x] `_upgrade_v0_to_v1` が `CURRENT_SCHEMA_VERSION` ではなくリテラル `1` を設定するよう修正し、v0 → v1 → v2 のアップグレードを順に通す
+- [x] `AppConfig` に `storage_profiles: Mapping[str, JSONValue]` を追加する
+  - [x] キーは `root_uuid`、値は `{capabilities, capability_level, checked_path, storage_fingerprint, capability_ack_at, encryption, encryption_declared_at, first_sync_confirmed_at}`
+  - [x] `encryption` の許可値を `ENCRYPTION_DECLARATIONS = frozenset({"encrypted", "unencrypted", "unknown"})` として定義する
+- [x] `AppConfig` に `credential_storage: str = "keyring"` を追加し、`CREDENTIAL_STORAGE_MODES = frozenset({"keyring", "session_only"})` を定義する
+- [x] `_KNOWN_FIELDS` へ両フィールドを追加する
+- [x] `_validate_config` に検証を追加する（`storage_profiles` の構造・キーの型・値の型・列挙値、`credential_storage` の許可値）。**不正値を既定へ黙って倒さず `ConfigError` を送出する**
+- [x] `db_backup_to_local_disk` のコメントを D-16 の一般化された条件へ更新する（実処理は Phase 4 のまま）
+- [x] 未知キーの `extra` 保持がスキーマ変更後も機能することを維持する
 
 #### **B-4. `infrastructure/database/connection.py` — `journal_mode` への置換（*B-2 に依存*）**
 
@@ -230,12 +230,12 @@
 
 #### **C-1. `infrastructure/security/keyring_store.py` — バックエンド検査**
 
-- [ ] `class KeyringBackendStatus(StrEnum)` に `SUPPORTED` / `UNSUPPORTED` / `UNAVAILABLE` を定義する
-- [ ] `_ALLOWED_BACKENDS` を**許可リスト**として定義する（`keyring.backends.Windows.WinVaultKeyring` / `keyring.backends.macOS.Keyring` / `keyring.backends.SecretService.Keyring` / `keyring.backends.kwallet.DBusKeyring`）
-- [ ] `detect_backend() -> KeyringBackendStatus` を実装する。判定は `type(keyring.get_keyring())` の `__module__` + `__qualname__` を許可リストと照合して行う
-- [ ] `backend_name() -> str` を実装する（設定ダイアログでの表示用）
-- [ ] `KeyringCredentialStore` が許可外バックエンドで `set_password` を実行せず `CredentialStoreError` を送出するようにする
-- [ ] 拒否リスト方式にしない理由（将来のバックエンド追加で漏れるため）をコメントで1行残す
+- [x] `class KeyringBackendStatus(StrEnum)` に `SUPPORTED` / `UNSUPPORTED` / `UNAVAILABLE` を定義する
+- [x] `_ALLOWED_BACKENDS` を**許可リスト**として定義する（`keyring.backends.Windows.WinVaultKeyring` / `keyring.backends.macOS.Keyring` / `keyring.backends.SecretService.Keyring` / `keyring.backends.kwallet.DBusKeyring`）
+- [x] `detect_backend() -> KeyringBackendStatus` を実装する。判定は `type(keyring.get_keyring())` の `__module__` + `__qualname__` を許可リストと照合して行う
+- [x] `backend_name() -> str` を実装する（設定ダイアログでの表示用）
+- [x] `KeyringCredentialStore` が許可外バックエンドで `set_password` を実行せず `CredentialStoreError` を送出するようにする
+- [x] 拒否リスト方式にしない理由（将来のバックエンド追加で漏れるため）をコメントで1行残す
 
 #### **C-2. `infrastructure/security/session_store.py` — メモリのみの資格情報ストア（*C-1 と並行可*）**
 
@@ -331,11 +331,11 @@
 
 #### **F-2. `tests/unit/test_config.py` の拡張**
 
-- [ ] schema v1 → v2 のアップグレードが無損失であり、未知キーが保持されることを検証する
-- [ ] schema v0 → v1 → v2 が順に適用され、v1 → v2 を飛ばさないことを検証する
-- [ ] `storage_profiles` の構造・列挙値の検証と、不正値が `ConfigError` になることを検証する
-- [ ] `credential_storage` の許可値外が `ConfigError` になることを検証する
-- [ ] 新フィールドを含む `AppConfig` のラウンドトリップ（`save` → `load`）を検証する
+- [x] schema v1 → v2 のアップグレードが無損失であり、未知キーが保持されることを検証する
+- [x] schema v0 → v1 → v2 が順に適用され、v1 → v2 を飛ばさないことを検証する
+- [x] `storage_profiles` の構造・列挙値の検証と、不正値が `ConfigError` になることを検証する
+- [x] `credential_storage` の許可値外が `ConfigError` になることを検証する
+- [x] 新フィールドを含む `AppConfig` のラウンドトリップ（`save` → `load`）を検証する
 
 #### **F-3. `tests/unit/test_connection.py` の拡張**
 
