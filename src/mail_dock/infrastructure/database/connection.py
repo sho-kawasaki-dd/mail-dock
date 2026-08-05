@@ -21,6 +21,7 @@ from mail_dock.infrastructure.storage.detach import storage_io
 
 BUSY_TIMEOUT_MS = 10_000
 CACHE_SIZE_KIB = -64_000
+JOURNAL_MODES = frozenset({"WAL", "DELETE"})
 
 
 def _readonly_uri(db_path: Path) -> str:
@@ -33,9 +34,13 @@ def _configure_connection(
     connection: sqlite3.Connection,
     *,
     readonly: bool,
-    network_drive: bool,
+    journal_mode: str,
 ) -> None:
     """Apply connection-local and database journaling settings."""
+
+    if journal_mode not in JOURNAL_MODES:
+        choices = ", ".join(sorted(JOURNAL_MODES))
+        raise DatabaseError(f"journal_mode must be one of: {choices}")
 
     # This must be set for every connection; SQLite does not inherit it from
     # another connection, and foreign-key enforcement is otherwise silently off.
@@ -49,7 +54,7 @@ def _configure_connection(
         connection.execute("PRAGMA query_only = ON")
         return
 
-    journal_mode = "DELETE" if network_drive else "WAL"
+    # The caller selects this from the storage probe and DriveKind.
     connection.execute(f"PRAGMA journal_mode = {journal_mode}")
 
 
@@ -57,7 +62,7 @@ def connect(
     db_path: Path,
     *,
     readonly: bool = False,
-    network_drive: bool = False,
+    journal_mode: str = "WAL",
 ) -> sqlite3.Connection:
     """Open and configure a metadata database connection.
 
@@ -85,7 +90,7 @@ def connect(
             _configure_connection(
                 connection,
                 readonly=readonly,
-                network_drive=network_drive,
+                journal_mode=journal_mode,
             )
     except Exception:
         if connection is not None:
@@ -109,11 +114,11 @@ class ConnectionManager:
         db_path: Path,
         *,
         readonly: bool = False,
-        network_drive: bool = False,
+        journal_mode: str = "WAL",
     ) -> None:
         self._db_path = db_path
         self._readonly = readonly
-        self._network_drive = network_drive
+        self._journal_mode = journal_mode
         self._local = threading.local()
         self._state_lock = threading.Lock()
         self._owners: dict[int, threading.Thread] = {}
@@ -135,7 +140,7 @@ class ConnectionManager:
             connection = connect(
                 self._db_path,
                 readonly=self._readonly,
-                network_drive=self._network_drive,
+                journal_mode=self._journal_mode,
             )
             self._local.connection = connection
             self._owners[threading.get_ident()] = threading.current_thread()

@@ -285,10 +285,10 @@ def _verify_database(connection: sqlite3.Connection) -> None:
         raise DatabaseError("Database foreign_key_check failed")
 
 
-def _verify_fts_database(db_path: Path, *, network_drive: bool) -> None:
+def _verify_fts_database(db_path: Path, *, journal_mode: str) -> None:
     """Run the FTS check on a short-lived writable connection only."""
 
-    connection = connect(db_path, network_drive=network_drive)
+    connection = connect(db_path, journal_mode=journal_mode)
     try:
         integrity_check(connection)
     finally:
@@ -352,13 +352,16 @@ class StorageSession:
             self.manager = ConnectionManager(
                 root / "metadata.db",
                 readonly=self.readonly,
-                network_drive=self.network_drive,
+                journal_mode="DELETE" if self.network_drive else "WAL",
             )
             connection = self.manager.get_connection()
             if self.readonly:
                 _verify_database(connection)
                 self.manager.close_current_thread()
-                _verify_fts_database(root / "metadata.db", network_drive=self.network_drive)
+                _verify_fts_database(
+                    root / "metadata.db",
+                    journal_mode="DELETE" if self.network_drive else "WAL",
+                )
                 LOGGER.info("Database verification succeeded")
             else:
                 version = migrate(connection, root / "metadata.db")

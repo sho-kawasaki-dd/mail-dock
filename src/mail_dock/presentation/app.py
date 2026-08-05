@@ -49,7 +49,7 @@ class _StartupVerificationWorker(QObject):
             if self._mode == "full":
                 _verify_fts_database(
                     self._session.root / "metadata.db",
-                    network_drive=self._session.network_drive,
+                    journal_mode="DELETE" if self._session.network_drive else "WAL",
                 )
         except BaseException as error:
             self.failed.emit(error)

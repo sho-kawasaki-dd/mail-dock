@@ -23,12 +23,35 @@ def test_readonly_connection_preserves_journal_mode(tmp_path: Path) -> None:
     writable.commit()
     writable.close()
 
-    readonly = connect(db_path, readonly=True)
+    readonly = connect(db_path, readonly=True, journal_mode="DELETE")
     try:
         assert readonly.execute("PRAGMA journal_mode").fetchone() == ("wal",)
         assert readonly.execute("PRAGMA query_only").fetchone() == (1,)
     finally:
         readonly.close()
+
+
+@pytest.mark.parametrize("journal_mode", ["WAL", "DELETE"])
+def test_writable_connection_applies_journal_mode(tmp_path: Path, journal_mode: str) -> None:
+    connection = connect(tmp_path / "metadata.db", journal_mode=journal_mode)
+    try:
+        assert connection.execute("PRAGMA journal_mode").fetchone() == (journal_mode.lower(),)
+    finally:
+        connection.close()
+
+
+def test_invalid_journal_mode_is_rejected_before_pragma(tmp_path: Path) -> None:
+    with pytest.raises(DatabaseError, match="journal_mode"):
+        connect(tmp_path / "metadata.db", journal_mode="TRUNCATE")
+
+
+def test_connection_manager_passes_journal_mode(tmp_path: Path) -> None:
+    manager = ConnectionManager(tmp_path / "metadata.db", journal_mode="DELETE")
+    connection = manager.get_connection()
+    try:
+        assert connection.execute("PRAGMA journal_mode").fetchone() == ("delete",)
+    finally:
+        manager.close_current_thread()
 
 
 def test_connection_manager_closes_connections_on_their_own_threads(tmp_path: Path) -> None:

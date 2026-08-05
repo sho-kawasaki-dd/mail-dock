@@ -217,12 +217,12 @@
 
 #### **B-4. `infrastructure/database/connection.py` — `journal_mode` への置換（*B-2 に依存*）**
 
-- [ ] `_configure_connection(connection, *, readonly: bool, journal_mode: str)` へシグネチャを変更する
-- [ ] `journal_mode` を許可リスト（`{"WAL", "DELETE"}`）で検証してから PRAGMA を発行する。許可外は `DatabaseError` とする
-- [ ] `connect(db_path, *, readonly=False, journal_mode: str = "WAL")` へ変更する
-- [ ] `ConnectionManager.__init__(db_path, *, readonly=False, journal_mode: str = "WAL")` へ変更する
-- [ ] `network_drive: bool` 引数を**削除**する（呼び出し元は `__main__.py` と `presentation/app.py` の2箇所のみ）
-- [ ] `journal_mode` の決定責務が呼び出し元（セルフテスト結果と `DriveKind` の安全側の組合せ）にある旨をコメントで1行残す
+- [x] `_configure_connection(connection, *, readonly: bool, journal_mode: str)` へシグネチャを変更する
+- [x] `journal_mode` を許可リスト（`{"WAL", "DELETE"}`）で検証してから PRAGMA を発行する。許可外は `DatabaseError` とする
+- [x] `connect(db_path, *, readonly=False, journal_mode: str = "WAL")` へ変更する
+- [x] `ConnectionManager.__init__(db_path, *, readonly=False, journal_mode: str = "WAL")` へ変更する
+- [x] `network_drive: bool` 引数を**削除**する（呼び出し元は `__main__.py` と `presentation/app.py` の2箇所のみ）
+- [x] `journal_mode` の決定責務が呼び出し元（セルフテスト結果と `DriveKind` の安全側の組合せ）にある旨をコメントで1行残す
 
 ---
 
@@ -239,10 +239,10 @@
 
 #### **C-2. `infrastructure/security/session_store.py` — メモリのみの資格情報ストア（*C-1 と並行可*）**
 
-- [ ] `SessionCredentialStore(BaseCredentialStore)` を実装する（プロセス内 `dict` のみ）
-- [ ] `set_password` / `get_password` / `delete_password` を実装する。ファイル・DB・ログへ一切書き込まない
-- [ ] `__repr__` を実装し、保持している値はもちろんアカウントIDも出力しない
-- [ ] モジュール docstring に「プロセス終了で失われる。永続化しないことが仕様である」と明記する
+- [x] `SessionCredentialStore(BaseCredentialStore)` を実装する（プロセス内 `dict` のみ）
+- [x] `set_password` / `get_password` / `delete_password` を実装する。ファイル・DB・ログへ一切書き込まない
+- [x] `__repr__` を実装し、保持している値はもちろんアカウントIDも出力しない
+- [x] モジュール docstring に「プロセス終了で失われる。永続化しないことが仕様である」と明記する
 
 ---
 
@@ -339,9 +339,9 @@
 
 #### **F-3. `tests/unit/test_connection.py` の拡張**
 
-- [ ] `journal_mode` の許可リスト外が `DatabaseError` になることを検証する
-- [ ] `WAL` / `DELETE` がそれぞれ実際にデータベースへ適用されることを検証する
-- [ ] `readonly` 接続が `journal_mode` を変更しないことを検証する（既存挙動の維持）
+- [x] `journal_mode` の許可リスト外が `DatabaseError` になることを検証する
+- [x] `WAL` / `DELETE` がそれぞれ実際にデータベースへ適用されることを検証する
+- [x] `readonly` 接続が `journal_mode` を変更しないことを検証する（既存挙動の維持）
 
 #### **F-4. `tests/unit/test_keyring_store.py` の拡張と `tests/unit/test_session_store.py`（新規）**
 

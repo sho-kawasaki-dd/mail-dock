@@ -262,16 +262,15 @@ class FakeConnection:
 
 def test_verify_fts_uses_and_closes_writable_connection(monkeypatch: pytest.MonkeyPatch) -> None:
     connection = FakeConnection()
-    connect_calls: list[tuple[Path, bool, bool]] = []
+    connect_calls: list[tuple[Path, str]] = []
     integrity_calls: list[FakeConnection] = []
 
     def fake_connect(
         db_path: Path,
         *,
-        readonly: bool = False,
-        network_drive: bool = False,
+        journal_mode: str = "WAL",
     ) -> FakeConnection:
-        connect_calls.append((db_path, readonly, network_drive))
+        connect_calls.append((db_path, journal_mode))
         return connection
 
     def fake_integrity_check(value: FakeConnection) -> None:
@@ -280,9 +279,9 @@ def test_verify_fts_uses_and_closes_writable_connection(monkeypatch: pytest.Monk
     monkeypatch.setattr(main, "connect", fake_connect)
     monkeypatch.setattr(main, "integrity_check", fake_integrity_check)
 
-    main._verify_fts_database(Path("metadata.db"), network_drive=True)
+    main._verify_fts_database(Path("metadata.db"), journal_mode="DELETE")
 
-    assert connect_calls == [(Path("metadata.db"), False, True)]
+    assert connect_calls == [(Path("metadata.db"), "DELETE")]
     assert integrity_calls == [connection]
     assert connection.closed
 
@@ -301,6 +300,6 @@ def test_verify_fts_closes_connection_when_check_fails(
     monkeypatch.setattr(main, "integrity_check", fail_integrity_check)
 
     with pytest.raises(RuntimeError, match="check failed"):
-        main._verify_fts_database(Path("metadata.db"), network_drive=False)
+        main._verify_fts_database(Path("metadata.db"), journal_mode="WAL")
 
     assert connection.closed
