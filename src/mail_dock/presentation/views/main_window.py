@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -10,7 +12,9 @@ from PySide6.QtCore import QSettings, Qt, QUrl, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog,
+    QInputDialog,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QProgressBar,
     QPushButton,
@@ -122,6 +126,9 @@ class MainWindow(QMainWindow):
         self._build_central_layout()
         self._build_actions()
         self._build_status_bar()
+        self.set_storage_encryption(getattr(context, "encryption_declaration", "unknown"))
+        self.set_storage_capability(getattr(context, "capability_level", None))
+        self._set_credential_storage_status(getattr(context, "credential_storage", None))
         self._connect_presentation()
         self._restore_ui_state()
 
@@ -130,9 +137,13 @@ class MainWindow(QMainWindow):
 
         if self._sync_token is not None:
             return
+        if not self._prepare_sync(self._enabled_account_ids()):
+            return
         sync_all_accounts = getattr(self.sync_worker, "sync_all_accounts", None)
         if callable(sync_all_accounts):
-            self._start_sync(sync_all_accounts())
+            token = sync_all_accounts()
+            if isinstance(token, CancelToken):
+                self._start_sync(token)
         else:
             self._sync_selected_account()
 
@@ -210,6 +221,8 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.thread_view_action)
         help_menu = self.menuBar().addMenu(strings.MAIN_MENU_HELP)
         help_menu.addAction(self.open_log_folder_action)
+        self.encryption_help_action = QAction(strings.MAIN_MENU_HELP_ENCRYPTION, self)
+        help_menu.addAction(self.encryption_help_action)
 
         self.sync_action.triggered.connect(self._sync_selected_account)
         self.refresh_folders_action.triggered.connect(self._refresh_selected_account)
@@ -219,6 +232,7 @@ class MainWindow(QMainWindow):
         self.exit_action.triggered.connect(self.close)
         self.settings_requested.connect(self._show_settings)
         self.open_log_folder_action.triggered.connect(self._open_log_folder)
+        self.encryption_help_action.triggered.connect(self._open_encryption_guide)
 
     def _build_status_bar(self) -> None:
         status = QStatusBar(self)
@@ -226,6 +240,11 @@ class MainWindow(QMainWindow):
         self._status_label = QLabel(strings.STATUS_READY, self)
         self._count_label = QLabel(strings.STATUS_MESSAGE_COUNT.format(count=0), self)
         self._storage_status_label = QLabel(strings.STATUS_STORAGE_CONNECTED, self)
+        self._encryption_status_label = QLabel(self)
+        self._encryption_status_label.setObjectName("storageEncryptionStatusLabel")
+        self._credential_status_label = QLabel(self)
+        self._credential_status_label.setObjectName("credentialStorageStatusLabel")
+        self._credential_status_label.setVisible(False)
         self._progress_bar = QProgressBar(self)
         self._progress_bar.setObjectName("syncProgressBar")
         self._progress_bar.setRange(0, 100)
@@ -240,6 +259,124 @@ class MainWindow(QMainWindow):
         status.addPermanentWidget(self._progress_bar)
         status.addPermanentWidget(self._cancel_button)
         status.addPermanentWidget(self._storage_status_label)
+        status.addPermanentWidget(self._encryption_status_label)
+        status.addPermanentWidget(self._credential_status_label)
+
+    def set_storage_encryption(self, state: object) -> None:
+        """Display the user-declared storage encryption state."""
+
+        declaration = state if isinstance(state, str) else "unknown"
+        if declaration not in config.ENCRYPTION_DECLARATIONS:
+            declaration = "unknown"
+        text = strings.STATUS_STORAGE_ENCRYPTION.format(state=declaration)
+        self._encryption_status_label.setText(text)
+        self._encryption_status_label.setToolTip(f"{text}\n{strings.MAIN_MENU_HELP_ENCRYPTION}")
+
+    def set_storage_capability(self, level: object) -> None:
+        """Display the measured storage capability, including warnings."""
+
+        capability = level.lower() if isinstance(level, str) else "unknown"
+        if capability == "unsupported":
+            text = strings.STATUS_STORAGE_CAPABILITY_UNSUPPORTED
+        elif capability == "degraded":
+            text = strings.STATUS_STORAGE_CAPABILITY_DEGRADED
+        elif capability == "ok":
+            text = strings.STATUS_STORAGE_CAPABILITY.format(level="OK")
+        else:
+            text = strings.STATUS_STORAGE_CAPABILITY.format(level=capability)
+        self._storage_status_label.setText(text)
+        self._storage_status_label.setToolTip(text)
+
+    def _set_credential_storage_status(self, mode: object) -> None:
+        if mode == "session_only":
+            self._credential_status_label.setText(strings.STATUS_CREDENTIAL_STORAGE_SESSION_ONLY)
+            self._credential_status_label.setVisible(True)
+
+    def _prepare_sync(self, account_ids: Sequence[str]) -> bool:
+        """Run confirmation and credential gates before queueing a sync."""
+
+        if not self._confirm_first_sync_encryption():
+            return False
+        return self._ensure_session_credentials(account_ids)
+
+    def _confirm_first_sync_encryption(self) -> bool:
+        root_uuid = getattr(self.context, "root_uuid", None)
+        settings = getattr(self.context, "settings", None)
+        if not isinstance(root_uuid, str) or not isinstance(settings, config.AppConfig):
+            return True
+        raw_profile = settings.storage_profiles.get(root_uuid)
+        profile = dict(raw_profile) if isinstance(raw_profile, dict) else {}
+        encryption = getattr(
+            self.context,
+            "encryption_declaration",
+            profile.get("encryption", "unknown"),
+        )
+        if encryption not in {"unencrypted", "unknown"}:
+            return True
+        if profile.get("first_sync_confirmed_at"):
+            return True
+        if not ConfirmationDialog(
+            strings.DIALOG_CONFIRM_FIRST_SYNC_WITHOUT_ENCRYPTION,
+            self,
+        ).confirmed():
+            return False
+        profile["first_sync_confirmed_at"] = datetime.now(UTC).isoformat()
+        profiles = dict(settings.storage_profiles)
+        profiles[root_uuid] = profile
+        try:
+            self.context.save_settings(replace(settings, storage_profiles=profiles))
+        except Exception:
+            self._status_label.setText(strings.ERROR_CONFIG)
+            return False
+        return True
+
+    def _ensure_session_credentials(self, account_ids: Sequence[str]) -> bool:
+        if getattr(self.context, "credential_storage", None) != "session_only":
+            return True
+        store = getattr(self.context, "credential_store", None)
+        if store is None:
+            return True
+        for account_id in account_ids:
+            if store.get_password(account_id) is not None:
+                continue
+            password, accepted = QInputDialog.getText(
+                self,
+                strings.DIALOG_ENTER_PASSWORD_TITLE,
+                strings.DIALOG_ENTER_PASSWORD.format(account_id=account_id),
+                QLineEdit.EchoMode.Password,
+            )
+            if not accepted or not password:
+                self._status_label.setText(strings.STATUS_CREDENTIAL_REQUIRED)
+                return False
+            try:
+                store.set_password(account_id, password)
+            except Exception:
+                self._status_label.setText(strings.ERROR_CREDENTIAL_STORE)
+                return False
+        return True
+
+    def _enabled_account_ids(self) -> tuple[str, ...]:
+        create_repository = getattr(self.context, "create_message_repository", None)
+        if callable(create_repository):
+            try:
+                accounts = cast(Any, create_repository()).list_accounts()
+            except Exception:
+                accounts = ()
+            account_ids = tuple(
+                account_id
+                for account in accounts
+                if account.get("is_enabled", 1) not in (False, 0, "0")
+                and isinstance(account_id := account.get("id", account.get("account_id")), str)
+                and account_id
+            )
+            if account_ids:
+                return account_ids
+        return tuple(
+            node.account_id
+            for root in self.folder_tree_model.roots()
+            for node in _walk_folder_tree(root)
+            if node.kind == "account" and node.account_id is not None
+        )
 
     def _connect_presentation(self) -> None:
         self.message_list_viewmodel.filters_changed.connect(self.message_table_model.set_filters)
@@ -302,6 +439,8 @@ class MainWindow(QMainWindow):
         account_id = self._selected_account_id()
         if account_id is None:
             self._status_label.setText(strings.STATUS_NO_ACCOUNT_SELECTED)
+            return
+        if not self._prepare_sync((account_id,)):
             return
         self._start_sync(self.sync_worker.sync_account(account_id))
 
@@ -519,6 +658,11 @@ class MainWindow(QMainWindow):
         path.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
+    def _open_encryption_guide(self) -> None:
+        guide = Path(__file__).resolve().parents[4] / "README.md"
+        if guide.is_file():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(guide)))
+
     def _cancel_current_operation(self) -> None:
         if self._sync_token is not None:
             self._sync_token.cancel()
@@ -541,3 +685,12 @@ class MainWindow(QMainWindow):
             "message_header",
             self.message_list_view.horizontalHeader().saveState(),
         )
+
+
+def _walk_folder_tree(node: Any) -> tuple[Any, ...]:
+    """Flatten folder-tree nodes for startup credential preflight."""
+
+    nodes = [node]
+    for child in getattr(node, "children", ()):
+        nodes.extend(_walk_folder_tree(child))
+    return tuple(nodes)

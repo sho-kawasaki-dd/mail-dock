@@ -51,6 +51,7 @@ class AppContext:
         renderer_factory: MessageRendererFactory | None = None,
     ) -> None:
         self.storage_root = session.root
+        self.root_uuid = session.root_uuid
         self.settings = settings
         self.storage_lock = session.storage_lock
         self.connection_manager = session.connection_manager

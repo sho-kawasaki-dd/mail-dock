@@ -297,13 +297,13 @@
 
 #### **E-3. `presentation/views/main_window.py` — ステータス常時表示と初回同期確認（*E-1 に依存*）**
 
-- [ ] `_build_status_bar` に `_encryption_status_label` を追加する（`_storage_status_label` の隣）
-- [ ] `set_storage_encryption(state)` と `set_storage_capability(level)` を実装する。`UNSUPPORTED` を承認して続行中の場合は常時警告表示にする（D-5 / D-18）
-- [ ] ラベルのツールチップから暗号化ガイドへ誘導し、ヘルプメニューに「保管先の暗号化について」を追加する
-- [ ] 手動同期・起動時同期を含む全同期経路に、ワーカーへジョブを投入する**前**の共通ゲートを設ける。当該 `root_uuid` に `first_sync_confirmed_at` が無く暗号化申告が `unencrypted` / `unknown` の場合、**1回だけ**モーダル確認を表示する（D-18）。`sync_worker.sync_account()` / `sync_all_accounts()` を呼んだ後に確認してはならない
-- [ ] 確認後に `first_sync_confirmed_at` を記録し、以後は確認を出さない
-- [ ] 資格情報が `session_only` で動作している場合、その旨をステータスバーまたは通知で1回示す
-- [ ] `session_only` で対象アカウントの資格情報が無い場合、ネットワーク操作をワーカーへ投入する前にパスワード入力ダイアログを表示し、入力値を当該プロセスのセッションストアだけへ保存する。キャンセル時は操作を開始しない
+- [x] `_build_status_bar` に `_encryption_status_label` を追加する（`_storage_status_label` の隣）
+- [x] `set_storage_encryption(state)` と `set_storage_capability(level)` を実装する。`UNSUPPORTED` を承認して続行中の場合は常時警告表示にする（D-5 / D-18）
+- [x] ラベルのツールチップから暗号化ガイドへ誘導し、ヘルプメニューに「保管先の暗号化について」を追加する
+- [x] 手動同期・起動時同期を含む全同期経路に、ワーカーへジョブを投入する**前**の共通ゲートを設ける。当該 `root_uuid` に `first_sync_confirmed_at` が無く暗号化申告が `unencrypted` / `unknown` の場合、**1回だけ**モーダル確認を表示する（D-18）。`sync_worker.sync_account()` / `sync_all_accounts()` を呼んだ後に確認してはならない
+- [x] 確認後に `first_sync_confirmed_at` を記録し、以後は確認を出さない
+- [x] 資格情報が `session_only` で動作している場合、その旨をステータスバーまたは通知で1回示す
+- [x] `session_only` で対象アカウントの資格情報が無い場合、ネットワーク操作をワーカーへ投入する前にパスワード入力ダイアログを表示し、入力値を当該プロセスのセッションストアだけへ保存する。キャンセル時は操作を開始しない
 
 #### **E-4. `presentation/views/dialogs/settings_dialog.py` — 設定項目の追加（*E-1 に依存*）**
 
