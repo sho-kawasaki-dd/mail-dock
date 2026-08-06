@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,7 +11,10 @@ from typing import Any, cast
 from PySide6.QtCore import QSettings, Qt, QUrl, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
+    QFormLayout,
     QInputDialog,
     QLabel,
     QLineEdit,
@@ -64,9 +67,17 @@ class MainWindow(QMainWindow):
     settings_requested = Signal()
     export_requested = Signal()
 
-    def __init__(self, context: AppContext) -> None:
+    def __init__(
+        self,
+        context: AppContext,
+        *,
+        on_storage_root_switch: Callable[[Path], None] | None = None,
+        on_storage_setup: Callable[[Path | None], None] | None = None,
+    ) -> None:
         super().__init__()
         self.context = context
+        self._on_storage_root_switch = on_storage_root_switch
+        self._on_storage_setup = on_storage_setup
         self.setObjectName("mainWindow")
         self.setWindowTitle(strings.MAIN_WINDOW_TITLE)
         self._workers_stopped = False
@@ -75,6 +86,7 @@ class MainWindow(QMainWindow):
         self._file_token: CancelToken | None = None
         self._pending_attachment_request: AttachmentSaveRequest | None = None
         self._pending_attachment_plan: AttachmentSavePlan | None = None
+        self._query_busy = False
         self._ui_settings = QSettings("mail-dock", "mail-dock")
 
         self.query_worker = QueryWorker(
@@ -202,6 +214,9 @@ class MainWindow(QMainWindow):
         self.thread_view_action = QAction(strings.MAIN_MENU_THREAD_VIEW, self)
         self.exit_action = QAction(strings.MAIN_MENU_EXIT, self)
         self.open_log_folder_action = QAction(strings.MAIN_MENU_OPEN_LOG_FOLDER, self)
+        self.storage_info_action = QAction(strings.MAIN_MENU_STORAGE_INFO, self)
+        self.storage_switch_action = QAction(strings.MAIN_MENU_STORAGE_SWITCH, self)
+        self.storage_setup_action = QAction(strings.MAIN_MENU_STORAGE_SETUP, self)
 
         toolbar = QToolBar(strings.APP_NAME, self)
         toolbar.setObjectName("mainToolBar")
@@ -219,6 +234,10 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.exit_action)
         view_menu = self.menuBar().addMenu(strings.MAIN_MENU_VIEW)
         view_menu.addAction(self.thread_view_action)
+        storage_menu = self.menuBar().addMenu(strings.MAIN_MENU_STORAGE)
+        storage_menu.addAction(self.storage_info_action)
+        storage_menu.addAction(self.storage_switch_action)
+        storage_menu.addAction(self.storage_setup_action)
         help_menu = self.menuBar().addMenu(strings.MAIN_MENU_HELP)
         help_menu.addAction(self.open_log_folder_action)
         self.encryption_help_action = QAction(strings.MAIN_MENU_HELP_ENCRYPTION, self)
@@ -233,6 +252,9 @@ class MainWindow(QMainWindow):
         self.settings_requested.connect(self._show_settings)
         self.open_log_folder_action.triggered.connect(self._open_log_folder)
         self.encryption_help_action.triggered.connect(self._open_encryption_guide)
+        self.storage_info_action.triggered.connect(self._show_storage_root)
+        self.storage_switch_action.triggered.connect(self._request_storage_switch)
+        self.storage_setup_action.triggered.connect(self._request_storage_setup)
 
     def _build_status_bar(self) -> None:
         status = QStatusBar(self)
@@ -240,6 +262,8 @@ class MainWindow(QMainWindow):
         self._status_label = QLabel(strings.STATUS_READY, self)
         self._count_label = QLabel(strings.STATUS_MESSAGE_COUNT.format(count=0), self)
         self._storage_status_label = QLabel(strings.STATUS_STORAGE_CONNECTED, self)
+        self._storage_root_label = QLabel(self)
+        self._storage_root_label.setObjectName("storageRootLabel")
         self._encryption_status_label = QLabel(self)
         self._encryption_status_label.setObjectName("storageEncryptionStatusLabel")
         self._credential_status_label = QLabel(self)
@@ -258,9 +282,72 @@ class MainWindow(QMainWindow):
         status.addPermanentWidget(self._count_label)
         status.addPermanentWidget(self._progress_bar)
         status.addPermanentWidget(self._cancel_button)
+        status.addPermanentWidget(self._storage_root_label)
         status.addPermanentWidget(self._storage_status_label)
         status.addPermanentWidget(self._encryption_status_label)
         status.addPermanentWidget(self._credential_status_label)
+        self.set_storage_root(getattr(self.context, "storage_root", None))
+
+    def set_storage_root(self, root: object) -> None:
+        """Display the absolute path of the active storage root."""
+
+        path = str(root) if isinstance(root, Path) else "-"
+        self._storage_root_label.setText(strings.STATUS_STORAGE_ROOT.format(path=path))
+        self._storage_root_label.setToolTip(path)
+
+    def has_active_operations(self) -> bool:
+        """Return whether an operation must be stopped before releasing storage."""
+
+        return any(
+            (
+                self._sync_token is not None,
+                self._folder_refresh_token is not None,
+                self._file_token is not None,
+                self._query_busy,
+            )
+        )
+
+    def _show_storage_root(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle(strings.DIALOG_STORAGE_ROOT_INFO_TITLE)
+        form = QFormLayout(dialog)
+        form.addRow(strings.DIALOG_STORAGE_ROOT_PATH, QLabel(str(self.context.storage_root)))
+        form.addRow(strings.DIALOG_STORAGE_ROOT_UUID, QLabel(str(self.context.root_uuid or "-")))
+        form.addRow(
+            strings.DIALOG_STORAGE_ROOT_CAPABILITY,
+            QLabel(str(getattr(self.context, "capability_level", None) or "-")),
+        )
+        form.addRow(
+            strings.DIALOG_STORAGE_ROOT_ENCRYPTION,
+            QLabel(str(getattr(self.context, "encryption_declaration", "unknown"))),
+        )
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok, parent=dialog)
+        buttons.accepted.connect(dialog.accept)
+        form.addRow(buttons)
+        dialog.exec()
+
+    def _request_storage_switch(self) -> None:
+        if self._on_storage_root_switch is None:
+            return
+        selected = QFileDialog.getExistingDirectory(self, strings.MAIN_MENU_STORAGE_SWITCH)
+        if not selected:
+            return
+        if self.has_active_operations() and not ConfirmationDialog(
+            strings.DIALOG_CONFIRM_STORAGE_SWITCH_BUSY,
+            self,
+        ).confirmed():
+            return
+        self._on_storage_root_switch(Path(selected))
+
+    def _request_storage_setup(self) -> None:
+        if self._on_storage_setup is None:
+            return
+        if self.has_active_operations() and not ConfirmationDialog(
+            strings.DIALOG_CONFIRM_STORAGE_SETUP_BUSY,
+            self,
+        ).confirmed():
+            return
+        self._on_storage_setup(None)
 
     def set_storage_encryption(self, state: object) -> None:
         """Display the user-declared storage encryption state."""
@@ -414,6 +501,7 @@ class MainWindow(QMainWindow):
         )
 
     def _set_query_busy(self, busy: bool) -> None:
+        self._query_busy = busy
         if busy and self._sync_token is None:
             self._status_label.setText(strings.STATUS_QUERYING)
         elif not busy and self._sync_token is None:

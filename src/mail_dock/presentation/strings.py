@@ -88,6 +88,10 @@ MAIN_MENU_THREAD_VIEW = "スレッド表示"
 MAIN_MENU_HELP = "ヘルプ"
 MAIN_MENU_HELP_ENCRYPTION = "保管先の暗号化について"
 MAIN_MENU_OPEN_LOG_FOLDER = "ログフォルダを開く"
+MAIN_MENU_STORAGE = "ストレージ"
+MAIN_MENU_STORAGE_INFO = "現在のストレージルートを表示"
+MAIN_MENU_STORAGE_SWITCH = "ストレージルートを切り替え..."
+MAIN_MENU_STORAGE_SETUP = "新規ストレージセットアップウィザード..."
 MAIN_TOOLBAR_SYNC = "同期"
 MAIN_TOOLBAR_REFRESH_FOLDERS = "フォルダを再取得"
 MAIN_TOOLBAR_SEARCH = "検索"
@@ -106,6 +110,7 @@ STATUS_QUERYING = "検索中..."
 STATUS_LOADING = "読み込み中..."
 STATUS_READY = "準備完了"
 STATUS_STORAGE_CONNECTED = "ストレージ接続済み"
+STATUS_STORAGE_ROOT = "ルート: {path}"
 BANNER_STORAGE_DETACHED = "ストレージが切断されているため、メールを閲覧できません。"
 STATUS_NO_ACCOUNT_SELECTED = "同期するアカウントを選択してください"
 STATUS_SYNC_PROGRESS = "{folder}: {transferred} / {total} bytes ({count} 件, 残り {eta})"
@@ -188,6 +193,23 @@ RECOVERY_CHECK_CREDENTIAL_STORE = "OSの資格情報ストアを確認してか�
 RECOVERY_RETRY = "しばらく待ってから再試行してください。"
 
 DIALOG_CONFIRM_TITLE = "確認"
+DIALOG_CONFIRM_STORAGE_SWITCH_BUSY = (
+    "同期、フォルダ再取得、またはファイル操作が進行中です。\n"
+    "ストレージを切り替えると、進行中の操作は停止します。続行しますか?"
+)
+DIALOG_CONFIRM_STORAGE_SETUP_BUSY = (
+    "同期、フォルダ再取得、またはファイル操作が進行中です。\n"
+    "新しいストレージのセットアップを開始すると、進行中の操作は停止します。続行しますか?"
+)
+DIALOG_CONFIRM_SETUP_MISSING_ROOT = (
+    "選択されたフォルダはストレージルートとして初期化されていません。\n"
+    "新規ストレージセットアップウィザードを起動しますか?"
+)
+DIALOG_STORAGE_ROOT_INFO_TITLE = "現在のストレージルート"
+DIALOG_STORAGE_ROOT_PATH = "パス"
+DIALOG_STORAGE_ROOT_UUID = "UUID"
+DIALOG_STORAGE_ROOT_CAPABILITY = "容量・適合性"
+DIALOG_STORAGE_ROOT_ENCRYPTION = "暗号化申告"
 DIALOG_CONFIRM_STORAGE_UNSUPPORTED = (
     "この保管先では排他ロックまたは既存ファイルへの上書き配置が成立しません。\n"
     "メール保存の原子性や同時実行時の整合性を保証できず、データが破損する可能性があります。\n"

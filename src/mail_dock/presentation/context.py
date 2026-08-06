@@ -79,6 +79,9 @@ class AppContext:
         self.keyring_supported = detect_backend() is KeyringBackendStatus.SUPPORTED
         self._session = session
         self._renderer_factory = renderer_factory
+        self.storage_root_switch_handler: Callable[[Path], None] | None = None
+        self.storage_setup_handler: Callable[[Path | None], None] | None = None
+        self.window_created_handler: Callable[[Any], None] | None = None
 
     @property
     def database_path(self) -> Path:
@@ -218,9 +221,23 @@ class AppContext:
             "storage_fingerprint": fingerprint,
         }
 
-    def build_main_window(self) -> Any:
+    def build_main_window(
+        self,
+        *,
+        on_storage_root_switch: Callable[[Path], None] | None = None,
+        on_storage_setup: Callable[[Path | None], None] | None = None,
+    ) -> Any:
         """Construct the main window through the presentation composition root."""
 
         from mail_dock.presentation.views.main_window import MainWindow
 
-        return MainWindow(self)
+        window = MainWindow(
+            self,
+            on_storage_root_switch=(
+                on_storage_root_switch or self.storage_root_switch_handler
+            ),
+            on_storage_setup=on_storage_setup or self.storage_setup_handler,
+        )
+        if self.window_created_handler is not None:
+            self.window_created_handler(window)
+        return window

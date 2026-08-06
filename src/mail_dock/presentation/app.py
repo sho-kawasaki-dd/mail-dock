@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -90,16 +90,21 @@ class _StartupVerificationCompletion(QObject):
         session: StorageSession,
         context: AppContext,
         result: dict[str, Any],
+        window_factory: Callable[[AppContext], Any] | None = None,
     ) -> None:
         super().__init__(app)
         self._app = app
         self._session = session
         self._context = context
         self._result = result
+        self._window_factory = window_factory
 
     @Slot()
     def verified(self) -> None:
-        window = self._context.build_main_window()
+        if self._window_factory is not None:
+            window = self._window_factory(self._context)
+        else:
+            window = self._context.build_main_window()
         self._result["window"] = window
         window.show()
         if self._session.settings.sync_on_startup:
@@ -238,12 +243,20 @@ def _start_verification(
     app: QCoreApplication,
     session: StorageSession,
     context: AppContext,
+    *,
+    window_factory: Callable[[AppContext], Any] | None = None,
 ) -> tuple[QThread, dict[str, Any]]:
     thread = QThread()
     worker = _StartupVerificationWorker(session, session.settings.startup_verification)
     worker.moveToThread(thread)
     result: dict[str, Any] = {"error": None, "window": None, "worker": worker}
-    completion = _StartupVerificationCompletion(app, session, context, result)
+    completion = _StartupVerificationCompletion(
+        app,
+        session,
+        context,
+        result,
+        window_factory,
+    )
     result["completion"] = completion
 
     thread.started.connect(worker.run)
@@ -258,6 +271,154 @@ def _start_verification(
 
 
 QWizardAccepted = 1
+
+
+def _start_session(
+    settings: config.AppConfig,
+    root: Path,
+) -> tuple[StorageSession, AppContext]:
+    """Start one storage session and compose its presentation context."""
+
+    session = StorageSession(settings, root)
+    try:
+        session.__enter__()
+        return session, AppContext(session, session.settings)
+    except BaseException as error:
+        session.__exit__(type(error), error, error.__traceback__)
+        raise
+
+
+class _GuiRuntime:
+    """Own the replaceable GUI window and exactly one active storage session."""
+
+    def __init__(self, application: QCoreApplication, settings: config.AppConfig) -> None:
+        self.application = application
+        self.settings = settings
+        self.session: StorageSession | None = None
+        self.context: AppContext | None = None
+        self.window: Any = None
+        self.verification_thread: QThread | None = None
+        self.verification_result: dict[str, Any] = {"error": None, "window": None}
+
+    def attach(self, session: StorageSession, context: AppContext) -> None:
+        self.session = session
+        self.context = context
+        self.settings = session.settings
+        context.storage_root_switch_handler = self.switch_root
+        context.storage_setup_handler = self.start_setup
+        context.window_created_handler = self._window_created
+
+    def start(self, root: Path) -> AppContext:
+        session, context = _start_session(self.settings, root)
+        self.attach(session, context)
+        return context
+
+    def _window_created(self, window: Any) -> None:
+        self.window = window
+
+    def verify_and_show(self) -> None:
+        if self.session is None or self.context is None:
+            raise RuntimeError("GUI session has not started")
+        self.verification_thread, self.verification_result = _start_verification(
+            self.application,
+            self.session,
+            self.context,
+            window_factory=lambda context: context.build_main_window(),
+        )
+
+    def _release_current(self) -> None:
+        if self.verification_thread is not None and self.verification_thread.isRunning():
+            self.verification_thread.quit()
+            self.verification_thread.wait()
+        if self.window is not None:
+            _stop_window(self.window, self.context)
+            close = getattr(self.window, "close", None)
+            if callable(close):
+                close()
+        elif self.context is not None:
+            self.context.stop_workers()
+        if self.session is not None:
+            self.session.__exit__(None, None, None)
+        self.window = None
+        self.context = None
+        self.session = None
+        self.verification_thread = None
+
+    def switch_root(self, root: Path) -> None:
+        result = probe(root, None)
+        if result is RootProbe.MISSING:
+            if ConfirmationDialog(strings.DIALOG_CONFIRM_SETUP_MISSING_ROOT).confirmed():
+                self.start_setup(root)
+            return
+        if result is RootProbe.FOREIGN:
+            _show_error(StorageForeignRootError(strings.ERROR_FOREIGN_ROOT))
+            return
+        self._replace_with_root(root)
+
+    def _replace_with_root(self, root: Path) -> None:
+        marker = initialize_root(root)
+        self._release_current()
+        self.settings = replace(
+            self.settings,
+            storage_root_uuid=marker.root_uuid,
+            storage_root_candidates=(_normalized_storage_path(root),),
+        )
+        context = self.start(root)
+        updated = replace(
+            context.settings,
+            storage_root_uuid=context.root_uuid,
+            storage_root_candidates=(_normalized_storage_path(root),),
+        )
+        context.save_settings(updated)
+        self.verify_and_show()
+
+    def start_setup(self, initial_root: Path | None = None) -> None:
+        old_root = self.context.storage_root if self.context is not None else None
+        old_settings = self.settings
+        pending_probe: dict[str, object] | None = None
+
+        def probe_root(selected_root: Path, encryption: str) -> Mapping[str, object]:
+            nonlocal pending_probe
+            _unchanged_settings, result = _probe_setup_root(
+                self.settings,
+                selected_root,
+                encryption,
+            )
+            pending_probe = result
+            return result
+
+        def start_session(selected_root: Path) -> AppContext:
+            if pending_probe is None:
+                raise ConfigError("Storage root must be probed before confirmation")
+            self._release_current()
+            self.settings = _commit_setup_root(self.settings, selected_root, pending_probe)
+            return self.start(selected_root)
+
+        wizard = SetupWizard(
+            initial_root=initial_root,
+            context=None,
+            expected_root_uuid=self.settings.storage_root_uuid,
+            on_root_confirmed=start_session,
+            on_root_probe=probe_root,
+            on_root_identity_probe=lambda path: probe(path, self.settings.storage_root_uuid).value,
+            check_root_space=lambda path: check_free_space(path).value,
+            resolve_drive_kind=lambda path: drive_kind(path).value,
+            resolve_free_space=free_space,
+        )
+        accepted = wizard.exec() == QDialog.DialogCode.Accepted
+        if accepted and self.session is not None:
+            self.verify_and_show()
+        elif not accepted and old_root is not None and self.session is not None:
+            current_root = self.context.storage_root if self.context is not None else None
+            if current_root != old_root:
+                self._release_current()
+                self.settings = old_settings
+                config.save(old_settings)
+                self.start(old_root)
+                self.verify_and_show()
+
+    def close(self) -> None:
+        self._release_current()
 
 
 def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -> int:
@@ -276,6 +437,7 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
     verification_thread: QThread | None = None
     verification_result: dict[str, Any] = {"error": None, "window": None}
     session_error: BaseException | None = None
+    runtime: _GuiRuntime | None = None
     try:
         active_settings = settings
         root = _available_root(active_settings, requested_root)
@@ -334,9 +496,8 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
         else:
             unsupported_acknowledged = False
             while True:
-                session = StorageSession(active_settings, root)
                 try:
-                    session.__enter__()
+                    session, context = _start_session(active_settings, root)
                 except StorageUnsupportedError as unsupported_error:
                     if unsupported_acknowledged or not _confirm_storage_unsupported(
                         unsupported_error
@@ -344,15 +505,19 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
                         session_error = unsupported_error
                         return _exit_code(unsupported_error)
                     active_settings = _acknowledge_storage_unsupported(
-                        session.settings, unsupported_error
+                        active_settings, unsupported_error
                     )
                     unsupported_acknowledged = True
                     continue
                 break
-            context = AppContext(session, session.settings)
+        runtime = _GuiRuntime(app, active_settings)
+        runtime.attach(session, context)
         verification_thread, verification_result = _start_verification(app, session, context)
+        runtime.verification_thread = verification_thread
+        runtime.verification_result = verification_result
         event_code = app.exec()
         window = verification_result["window"]
+        runtime.window = window
         error = verification_result["error"]
         if isinstance(error, MailDockError):
             session_error = error
@@ -366,6 +531,12 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
         _show_error(error)
         return _exit_code(error) if isinstance(error, MailDockError) else 1
     finally:
+        if runtime is not None:
+            runtime.close()
+            session = None
+            context = None
+            window = None
+            verification_thread = None
         if verification_thread is not None and verification_thread.isRunning():
             verification_thread.quit()
             verification_thread.wait()
