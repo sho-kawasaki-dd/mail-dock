@@ -253,7 +253,6 @@ def _start_verification(
     worker.failed.connect(thread.quit)
     worker.finished.connect(worker.deleteLater)
     worker.failed.connect(worker.deleteLater)
-    thread.finished.connect(thread.deleteLater)
     thread.start()
     return thread, result
 
