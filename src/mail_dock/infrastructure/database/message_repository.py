@@ -14,7 +14,7 @@ from typing import Any, cast
 
 from mail_dock.domain.errors import DatabaseError
 from mail_dock.domain.messages import StoredEml
-from mail_dock.domain.normalize import normalize_for_search
+from mail_dock.domain.normalize import normalize_for_search, replace_surrogates
 from mail_dock.domain.repository import BaseMessageRepository, MessageContents, MessageRecord
 from mail_dock.infrastructure.database.connection import ConnectionManager, checkpoint_truncate
 from mail_dock.infrastructure.storage.detach import classify_sqlite_error, storage_io
@@ -121,7 +121,9 @@ class SqliteMessageRepository(BaseMessageRepository):
                 value = contents.get("subject")
             elif value is None and key == "sender_norm":
                 value = contents.get("sender")
-            normalized[key] = normalize_for_search(value) if value is not None else None
+            normalized[key] = (
+                normalize_for_search(replace_surrogates(value)) if value is not None else None
+            )
         return normalized
 
     def upsert_account(self, account: MessageRecord) -> str:

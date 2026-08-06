@@ -13,6 +13,12 @@ import unicodedata
 _WHITESPACE_RE = re.compile(r"\s+")
 
 
+def replace_surrogates(text: str) -> str:
+    """Replace lone surrogate code points with a database-safe character."""
+
+    return text.encode("utf-8", errors="replace").decode("utf-8")
+
+
 def normalize_for_search(text: str) -> str:
     """Return the canonical searchable representation of ``text``."""
 

@@ -10,6 +10,8 @@ from email.utils import parsedate_to_datetime
 from typing import Final
 from urllib.parse import unquote_to_bytes
 
+from mail_dock.domain.normalize import replace_surrogates
+
 _PARAMETER_NAME: Final[re.Pattern[str]] = re.compile(
     r"^(?P<name>[^*]+)(?:\*(?P<index>\d+)(?P<encoded>\*)?|(?P<extended>\*))?$",
     re.IGNORECASE,
@@ -24,9 +26,9 @@ def decode_header_value(value: str | None) -> str:
 
     try:
         decoded = str(make_header(decode_header(value)))
-        return value if value and not decoded else decoded
+        return replace_surrogates(value if value and not decoded else decoded)
     except (LookupError, UnicodeError, ValueError):
-        return value
+        return replace_surrogates(value)
 
 
 def _raw_header_value(part: Message, header_name: str) -> str | None:
@@ -148,10 +150,10 @@ def parse_content_disposition_filename(part: Message) -> str | None:
         parameters = _parse_parameters(header_value)
         filename = _filename_from_parameters(parameters, "filename")
         if filename is not None:
-            return filename
+            return replace_surrogates(filename)
         filename = _filename_from_parameters(parameters, "name")
         if filename is not None:
-            return filename
+            return replace_surrogates(filename)
     return None
 
 

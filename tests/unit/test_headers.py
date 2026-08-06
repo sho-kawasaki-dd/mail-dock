@@ -29,6 +29,10 @@ def test_decode_header_value_handles_rfc2047_and_malformed_input() -> None:
     assert decode_header_value(None) == ""
 
 
+def test_decode_header_value_replaces_lone_surrogates() -> None:
+    assert decode_header_value("broken\udcff header") == "broken? header"
+
+
 def test_parse_content_disposition_filename_supports_rfc2231_segments() -> None:
     assert parse_content_disposition_filename(_attachment("09_attachment_rfc2231_split.eml")) == (
         "日本語.txt"

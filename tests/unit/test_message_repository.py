@@ -57,6 +57,24 @@ def test_add_message_separates_uid_generations_and_normalizes_contents(
     assert db_conn.execute("SELECT COUNT(*) FROM messages").fetchone() == (2,)
 
 
+def test_add_message_replaces_lone_surrogates_in_contents(
+    db_conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    repository, folder_id = _repository(db_conn, tmp_path / "metadata.db")
+
+    repository.begin_batch()
+    repository.add_message(
+        _message(folder_id, 11),
+        {"subject": "broken\udcff subject", "body_text": "body\ud800 text"},
+    )
+    repository.commit_batch()
+
+    contents = db_conn.execute(
+        "SELECT subject_norm, body_text FROM message_contents"
+    ).fetchone()
+    assert contents == ("broken? subject", "body? text")
+
+
 def test_batch_changes_are_not_committed_per_message(
     db_conn: sqlite3.Connection, tmp_path: Path
 ) -> None:
