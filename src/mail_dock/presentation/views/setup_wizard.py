@@ -119,10 +119,6 @@ class SetupWizard(QWizard):
         browse_button = QPushButton(strings.WIZARD_BUTTON_BROWSE, self._root_page)
         browse_button.clicked.connect(self._browse)
         layout.addRow(browse_button)
-        storage_test_button = QPushButton(strings.WIZARD_BUTTON_STORAGE_TEST, self._root_page)
-        storage_test_button.clicked.connect(self._run_storage_checks)
-        self._storage_test_button = storage_test_button
-        layout.addRow(storage_test_button)
 
         self._drive_kind_label = QLabel("-")
         self._free_space_label = QLabel("-")
@@ -163,6 +159,11 @@ class SetupWizard(QWizard):
         self._root_edit.textChanged.connect(self._update_root_preview)
         self._encryption_combo.currentIndexChanged.connect(self._invalidate_storage_test)
         self._update_root_preview()
+
+        storage_test_button = QPushButton(strings.WIZARD_BUTTON_STORAGE_TEST, self._root_page)
+        storage_test_button.clicked.connect(self._run_storage_checks)
+        self._storage_test_button = storage_test_button
+        layout.addRow(storage_test_button)
 
     def _update_root_preview(self, *_args: object) -> None:
         self._invalidate_storage_test()
