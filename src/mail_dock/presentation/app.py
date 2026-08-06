@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QCoreApplication, QObject, QThread, Signal, Slot
+from PySide6.QtCore import QCoreApplication, QObject, Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import QApplication, QDialog
 
 from mail_dock import config as config
@@ -40,6 +40,7 @@ from mail_dock.infrastructure.storage.storage_root import (
     ensure_layout,
     free_space,
     initialize_root,
+    probe,
     resolve_root,
 )
 from mail_dock.presentation import strings
@@ -78,6 +79,40 @@ class _StartupVerificationWorker(QObject):
             self.failed.emit(error)
         else:
             self.finished.emit()
+
+
+class _StartupVerificationCompletion(QObject):
+    """Handle verification results on the GUI thread."""
+
+    def __init__(
+        self,
+        app: QCoreApplication,
+        session: StorageSession,
+        context: AppContext,
+        result: dict[str, Any],
+    ) -> None:
+        super().__init__(app)
+        self._app = app
+        self._session = session
+        self._context = context
+        self._result = result
+
+    @Slot()
+    def verified(self) -> None:
+        window = self._context.build_main_window()
+        self._result["window"] = window
+        window.show()
+        if self._session.settings.sync_on_startup:
+            start_sync = getattr(window, "start_startup_sync", None)
+            if callable(start_sync):
+                start_sync()
+
+    @Slot(object)
+    def failed(self, error: object) -> None:
+        if isinstance(error, BaseException):
+            self._result["error"] = error
+            _show_error(error)
+        self._app.quit()
 
 
 def _available_root(settings: config.AppConfig, requested_root: Path | None) -> Path | None:
@@ -184,24 +219,12 @@ def _start_verification(
     worker = _StartupVerificationWorker(session, session.settings.startup_verification)
     worker.moveToThread(thread)
     result: dict[str, Any] = {"error": None, "window": None, "worker": worker}
-
-    def verified() -> None:
-        window = context.build_main_window()
-        result["window"] = window
-        window.show()
-        if session.settings.sync_on_startup:
-            start_sync = getattr(window, "start_startup_sync", None)
-            if callable(start_sync):
-                start_sync()
-
-    def failed(error: BaseException) -> None:
-        result["error"] = error
-        _show_error(error)
-        app.quit()
+    completion = _StartupVerificationCompletion(app, session, context, result)
+    result["completion"] = completion
 
     thread.started.connect(worker.run)
-    worker.finished.connect(verified)
-    worker.failed.connect(failed)
+    worker.finished.connect(completion.verified, Qt.ConnectionType.QueuedConnection)
+    worker.failed.connect(completion.failed, Qt.ConnectionType.QueuedConnection)
     worker.finished.connect(thread.quit)
     worker.failed.connect(thread.quit)
     worker.finished.connect(worker.deleteLater)
@@ -263,6 +286,10 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
                 expected_root_uuid=active_settings.storage_root_uuid,
                 on_root_confirmed=start_session,
                 on_root_probe=probe_root,
+                on_root_identity_probe=lambda path: probe(
+                    path,
+                    active_settings.storage_root_uuid,
+                ).value,
                 root_initializer=lambda path: initialize_root(path).root_uuid,
                 check_root_space=lambda path: check_free_space(path).value,
                 resolve_drive_kind=lambda path: drive_kind(path).value,

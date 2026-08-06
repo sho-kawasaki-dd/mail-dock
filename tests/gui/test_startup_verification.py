@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QApplication
 
 from mail_dock import config
@@ -76,6 +77,8 @@ def test_main_window_is_built_only_after_verification_finishes(
     session = _Session("quick", tmp_path)
     window = _Window()
     built: list[_Window] = []
+    application = QApplication.instance()
+    assert application is not None
 
     monkeypatch.setattr(app, "_verify_database", lambda _connection: None)
     context = type(
@@ -85,12 +88,11 @@ def test_main_window_is_built_only_after_verification_finishes(
     )()
 
     def build_main_window() -> _Window:
+        assert QThread.currentThread() is application.thread()
         built.append(window)
         return window
 
     context.build_main_window = build_main_window
-    application = QApplication.instance()
-    assert application is not None
     _thread, result = app._start_verification(application, cast(Any, session), cast(Any, context))
 
     assert result["window"] is None

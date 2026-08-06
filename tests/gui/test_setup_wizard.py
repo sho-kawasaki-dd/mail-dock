@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from mail_dock.domain.errors import InsufficientSpaceError
 from mail_dock.infrastructure.storage.storage_root import DriveKind, SpaceStatus
 from mail_dock.presentation import strings
 from mail_dock.presentation.views.setup_wizard import SetupWizard
@@ -56,6 +57,43 @@ def test_wizard_has_three_pages_and_confirms_a_temporary_root(
     assert wizard.validateCurrentPage()
     assert wizard.selected_root == (tmp_path / "mail-root").resolve()
     assert confirmed == [wizard.selected_root]
+
+
+def test_root_preview_updates_when_path_changes(tmp_path: Path, qtbot: Any) -> None:
+    wizard = SetupWizard(
+        root_initializer=lambda _root: "root-1",
+        check_root_space=lambda _root: SpaceStatus.OK.value,
+        resolve_drive_kind=lambda _root: DriveKind.LOCAL.value,
+        resolve_free_space=lambda _root: 1024 * 1024 * 1024,
+    )
+    qtbot.addWidget(wizard)
+
+    wizard._root_edit.setText(str(tmp_path))
+
+    assert wizard._drive_kind_label.text() == DriveKind.LOCAL.value
+    assert wizard._free_space_label.text() == "1.0 GiB"
+    assert wizard._capability_label.text() == "-"
+
+
+def test_root_validation_keeps_free_space_visible_when_below_minimum(
+    tmp_path: Path,
+    qtbot: Any,
+) -> None:
+    wizard = SetupWizard(
+        initial_root=tmp_path,
+        root_initializer=lambda _root: "root-1",
+        check_root_space=lambda _root: (_ for _ in ()).throw(
+            InsufficientSpaceError("not enough space")
+        ),
+        resolve_drive_kind=lambda _root: DriveKind.LOCAL.value,
+        resolve_free_space=lambda _root: 4 * 1024**3,
+    )
+    qtbot.addWidget(wizard)
+    wizard.show()
+
+    assert not wizard.validateCurrentPage()
+    assert wizard._drive_kind_label.text() == DriveKind.LOCAL.value
+    assert wizard._free_space_label.text() == "4.0 GiB"
 
 
 def test_account_validation_rejects_invalid_id_before_connection_test(qtbot: Any) -> None:
@@ -110,9 +148,61 @@ def test_unsupported_capability_blocks_root_confirmation(
     qtbot.addWidget(wizard)
     wizard.show()
 
+    wizard._storage_test_button.click()
+
     assert not wizard.validateCurrentPage()
     assert wizard._capability_label.text() == strings.WIZARD_CAPABILITY_UNSUPPORTED
     assert confirmed == []
+
+
+def test_new_root_is_not_rejected_by_previous_archive_uuid(
+    tmp_path: Path,
+    qtbot: Any,
+) -> None:
+    context = _Context()
+    wizard = SetupWizard(
+        initial_root=tmp_path / "new-root",
+        expected_root_uuid="previous-root",
+        on_root_identity_probe=lambda _root: "missing",
+        on_root_confirmed=lambda _root: context,
+        root_initializer=lambda _root: "new-root",
+        check_root_space=lambda _root: SpaceStatus.OK.value,
+        resolve_drive_kind=lambda _root: DriveKind.LOCAL.value,
+        resolve_free_space=lambda _root: 1024 * 1024 * 1024,
+    )
+    qtbot.addWidget(wizard)
+    wizard.show()
+
+    assert wizard.validateCurrentPage()
+    assert wizard.selected_root == (tmp_path / "new-root").resolve()
+
+
+def test_foreign_existing_root_is_rejected_before_initialization(
+    tmp_path: Path,
+    qtbot: Any,
+) -> None:
+    initialized = False
+
+    def initialize(_root: Path) -> str:
+        nonlocal initialized
+        initialized = True
+        return "foreign-root"
+
+    wizard = SetupWizard(
+        initial_root=tmp_path / "foreign-root",
+        expected_root_uuid="previous-root",
+        on_root_identity_probe=lambda _root: "foreign",
+        root_initializer=initialize,
+        check_root_space=lambda _root: SpaceStatus.OK.value,
+        resolve_drive_kind=lambda _root: DriveKind.LOCAL.value,
+        resolve_free_space=lambda _root: 1024 * 1024 * 1024,
+    )
+    qtbot.addWidget(wizard)
+    wizard.show()
+
+    assert not wizard.validateCurrentPage()
+    assert not initialized
+    assert wizard._root_status.text() == strings.ERROR_FOREIGN_ROOT
 
 
 def test_degraded_capability_and_unencrypted_declaration_require_confirmation(
@@ -139,11 +229,13 @@ def test_degraded_capability_and_unencrypted_declaration_require_confirmation(
     wizard.show()
     wizard._encryption_combo.setCurrentIndex(1)
 
-    assert not wizard.validateCurrentPage()
+    wizard._storage_test_button.click()
+
     assert declarations == []
     assert wizard._encryption_confirmation.isVisible()
 
     wizard._encryption_confirmation.setChecked(True)
+    wizard._storage_test_button.click()
     assert wizard.validateCurrentPage()
     assert declarations == ["unencrypted"]
     assert wizard._capability_label.text() == strings.WIZARD_CAPABILITY_DEGRADED
@@ -182,5 +274,6 @@ def test_setup_wizard_uses_injected_probe_and_saves_encryption_declaration(
     wizard.show()
     wizard._encryption_combo.setCurrentIndex(0)
 
+    wizard._storage_test_button.click()
     assert wizard.validateCurrentPage()
     assert saved == [{"root": str((tmp_path / "mail-root").resolve()), "encryption": "encrypted"}]

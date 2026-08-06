@@ -35,6 +35,7 @@ from .dialogs.progress_dialog import ProgressDialog
 
 RootContextFactory = Callable[[Path], Any]
 RootCapabilityProbe = Callable[[Path, str], Mapping[str, object]]
+RootIdentityProbe = Callable[[Path], str]
 RootInitializer = Callable[[Path], str]
 RootSpaceChecker = Callable[[Path], str]
 RootDriveKindResolver = Callable[[Path], str]
@@ -63,6 +64,7 @@ class SetupWizard(QWizard):
         on_root_confirmed: RootContextFactory | None = None,
         on_root_probe: RootCapabilityProbe | None = None,
         root_initializer: RootInitializer | None = None,
+        on_root_identity_probe: RootIdentityProbe | None = None,
         check_root_space: RootSpaceChecker | None = None,
         resolve_drive_kind: RootDriveKindResolver | None = None,
         resolve_free_space: RootFreeSpaceResolver | None = None,
@@ -74,11 +76,16 @@ class SetupWizard(QWizard):
         self._expected_root_uuid = expected_root_uuid
         self._on_root_confirmed = on_root_confirmed
         self._on_root_probe = on_root_probe
+        self._on_root_identity_probe = on_root_identity_probe
         self._root_initializer = root_initializer
         self._check_root_space = check_root_space
         self._resolve_drive_kind = resolve_drive_kind
         self._resolve_free_space = resolve_free_space
         self._root_confirmed = context is not None
+        self._storage_test_passed = False
+        self._storage_check_root: Path | None = None
+        self._storage_space_status: str | None = None
+        self._storage_capability_level: str | None = None
         self._worker: Worker | None = None
         self._progress_dialog: ProgressDialog | None = None
         self._operation: str | None = None
@@ -112,6 +119,10 @@ class SetupWizard(QWizard):
         browse_button = QPushButton(strings.WIZARD_BUTTON_BROWSE, self._root_page)
         browse_button.clicked.connect(self._browse)
         layout.addRow(browse_button)
+        storage_test_button = QPushButton(strings.WIZARD_BUTTON_STORAGE_TEST, self._root_page)
+        storage_test_button.clicked.connect(self._run_storage_checks)
+        self._storage_test_button = storage_test_button
+        layout.addRow(storage_test_button)
 
         self._drive_kind_label = QLabel("-")
         self._free_space_label = QLabel("-")
@@ -149,6 +160,34 @@ class SetupWizard(QWizard):
         layout.addRow(strings.WIZARD_LABEL_STORAGE_CAPABILITY, self._capability_label)
         layout.addRow(self._root_status)
         self._root_page_id = self.addPage(self._root_page)
+        self._root_edit.textChanged.connect(self._update_root_preview)
+        self._encryption_combo.currentIndexChanged.connect(self._invalidate_storage_test)
+        self._update_root_preview()
+
+    def _update_root_preview(self, *_args: object) -> None:
+        self._invalidate_storage_test()
+        self._drive_kind_label.setText("-")
+        self._free_space_label.setText("-")
+        value = self._root_edit.text().strip()
+        if not value or self._resolve_drive_kind is None or self._resolve_free_space is None:
+            return
+        root = Path(value).expanduser()
+        try:
+            drive_kind = self._resolve_drive_kind(root)
+            free_bytes = self._resolve_free_space(root)
+        except Exception:
+            return
+        self._drive_kind_label.setText(_drive_kind_text(drive_kind))
+        self._free_space_label.setText(_format_bytes(free_bytes))
+
+    def _invalidate_storage_test(self, *_args: object) -> None:
+        self._storage_test_passed = False
+        self._storage_check_root = None
+        self._storage_space_status = None
+        self._storage_capability_level = None
+        self._selected_root = None
+        self._capability_label.setText("-")
+        self._root_status.clear()
 
     def _encryption_declaration(self) -> str:
         value = self._encryption_combo.currentData()
@@ -235,7 +274,7 @@ class SetupWizard(QWizard):
         if page_id == self._folders_page_id and self._context is not None:
             self._load_folders()
 
-    def _validate_root(self) -> bool:
+    def _run_storage_checks(self, *_args: object) -> bool:
         value = self._root_edit.text().strip()
         if not value:
             self._root_status.setText(strings.ERROR_STORAGE_ROOT_MISSING)
@@ -250,33 +289,51 @@ class SetupWizard(QWizard):
                 or self._resolve_free_space is None
             ):
                 raise MailDockError("Storage root operations are not configured")
+            existing_root_probe = "missing"
+            if self._on_root_identity_probe is not None:
+                existing_root_probe = self._on_root_identity_probe(root)
+                if existing_root_probe not in {"missing", "ok", "foreign"}:
+                    raise MailDockError("Storage root identity result is invalid")
+                if existing_root_probe == "foreign":
+                    raise StorageForeignRootError(strings.ERROR_FOREIGN_ROOT)
             root_uuid = self._root_initializer(root)
-            if self._expected_root_uuid is not None and root_uuid != self._expected_root_uuid:
+            if (
+                existing_root_probe != "missing"
+                and self._expected_root_uuid is not None
+                and root_uuid != self._expected_root_uuid
+            ):
                 raise StorageForeignRootError(strings.ERROR_FOREIGN_ROOT)
+            drive_kind = self._resolve_drive_kind(root)
+            free_bytes = self._resolve_free_space(root)
+            self._drive_kind_label.setText(_drive_kind_text(drive_kind))
+            self._free_space_label.setText(_format_bytes(free_bytes))
             status = self._check_root_space(root)
         except Exception as error:
             self._show_inline_error(self._root_status, error)
+            self._capability_label.setText("-")
             return False
 
         self._selected_root = root.resolve(strict=False)
-        self._drive_kind_label.setText(_drive_kind_text(self._resolve_drive_kind(root)))
-        self._free_space_label.setText(_format_bytes(self._resolve_free_space(root)))
         encryption = self._encryption_declaration()
         if encryption == "unencrypted" and not self._encryption_confirmation.isChecked():
             self._root_status.setText(strings.WIZARD_ENCRYPTION_UNENCRYPTED_CONFIRM_REQUIRED)
             return False
-        capability_level = None
+        capability_level: str | None = None
         if self._on_root_probe is not None:
             try:
+                self._capability_label.setText(strings.WIZARD_STATUS_TESTING_STORAGE)
                 result = self._on_root_probe(self._selected_root, encryption)
-                capability_level = result.get("capability_level")
-                if not isinstance(capability_level, str):
+                raw_capability_level = result.get("capability_level")
+                if not isinstance(raw_capability_level, str):
                     raise MailDockError("Storage capability result is invalid")
+                capability_level = raw_capability_level
             except Exception as error:
                 self._show_inline_error(self._root_status, error)
+                self._capability_label.setText("-")
                 return False
             self._capability_label.setText(_capability_text(capability_level))
             if capability_level == "unsupported":
+                self._storage_test_passed = False
                 self._root_status.setText(strings.WIZARD_CAPABILITY_UNSUPPORTED_DESCRIPTION)
                 return False
 
@@ -289,6 +346,21 @@ class SetupWizard(QWizard):
                 else strings.WIZARD_STATUS_ROOT_READY
             )
         self._root_status.setText(status_text)
+        self._storage_test_passed = True
+        self._storage_check_root = self._selected_root
+        self._storage_space_status = status
+        self._storage_capability_level = capability_level
+        return True
+
+    def _validate_root(self) -> bool:
+        if self._on_root_probe is not None and not self._storage_test_passed:
+            self._root_status.setText(strings.WIZARD_STATUS_STORAGE_TEST_REQUIRED)
+            return False
+        if not self._storage_test_passed and not self._run_storage_checks():
+            return False
+        if self._selected_root is None:
+            self._root_status.setText(strings.ERROR_STORAGE_ROOT_MISSING)
+            return False
         if not self._root_confirmed and self._on_root_confirmed is not None:
             try:
                 self._context = self._on_root_confirmed(self._selected_root)
