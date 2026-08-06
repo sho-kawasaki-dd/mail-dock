@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from PySide6.QtCore import QCoreApplication, QObject, Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import QApplication, QDialog
@@ -159,43 +159,67 @@ def _probe_setup_root(
     root: Path,
     encryption: str,
 ) -> tuple[config.AppConfig, dict[str, object]]:
-    """Probe a newly selected root and persist its primitive result."""
+    """Probe a newly selected root without initializing its archive layout."""
 
-    marker = initialize_root(root)
-    ensure_layout(root)
-    cleanup_tmp(root)
     checked_path = _normalized_storage_path(root)
     fingerprint = storage_fingerprint(root)
     capabilities = probe_capabilities(root)
     level = capability_level(capabilities)
-    profiles = dict(settings.storage_profiles)
-    raw_profile = profiles.get(marker.root_uuid)
-    profile = dict(raw_profile) if isinstance(raw_profile, dict) else {}
-    profile.update(
-        {
-            "capabilities": capabilities.as_dict(),
-            "capability_level": level.value,
-            "checked_path": checked_path,
-            "storage_fingerprint": fingerprint,
-            "encryption": encryption,
-            "encryption_declared_at": datetime.now(UTC).isoformat(),
-        }
-    )
-    profiles[marker.root_uuid] = profile
-    updated = replace(
-        settings,
-        storage_root_uuid=marker.root_uuid,
-        storage_root_candidates=(checked_path,),
-        storage_profiles=profiles,
-    )
-    config.save(updated)
-    return config.load(), {
+    return settings, {
         "capabilities": capabilities.as_dict(),
         "capability_level": level.value,
         "checked_path": checked_path,
         "storage_fingerprint": fingerprint,
         "encryption": encryption,
     }
+
+
+def _commit_setup_root(
+    settings: config.AppConfig,
+    root: Path,
+    result: Mapping[str, object],
+) -> config.AppConfig:
+    """Initialize a confirmed root and persist its completed probe result."""
+
+    marker = initialize_root(root)
+    ensure_layout(root)
+    cleanup_tmp(root)
+    capabilities = result.get("capabilities")
+    capability_level_value = result.get("capability_level")
+    checked_path = result.get("checked_path")
+    fingerprint = result.get("storage_fingerprint")
+    encryption = result.get("encryption")
+    if not isinstance(capabilities, dict):
+        raise ConfigError("Storage capability result is invalid")
+    if not isinstance(capability_level_value, str):
+        raise ConfigError("Storage capability result is invalid")
+    if not isinstance(checked_path, str):
+        raise ConfigError("Storage capability result is invalid")
+    if not isinstance(fingerprint, str):
+        raise ConfigError("Storage capability result is invalid")
+    if not isinstance(encryption, str):
+        raise ConfigError("Storage capability result is invalid")
+    capabilities_value = cast(config.JSONValue, capabilities)
+    profile_updates: dict[str, config.JSONValue] = {
+        "capabilities": capabilities_value,
+        "capability_level": capability_level_value,
+        "checked_path": checked_path,
+        "storage_fingerprint": fingerprint,
+        "encryption": encryption,
+        "encryption_declared_at": datetime.now(UTC).isoformat(),
+    }
+    profiles = dict(settings.storage_profiles)
+    raw_profile = profiles.get(marker.root_uuid)
+    profile = dict(raw_profile) if isinstance(raw_profile, dict) else {}
+    profile.update(profile_updates)
+    updated = replace(
+        settings,
+        storage_root_uuid=marker.root_uuid,
+        storage_root_candidates=(_normalized_storage_path(root),),
+        storage_profiles={**profiles, marker.root_uuid: profile},
+    )
+    config.save(updated)
+    return config.load()
 
 
 def _normalized_storage_path(root: Path) -> str:
@@ -258,18 +282,27 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
         root = _available_root(active_settings, requested_root)
         setup_wizard: SetupWizard | None = None
         if root is None:
+            pending_probe: dict[str, object] | None = None
 
             def probe_root(selected_root: Path, encryption: str) -> Mapping[str, object]:
-                nonlocal active_settings
-                active_settings, result = _probe_setup_root(
+                nonlocal pending_probe
+                _unchanged_settings, result = _probe_setup_root(
                     active_settings,
                     selected_root,
                     encryption,
                 )
+                pending_probe = result
                 return result
 
             def start_session(selected_root: Path) -> AppContext:
-                nonlocal session, context
+                nonlocal active_settings, session, context
+                if pending_probe is None:
+                    raise ConfigError("Storage root must be probed before confirmation")
+                active_settings = _commit_setup_root(
+                    active_settings,
+                    selected_root,
+                    pending_probe,
+                )
                 session = StorageSession(active_settings, selected_root)
                 session.__enter__()
                 context = AppContext(session, session.settings)
@@ -290,7 +323,6 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
                     path,
                     active_settings.storage_root_uuid,
                 ).value,
-                root_initializer=lambda path: initialize_root(path).root_uuid,
                 check_root_space=lambda path: check_free_space(path).value,
                 resolve_drive_kind=lambda path: drive_kind(path).value,
                 resolve_free_space=free_space,

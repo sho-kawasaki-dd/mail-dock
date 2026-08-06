@@ -76,18 +76,21 @@ class _FakeContext:
 
 class _FakeWizard:
     callback: Any
+    probe_callback: Any
     accepted: ClassVar[bool] = True
     events: ClassVar[list[str]] = []
 
     def __init__(self, **kwargs: Any) -> None:
         self.callback = kwargs["on_root_confirmed"]
+        self.probe_callback = kwargs["on_root_probe"]
         self.selected_root: Path | None = None
         self.__class__.events.append("wizard")
 
     def exec(self) -> int:
         if self.accepted:
-            self.__class__.events.append("confirm")
             self.selected_root = Path("/attached/mail-dock")
+            self.probe_callback(self.selected_root, "unknown")
+            self.__class__.events.append("confirm")
             self.callback(self.selected_root)
             return app.QWizardAccepted
         self.__class__.events.append("cancel")
@@ -139,7 +142,7 @@ def test_run_gui_starts_session_only_after_root_confirmation(
     assert window.stop_calls == 1
 
 
-def test_setup_root_probe_persists_capabilities_and_encryption_declaration(
+def test_setup_root_probe_does_not_initialize_or_persist_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -164,11 +167,8 @@ def test_setup_root_probe_persists_capabilities_and_encryption_declaration(
 
     assert result["capability_level"] == "degraded"
     assert result["encryption"] == "unknown"
-    assert loaded.storage_root_uuid is not None
-    profile = loaded.storage_profiles[loaded.storage_root_uuid]
-    assert isinstance(profile, dict)
-    assert profile["capability_level"] == "degraded"
-    assert profile["encryption"] == "unknown"
+    assert loaded == settings
+    assert saved == []
 
 
 def test_run_gui_cancelled_wizard_does_not_create_session(

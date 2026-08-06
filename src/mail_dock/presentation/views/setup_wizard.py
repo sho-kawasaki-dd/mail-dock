@@ -284,8 +284,7 @@ class SetupWizard(QWizard):
         root = Path(value).expanduser()
         try:
             if (
-                self._root_initializer is None
-                or self._check_root_space is None
+                self._check_root_space is None
                 or self._resolve_drive_kind is None
                 or self._resolve_free_space is None
             ):
@@ -297,13 +296,6 @@ class SetupWizard(QWizard):
                     raise MailDockError("Storage root identity result is invalid")
                 if existing_root_probe == "foreign":
                     raise StorageForeignRootError(strings.ERROR_FOREIGN_ROOT)
-            root_uuid = self._root_initializer(root)
-            if (
-                existing_root_probe != "missing"
-                and self._expected_root_uuid is not None
-                and root_uuid != self._expected_root_uuid
-            ):
-                raise StorageForeignRootError(strings.ERROR_FOREIGN_ROOT)
             drive_kind = self._resolve_drive_kind(root)
             free_bytes = self._resolve_free_space(root)
             self._drive_kind_label.setText(_drive_kind_text(drive_kind))
