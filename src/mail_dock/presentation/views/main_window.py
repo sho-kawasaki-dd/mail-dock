@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from PySide6.QtCore import QSettings, Qt, QUrl, Signal
+from PySide6.QtCore import QItemSelectionModel, QModelIndex, QSettings, Qt, QUrl, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QDialog,
@@ -528,12 +528,26 @@ class MainWindow(QMainWindow):
         if self._sync_token is not None or self._folder_refresh_token is not None:
             return
         account_id = self._selected_account_id()
-        if account_id is None:
+        if account_id is not None:
+            if not self._prepare_sync((account_id,)):
+                return
+            self._start_sync(self.sync_worker.sync_account(account_id))
+            return
+        # No specific account row is selected (e.g. 'all accounts' or an empty
+        # tree): sync every enabled account instead of blocking the user.
+        account_ids = self._enabled_account_ids()
+        if not account_ids:
             self._status_label.setText(strings.STATUS_NO_ACCOUNT_SELECTED)
             return
-        if not self._prepare_sync((account_id,)):
+        if not self._prepare_sync(account_ids):
             return
-        self._start_sync(self.sync_worker.sync_account(account_id))
+        sync_all_accounts = getattr(self.sync_worker, "sync_all_accounts", None)
+        if callable(sync_all_accounts):
+            token = sync_all_accounts()
+            if isinstance(token, CancelToken):
+                self._start_sync(token)
+            return
+        self._start_sync(self.sync_worker.sync_account(account_ids[0]))
 
     def _refresh_selected_account(self) -> None:
         if self._sync_token is not None or self._folder_refresh_token is not None:
@@ -616,9 +630,54 @@ class MainWindow(QMainWindow):
     def _update_folder_tree(self, snapshot: object) -> None:
         if not isinstance(snapshot, FolderTreeSnapshot):
             return
+        previous_key = self._current_folder_tree_key()
         self.folder_tree_model.set_roots(
             build_mail_account_roots(snapshot.accounts, snapshot.folders)
         )
+        # set_roots() resets the view, collapsing every branch and clearing selection.
+        self.folder_tree_view.expandAll()
+        self._restore_folder_tree_selection(previous_key)
+
+    def _current_folder_tree_key(self) -> str | None:
+        node = self.folder_tree_model.data(
+            self.folder_tree_view.currentIndex(),
+            self.folder_tree_model.NodeRole,
+        )
+        key = getattr(node, "key", None)
+        return key if isinstance(key, str) else None
+
+    def _restore_folder_tree_selection(self, previous_key: str | None) -> None:
+        index = QModelIndex()
+        if previous_key is not None:
+            index = self.folder_tree_model.index_for_key(previous_key)
+        if not index.isValid():
+            index = self._default_folder_tree_index()
+        if not index.isValid():
+            return
+        selection_model = self.folder_tree_view.selectionModel()
+        if selection_model is not None:
+            selection_model.setCurrentIndex(
+                index,
+                QItemSelectionModel.SelectionFlag.ClearAndSelect
+                | QItemSelectionModel.SelectionFlag.Rows,
+            )
+
+    def _default_folder_tree_index(self) -> QModelIndex:
+        """Prefer the sole account, otherwise fall back to 'all accounts'."""
+
+        all_accounts_key: str | None = None
+        account_keys: list[str] = []
+        for root in self.folder_tree_model.roots():
+            for node in _walk_folder_tree(root):
+                if node.kind == "account":
+                    account_keys.append(node.key)
+                elif node.kind == "all_accounts" and all_accounts_key is None:
+                    all_accounts_key = node.key
+        if len(account_keys) == 1:
+            return self.folder_tree_model.index_for_key(account_keys[0])
+        if all_accounts_key is not None:
+            return self.folder_tree_model.index_for_key(all_accounts_key)
+        return QModelIndex()
 
     def _show_sync_error(self, notification: object) -> None:
         if not isinstance(notification, SyncErrorNotification):

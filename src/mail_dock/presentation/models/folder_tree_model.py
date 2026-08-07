@@ -260,6 +260,24 @@ class FolderTreeModel(QAbstractItemModel):
 
         return self.message_filter(index)
 
+    def index_for_key(self, key: str) -> QModelIndex:
+        """Return the index for the node with ``key``, or an invalid index.
+
+        Used to restore or default a tree selection after ``set_roots``
+        resets the view's expansion and selection state.
+        """
+
+        def _search(items: list[_TreeItem]) -> QModelIndex:
+            for row, item in enumerate(items):
+                if item.value.key == key:
+                    return self.createIndex(row, 0, item)
+                found = _search(item.children)
+                if found.isValid():
+                    return found
+            return _EMPTY_INDEX
+
+        return _search(self._roots)
+
     def _children_for(
         self,
         parent: QModelIndex | QPersistentModelIndex,
