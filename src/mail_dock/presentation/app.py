@@ -464,13 +464,11 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
                     selected_root,
                     pending_probe,
                 )
-                session = StorageSession(active_settings, selected_root)
-                session.__enter__()
-                context = AppContext(session, session.settings)
+                session, context = _start_session(active_settings, selected_root)
                 updated_settings = replace(
                     session.settings,
                     storage_root_uuid=session.root_uuid,
-                    storage_root_candidates=(str(selected_root.resolve(strict=False)),),
+                    storage_root_candidates=(_normalized_storage_path(selected_root),),
                 )
                 context.save_settings(updated_settings)
                 return context

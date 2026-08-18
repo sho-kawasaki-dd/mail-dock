@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -71,6 +72,7 @@ class _Fetcher:
 
 class _Context:
     def __init__(self, *, profile: dict[str, config.JSONValue] | None = None) -> None:
+        self.storage_root: Path | None = None
         self.root_uuid = "root-1" if profile is not None else None
         self.settings = config.AppConfig(
             storage_root_uuid=self.root_uuid,
@@ -176,6 +178,20 @@ def test_status_bar_displays_encryption_and_capability_state(qtbot: Any) -> None
     assert "unknown" in window._encryption_status_label.text()
     assert "DEGRADED" in window._storage_status_label.text()
     assert window.encryption_help_action.text() == "保管先の暗号化について"
+    window.stop_workers()
+
+
+def test_storage_menu_and_status_bar_display_active_root(qtbot: Any) -> None:
+    context = _Context(profile={"encryption": "encrypted", "capability_level": "ok"})
+    context.storage_root = Path("C:/mail-dock")
+    window = MainWindow(cast(Any, context))
+    qtbot.addWidget(window)
+
+    assert window.storage_info_action.text() == strings.MAIN_MENU_STORAGE_INFO
+    assert window.storage_switch_action.text() == strings.MAIN_MENU_STORAGE_SWITCH
+    assert window.storage_setup_action.text() == strings.MAIN_MENU_STORAGE_SETUP
+    assert str(context.storage_root) in window._storage_root_label.text()
+    assert window._storage_root_label.toolTip() == str(context.storage_root)
     window.stop_workers()
 
 
