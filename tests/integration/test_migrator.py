@@ -22,8 +22,8 @@ def test_empty_database_migrates_to_latest_version(
 ) -> None:
     db_path = tmp_path / "metadata.db"
 
-    assert migrate(db_conn, db_path) == 3
-    assert current_version(db_conn) == 3
+    assert migrate(db_conn, db_path) == 4
+    assert current_version(db_conn) == 4
     assert db_conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
 
 
@@ -34,7 +34,7 @@ def test_nonempty_v0_database_is_backed_up_before_migration(tmp_path: Path) -> N
         connection.execute("CREATE TABLE legacy (value TEXT)")
         connection.execute("INSERT INTO legacy VALUES ('old')")
         connection.commit()
-        assert migrate(connection, db_path) == 3
+        assert migrate(connection, db_path) == 4
     finally:
         connection.close()
 
@@ -49,7 +49,7 @@ def test_nonempty_v0_database_is_backed_up_before_migration(tmp_path: Path) -> N
 
     rerun = connect(db_path)
     try:
-        assert migrate(rerun, db_path) == 3
+        assert migrate(rerun, db_path) == 4
     finally:
         rerun.close()
     assert not (tmp_path / "metadata.db.bak.0.1").exists()
@@ -107,7 +107,7 @@ def test_timestamp_migration_normalizes_legacy_values_and_defaults(
     )
     db_conn.commit()
 
-    assert migrate(db_conn, tmp_path / "metadata.db") == 3
+    assert migrate(db_conn, tmp_path / "metadata.db") == 4
 
     values = db_conn.execute(
         """

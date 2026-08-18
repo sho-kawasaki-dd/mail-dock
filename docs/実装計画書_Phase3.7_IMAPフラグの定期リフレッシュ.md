@@ -84,15 +84,15 @@
 
 ### **Group B: DBスキーマとリポジトリ**
 
-- [ ] `migrations/004_flag_refresh.sql` を追加し、`folders.highest_modseq INTEGER` と候補検索用インデックス `messages(folder_id, uidvalidity, internal_date)` を追加する
-- [ ] `message_repository.py` の `_FOLDER_COLUMNS` に `highest_modseq` を追加し、`list_folders` / `list_sync_targets` からユースケースへ保存値を供給する
-- [ ] `BaseMessageRepository` に `list_flag_refresh_items(account_id, folder_id, uidvalidity, since_internal_date) -> Sequence[MessageRecord]` を追加し、`uid` / `imap_flags` / `flags_seen_at` を返す
-- [ ] `BaseMessageRepository` に `update_flags(account_id, folder_id, uidvalidity, uid, imap_flags, flags_seen_at) -> None` を追加する
-- [ ] `BaseMessageRepository` に `touch_flags_seen_at(account_id, folder_id, uidvalidity, uids: Sequence[int], flags_seen_at: str) -> None` を追加し、N+1クエリを防ぐ一括更新を定義する
-- [ ] `BaseMessageRepository` に `set_highest_modseq(folder_id, value: int | None) -> None` を追加し、値の保存と明示的な `NULL` リセットを可能にする
-- [ ] `SqliteMessageRepository` に上記メソッド群を実装する（`touch_flags_seen_at` は SQLiteのパラメータ上限を考慮し500件単位でチャンク分割実行）
-- [ ] `initialize_sync_cursors` では `highest_modseq = NULL` にリセットし、`set_highest_modseq` は既存のバッチ内で利用できるようにする
-- [ ] `tests/support/in_memory_repository.py` に同メソッド群を追加する
+- [x] `migrations/004_flag_refresh.sql` を追加し、`folders.highest_modseq INTEGER` と候補検索用インデックス `messages(folder_id, uidvalidity, internal_date)` を追加する
+- [x] `message_repository.py` の `_FOLDER_COLUMNS` に `highest_modseq` を追加し、`list_folders` / `list_sync_targets` からユースケースへ保存値を供給する
+- [x] `BaseMessageRepository` に、`list_flag_refresh_items(account_id, folder_id, uidvalidity, since_internal_date) -> Sequence[MessageRecord]` を追加し、`uid` / `imap_flags` / `flags_seen_at` を返す
+- [x] `BaseMessageRepository` に `update_flags(account_id, folder_id, uidvalidity, uid, imap_flags, flags_seen_at) -> None` を追加する
+- [x] `BaseMessageRepository` に `touch_flags_seen_at(account_id, folder_id, uidvalidity, uids: Sequence[int], flags_seen_at: str) -> None` を追加し、N+1クエリを防ぐ一括更新を定義する
+- [x] `BaseMessageRepository` に `set_highest_modseq(folder_id, value: int | None) -> None` を追加し、値の保存と明示的な `NULL` リセットを可能にする
+- [x] `SqliteMessageRepository` に上記メソッド群を実装する（`touch_flags_seen_at` は SQLiteのパラメータ上限を考慮し500件単位でチャンク分割実行）
+- [x] `initialize_sync_cursors` では `highest_modseq = NULL` にリセットし、`set_highest_modseq` は既存のバッチ内で利用できるようにする
+- [x] `tests/support/in_memory_repository.py` に同メソッド群を追加する
 
 ### **Group C: 設定**
 

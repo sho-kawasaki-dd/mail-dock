@@ -59,6 +59,7 @@ class InMemoryMessageRepository(BaseMessageRepository):
             self._next_folder_id = max(self._next_folder_id, folder_id + 1)
             record["id"] = folder_id
             record.setdefault("is_sync_target", 0)
+            record.setdefault("highest_modseq", None)
             self.folders[folder_id] = record
         else:
             folder_id = int(existing["id"])
@@ -92,6 +93,7 @@ class InMemoryMessageRepository(BaseMessageRepository):
         self.folders.setdefault(int(folder_id), {"id": int(folder_id)}).update(
             self.cursors[int(folder_id)]
         )
+        self.folders[int(folder_id)]["highest_modseq"] = None
 
     def update_sync_cursors(
         self,
@@ -109,6 +111,70 @@ class InMemoryMessageRepository(BaseMessageRepository):
         if initial_sync_completed is not None:
             cursor["initial_sync_completed"] = int(initial_sync_completed)
         self.folders.setdefault(int(folder_id), {"id": int(folder_id)}).update(cursor)
+
+    def list_flag_refresh_items(
+        self,
+        account_id: str,
+        folder_id: Any,
+        uidvalidity: int,
+        since_internal_date: str,
+    ) -> Sequence[MessageRecord]:
+        return [
+            {
+                "uid": item["uid"],
+                "imap_flags": item.get("imap_flags"),
+                "flags_seen_at": item.get("flags_seen_at"),
+            }
+            for item in self.messages.values()
+            if item.get("account_id") == account_id
+            and item.get("folder_id") == folder_id
+            and item.get("uidvalidity") == uidvalidity
+            and item.get("uid") is not None
+            and item.get("internal_date") is not None
+            and str(item["internal_date"]) >= since_internal_date
+        ]
+
+    def update_flags(
+        self,
+        account_id: str,
+        folder_id: Any,
+        uidvalidity: int,
+        uid: int,
+        imap_flags: str | None,
+        flags_seen_at: str,
+    ) -> None:
+        for message in self.messages.values():
+            if (
+                message.get("account_id") == account_id
+                and message.get("folder_id") == folder_id
+                and message.get("uidvalidity") == uidvalidity
+                and message.get("uid") == uid
+            ):
+                message["imap_flags"] = imap_flags
+                message["flags_seen_at"] = flags_seen_at
+                return
+
+    def touch_flags_seen_at(
+        self,
+        account_id: str,
+        folder_id: Any,
+        uidvalidity: int,
+        uids: Sequence[int],
+        flags_seen_at: str,
+    ) -> None:
+        uid_set = set(uids)
+        for item in self.messages.values():
+            if (
+                item.get("account_id") == account_id
+                and item.get("folder_id") == folder_id
+                and item.get("uidvalidity") == uidvalidity
+                and item.get("uid") in uid_set
+            ):
+                item["flags_seen_at"] = flags_seen_at
+
+    def set_highest_modseq(self, folder_id: Any, value: int | None) -> None:
+        folder = self.folders.setdefault(int(folder_id), {"id": int(folder_id)})
+        folder["highest_modseq"] = value
 
     def add_message(self, record: MessageRecord, contents: MessageContents | None = None) -> int:
         incoming = self._copy(record)

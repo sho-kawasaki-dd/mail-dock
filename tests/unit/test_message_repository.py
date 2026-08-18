@@ -92,6 +92,62 @@ def test_batch_changes_are_not_committed_per_message(
     assert db_conn.execute("SELECT COUNT(*) FROM messages").fetchone() == (1,)
 
 
+def test_flag_refresh_repository_operations_and_modseq_reset(
+    db_conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    repository, folder_id = _repository(db_conn, tmp_path / "metadata.db")
+    repository.begin_batch()
+    repository.add_message(
+        {
+            **_message(folder_id, 11, uid=1),
+            "internal_date": "2026-07-01T00:00:00Z",
+            "imap_flags": "\\Seen",
+            "flags_seen_at": "2026-07-30T00:00:00Z",
+        }
+    )
+    repository.add_message(
+        {
+            **_message(folder_id, 11, uid=2),
+            "internal_date": "2026-08-01T00:00:00Z",
+            "imap_flags": "\\Flagged",
+        }
+    )
+    repository.commit_batch()
+
+    items = repository.list_flag_refresh_items(
+        "account", folder_id, 11, "2026-07-15T00:00:00Z"
+    )
+    assert items == [{"uid": 2, "imap_flags": "\\Flagged", "flags_seen_at": None}]
+
+    repository.begin_batch()
+    repository.update_flags("account", folder_id, 11, 2, "\\Seen \\Flagged", "2026-08-18T00:00:00Z")
+    repository.touch_flags_seen_at(
+        "account", folder_id, 11, [1], "2026-08-18T00:00:00Z"
+    )
+    repository.commit_batch()
+
+    rows = db_conn.execute(
+        "SELECT uid, imap_flags, flags_seen_at FROM messages ORDER BY uid"
+    ).fetchall()
+    assert rows == [
+        (1, "\\Seen", "2026-08-18T00:00:00Z"),
+        (2, "\\Seen \\Flagged", "2026-08-18T00:00:00Z"),
+    ]
+
+    repository.set_highest_modseq(folder_id, 42)
+    assert repository.list_folders("account")[0]["highest_modseq"] == 42
+    repository.initialize_sync_cursors(folder_id, 12, 2)
+    assert repository.list_folders("account")[0]["highest_modseq"] is None
+
+
+def test_flag_refresh_index_exists(db_conn: sqlite3.Connection, tmp_path: Path) -> None:
+    _repository(db_conn, tmp_path / "metadata.db")
+    index_columns = db_conn.execute(
+        "PRAGMA index_info(idx_msg_flag_refresh)"
+    ).fetchall()
+    assert [row[2] for row in index_columns] == ["folder_id", "uidvalidity", "internal_date"]
+
+
 def test_begin_batch_uses_immediate_transaction(
     db_conn: sqlite3.Connection, tmp_path: Path
 ) -> None:

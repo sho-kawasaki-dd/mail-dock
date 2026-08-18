@@ -47,6 +47,39 @@ class BaseMessageRepository(ABC):
     ) -> None: ...
 
     @abstractmethod
+    def list_flag_refresh_items(
+        self,
+        account_id: str,
+        folder_id: Any,
+        uidvalidity: int,
+        since_internal_date: str,
+    ) -> Sequence[MessageRecord]: ...
+
+    @abstractmethod
+    def update_flags(
+        self,
+        account_id: str,
+        folder_id: Any,
+        uidvalidity: int,
+        uid: int,
+        imap_flags: str | None,
+        flags_seen_at: str,
+    ) -> None: ...
+
+    @abstractmethod
+    def touch_flags_seen_at(
+        self,
+        account_id: str,
+        folder_id: Any,
+        uidvalidity: int,
+        uids: Sequence[int],
+        flags_seen_at: str,
+    ) -> None: ...
+
+    @abstractmethod
+    def set_highest_modseq(self, folder_id: Any, value: int | None) -> None: ...
+
+    @abstractmethod
     def add_message(
         self, record: MessageRecord, contents: MessageContents | None = None
     ) -> Any: ...

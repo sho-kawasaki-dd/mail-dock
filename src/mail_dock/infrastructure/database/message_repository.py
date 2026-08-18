@@ -39,6 +39,7 @@ _FOLDER_COLUMNS = (
     "last_synced_at",
     "backfill_next_uid",
     "initial_sync_completed",
+    "highest_modseq",
 )
 _MESSAGE_COLUMNS = (
     "message_id",
@@ -172,6 +173,7 @@ class SqliteMessageRepository(BaseMessageRepository):
             "last_synced_at": folder.get("last_synced_at"),
             "backfill_next_uid": folder.get("backfill_next_uid"),
             "initial_sync_completed": int(folder.get("initial_sync_completed", 0)),
+            "highest_modseq": folder.get("highest_modseq"),
         }
         update_columns = [
             column
@@ -233,6 +235,8 @@ class SqliteMessageRepository(BaseMessageRepository):
             updates["backfill_next_uid"] = max_uid
         if "initial_sync_completed" in columns:
             updates["initial_sync_completed"] = int(max_uid == 0)
+        if "highest_modseq" in columns:
+            updates["highest_modseq"] = None
         self._update_folder_columns(folder_id, updates)
 
     def update_sync_cursors(
@@ -253,6 +257,66 @@ class SqliteMessageRepository(BaseMessageRepository):
             updates["initial_sync_completed"] = int(initial_sync_completed)
         if updates:
             self._update_folder_columns(folder_id, updates)
+
+    def list_flag_refresh_items(
+        self,
+        account_id: str,
+        folder_id: Any,
+        uidvalidity: int,
+        since_internal_date: str,
+    ) -> Sequence[MessageRecord]:
+        with self._db_io("list flag refresh items"):
+            cursor = self._conn().execute(
+                "SELECT uid, imap_flags, flags_seen_at FROM messages "
+                "WHERE account_id = ? AND folder_id = ? AND uidvalidity = ? "
+                "AND uid IS NOT NULL AND internal_date >= ? ORDER BY uid",
+                (account_id, folder_id, uidvalidity, since_internal_date),
+            )
+            return self._rows(cursor)
+
+    def update_flags(
+        self,
+        account_id: str,
+        folder_id: Any,
+        uidvalidity: int,
+        uid: int,
+        imap_flags: str | None,
+        flags_seen_at: str,
+    ) -> None:
+        with self._db_io("update message flags"):
+            self._conn().execute(
+                "UPDATE messages SET imap_flags = ?, flags_seen_at = ? "
+                "WHERE account_id = ? AND folder_id = ? AND uidvalidity = ? AND uid = ?",
+                (imap_flags, flags_seen_at, account_id, folder_id, uidvalidity, uid),
+            )
+
+    def touch_flags_seen_at(
+        self,
+        account_id: str,
+        folder_id: Any,
+        uidvalidity: int,
+        uids: Sequence[int],
+        flags_seen_at: str,
+    ) -> None:
+        if not uids:
+            return
+        with self._db_io("touch message flag timestamps"):
+            connection = self._conn()
+            for offset in range(0, len(uids), 500):
+                chunk = uids[offset : offset + 500]
+                placeholders = ", ".join("?" for _ in chunk)
+                connection.execute(
+                    "UPDATE messages SET flags_seen_at = ? "
+                    "WHERE account_id = ? AND folder_id = ? AND uidvalidity = ? "
+                    f"AND uid IN ({placeholders})",
+                    (flags_seen_at, account_id, folder_id, uidvalidity, *chunk),
+                )
+
+    def set_highest_modseq(self, folder_id: Any, value: int | None) -> None:
+        with self._db_io("set folder highest modseq"):
+            self._conn().execute(
+                "UPDATE folders SET highest_modseq = ? WHERE id = ?", (value, folder_id)
+            )
 
     def _update_folder_columns(self, folder_id: Any, updates: Mapping[str, Any]) -> None:
         with self._db_io("update sync cursors"):
