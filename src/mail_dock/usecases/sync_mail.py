@@ -7,7 +7,7 @@ import logging
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from mail_dock.domain.errors import (
@@ -28,6 +28,7 @@ from mail_dock.usecases.retry import with_retry
 _LOGGER = logging.getLogger(__name__)
 _BATCH_MESSAGE_LIMIT = 100
 _BATCH_BYTES_LIMIT = 50 * 1024 * 1024
+_SQLITE_MAX_INTEGER = 2**63 - 1
 
 
 @dataclass(frozen=True)
@@ -122,6 +123,31 @@ def _date_iso(value: datetime | None) -> str | None:
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
     return to_utc_iso8601(value)
+
+
+def _valid_sqlite_modseq(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    if value <= 0 or value > _SQLITE_MAX_INTEGER:
+        return None
+    return value
+
+
+def _flag_seen_at_is_expired(
+    value: object,
+    *,
+    now: datetime,
+    minimum_interval: timedelta,
+) -> bool:
+    if not isinstance(value, str) or not value:
+        return True
+    try:
+        seen_at = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if seen_at.tzinfo is None:
+        seen_at = seen_at.replace(tzinfo=UTC)
+    return now - seen_at >= minimum_interval
 
 
 def _message_contents(parsed: ParsedMessage, *, empty: bool = False) -> MessageContents:
@@ -629,6 +655,180 @@ def sync_account(
             report(folder_raw_name)
         return minimum_seen is not None, minimum_seen
 
+    def refresh_flags(folder: dict[str, object], folder_raw_name: str) -> None:
+        if not options.flag_refresh_enabled or not bool(folder.get("initial_sync_completed", 0)):
+            return
+
+        folder_id = folder["id"]
+        uidvalidity = _get_int(folder, "uidvalidity")
+        now = datetime.now(UTC)
+        seen_at = to_utc_iso8601(now)
+        since = to_utc_iso8601(
+            now - timedelta(days=options.flag_refresh_window_days)
+        )
+        items = repo.list_flag_refresh_items(
+            account_id, folder_id, uidvalidity, since
+        )
+        local_flags: dict[int, str | None] = {}
+        expired_uids: set[int] = set()
+        minimum_interval = timedelta(seconds=options.flag_refresh_min_interval_seconds)
+        for item in items:
+            uid = item.get("uid")
+            if not isinstance(uid, int) or isinstance(uid, bool):
+                continue
+            local_flags[uid] = cast(str | None, item.get("imap_flags"))
+            if _flag_seen_at_is_expired(
+                item.get("flags_seen_at"),
+                now=now,
+                minimum_interval=minimum_interval,
+            ):
+                expired_uids.add(uid)
+        capabilities = getattr(fetcher, "capabilities", ())
+        condstore_supported = "CONDSTORE" in {
+            str(capability).upper() for capability in capabilities
+        }
+        current_modseq = _valid_sqlite_modseq(fetcher.get_highest_modseq())
+        raw_saved_modseq = folder.get("highest_modseq")
+        saved_modseq = _valid_sqlite_modseq(raw_saved_modseq)
+        use_condstore = condstore_supported and current_modseq is not None
+        saved_modseq_is_ahead = False
+        if saved_modseq is not None and current_modseq is not None:
+            saved_modseq_is_ahead = saved_modseq > current_modseq
+        if not expired_uids:
+            needs_modseq_reset = (
+                raw_saved_modseq is not None
+                and (
+                    not use_condstore
+                    or saved_modseq is None
+                    or saved_modseq_is_ahead
+                )
+            )
+            if needs_modseq_reset:
+                repo.begin_batch()
+                repo.set_highest_modseq(folder_id, None)
+                repo.commit_batch()
+            return
+        baseline = use_condstore and (
+            saved_modseq is None or saved_modseq_is_ahead
+        )
+
+        pending_changes: list[tuple[int, str | None]] = []
+        pending_touches: list[int] = []
+
+        def flush_flag_updates() -> None:
+            if not pending_changes and not pending_touches:
+                return
+            repo.begin_batch()
+            try:
+                for uid, flags in pending_changes:
+                    repo.update_flags(
+                        account_id,
+                        folder_id,
+                        uidvalidity,
+                        uid,
+                        flags,
+                        seen_at,
+                    )
+                if pending_touches:
+                    repo.touch_flags_seen_at(
+                        account_id,
+                        folder_id,
+                        uidvalidity,
+                        tuple(pending_touches),
+                        seen_at,
+                    )
+                repo.commit_batch()
+            finally:
+                pending_changes.clear()
+                pending_touches.clear()
+
+        def queue_update(uid: int, flags: str | None) -> None:
+            pending_changes.append((uid, flags))
+            if len(pending_changes) + len(pending_touches) >= 500:
+                flush_flag_updates()
+
+        def queue_touch(uid: int) -> None:
+            pending_touches.append(uid)
+            if len(pending_changes) + len(pending_touches) >= 500:
+                flush_flag_updates()
+
+        response_uids: set[int] = set()
+        if baseline:
+            iterator = fetcher.iter_flags(
+                folder_raw_name,
+                sorted(local_flags),
+                cancel=token,
+            )
+            for ref in iterator:
+                token.raise_if_cancelled()
+                if ref.uid not in local_flags:
+                    continue
+                response_uids.add(ref.uid)
+                queue_update(ref.uid, " ".join(ref.flags))
+            token.raise_if_cancelled()
+            flush_flag_updates()
+            if current_modseq is not None:
+                repo.begin_batch()
+                try:
+                    repo.set_highest_modseq(folder_id, current_modseq)
+                    repo.commit_batch()
+                finally:
+                    pending_changes.clear()
+                    pending_touches.clear()
+            return
+
+        if use_condstore and saved_modseq is not None and current_modseq is not None:
+            iterator = fetcher.iter_flags_since(
+                folder_raw_name,
+                saved_modseq,
+                cancel=token,
+            )
+            for ref in iterator:
+                token.raise_if_cancelled()
+                if ref.uid not in local_flags:
+                    continue
+                response_uids.add(ref.uid)
+                queue_update(ref.uid, " ".join(ref.flags))
+            token.raise_if_cancelled()
+            for uid in sorted(expired_uids - response_uids):
+                queue_touch(uid)
+            flush_flag_updates()
+            if current_modseq is not None:
+                repo.begin_batch()
+                try:
+                    repo.set_highest_modseq(folder_id, current_modseq)
+                    repo.commit_batch()
+                finally:
+                    pending_changes.clear()
+                    pending_touches.clear()
+            return
+
+        iterator = fetcher.iter_flags(
+            folder_raw_name,
+            sorted(expired_uids),
+            cancel=token,
+        )
+        for ref in iterator:
+            token.raise_if_cancelled()
+            if ref.uid not in local_flags:
+                continue
+            response_uids.add(ref.uid)
+            remote_flags = " ".join(ref.flags)
+            if local_flags[ref.uid] == remote_flags:
+                queue_touch(ref.uid)
+            else:
+                queue_update(ref.uid, remote_flags)
+        token.raise_if_cancelled()
+        flush_flag_updates()
+        if not use_condstore and saved_modseq is not None:
+            repo.begin_batch()
+            try:
+                repo.set_highest_modseq(folder_id, None)
+                repo.commit_batch()
+            finally:
+                pending_changes.clear()
+                pending_touches.clear()
+
     def sync_folder(folder: dict[str, object]) -> bool:
         folder_raw_name = str(folder["raw_name"])
         folder_id = folder["id"]
@@ -706,6 +906,7 @@ def sync_account(
                     repo.commit_batch()
                 backfill_next_uid = 0 if minimum_seen is None else max(minimum_seen - 1, 0)
                 initial_completed = backfill_next_uid == 0
+            folder["initial_sync_completed"] = int(initial_completed)
 
             catchup_max_uid = fetcher.get_max_uid(folder_raw_name)
             if catchup_max_uid > last_seen_uid:
@@ -722,6 +923,18 @@ def sync_account(
                 commit_pending(pending, cursor_folder_id=folder_id, last_seen_uid=catchup_max_uid)
             elif pending:
                 commit_pending(pending)
+            try:
+                refresh_flags(folder, folder_raw_name)
+            except AuthenticationError:
+                raise
+            except OperationCancelledError:
+                raise
+            except FetchError as error:
+                _LOGGER.warning(
+                    "Could not refresh IMAP flags: folder=%s error=%s",
+                    folder_raw_name,
+                    error,
+                )
             return False
         except OperationCancelledError:
             if pending:

@@ -102,21 +102,21 @@
 
 ### **Group D: 同期ユースケース**
 
-- [ ] `sync_mail.py` の `sync_folder()` に、新着・履歴backfill完了後、`initial_sync_completed` かつ `options.flag_refresh_enabled` が有効なフォルダに対してのみ動くフラグリフレッシュ・ステップを追加する
-- [ ] `list_flag_refresh_items` の結果から直近ウィンドウのUID→ローカルフラグの対応とTTL切れUIDを構築し、TTL切れUIDが0件ならIMAPコマンドを発行しない
-- [ ] `CONDSTORE` 対応時の経路を実装:
+- [x] `sync_mail.py` の `sync_folder()` に、新着・履歴backfill完了後、`initial_sync_completed` かつ `options.flag_refresh_enabled` が有効なフォルダに対してのみ動くフラグリフレッシュ・ステップを追加する
+- [x] `list_flag_refresh_items` の結果から直近ウィンドウのUID→ローカルフラグの対応とTTL切れUIDを構築し、TTL切れUIDが0件ならIMAPコマンドを発行しない
+- [x] `CONDSTORE` 対応時の経路を実装:
   - `folders.highest_modseq` が `NULL` の初回は、直近ウィンドウ内の全UIDを `iter_flags` で取得して基準スナップショットを作る
   - 保存済みMODSEQが有効な通常時は `iter_flags_since` でフォルダ全体の差分を取得し、直近ウィンドウ内のローカルUIDに該当する応答をTTLに関係なく `update_flags` する
   - 差分照会が正常完了したら、変化がなかったTTL切れUIDを `touch_flags_seen_at` する
   - 全FETCH正常完了後にのみ、サーバーの最新 `highest_modseq` を `set_highest_modseq` で最終バッチコミットする
   - `NOMODSEQ`、現在値欠落、保存値の後退・範囲異常時は `highest_modseq` を `NULL` にして初回基準点処理または非 `CONDSTORE` フォールバックへ移る
-- [ ] 非 `CONDSTORE` 時のフォールバック経路を実装:
+- [x] 非 `CONDSTORE` 時のフォールバック経路を実装:
   - TTL切れUIDのみを対象として `iter_flags` を実行する
   - `list_flag_refresh_items` で得たローカルフラグとリモートフラグを比較する
   - 変化があったメッセージは `update_flags`、応答があって変化がなかったメッセージは `touch_flags_seen_at`（N+1防止）で一括更新し、応答欠落UIDは更新しない
-- [ ] IMAP通信中は `BEGIN IMMEDIATE` を開始せず、DB更新のみ500件単位の短いバッチで実行する
-- [ ] フラグリフレッシュ中の `AuthenticationError` は再送出し、それ以外の `FetchError` は警告ログに残してフォルダ・アカウント全体の同期を失敗させない（`highest_modseq` は進めない）
-- [ ] `CancelToken` によるキャンセルは `OperationCancelledError` として既存のキャンセル処理へ渡し、その時点までにコミット済みの更新だけを保持して `highest_modseq` は進めない
+- [x] IMAP通信中は `BEGIN IMMEDIATE` を開始せず、DB更新のみ500件単位の短いバッチで実行する
+- [x] フラグリフレッシュ中の `AuthenticationError` は再送出し、それ以外の `FetchError` は警告ログに残してフォルダ・アカウント全体の同期を失敗させない（`highest_modseq` は進めない）
+- [x] `CancelToken` によるキャンセルは `OperationCancelledError` として既存のキャンセル処理へ渡し、その時点までにコミット済みの更新だけを保持して `highest_modseq` は進めない
 
 ### **Group E: GUI表示**
 
