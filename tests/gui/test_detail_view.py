@@ -156,3 +156,43 @@ def test_thread_button_updates_count_and_emits_loaded_items(qtbot: Any) -> None:
 
     assert "2" in view.thread_button.text()
     assert received == [items]
+
+
+def _open(worker: _FakeWorker, view: DetailView, summary: MessageSummary, html_body: str) -> None:
+    view.show_message(summary)
+    request = _Request(worker._next_request_id)
+    rendered = RenderedMessage(html_body=html_body, text_body="", parts=())
+    worker.result.emit(
+        type(
+            "Result",
+            (),
+            {
+                "channel": "detail/open",
+                "request_id": request.request_id,
+                "value": OpenedMessage(_detail(summary), rendered),
+            },
+        )()
+    )
+
+
+def test_remote_images_banner_hidden_without_remote_image_references(qtbot: Any) -> None:
+    worker = _FakeWorker()
+    view = DetailView(cast(Any, worker), lambda html, **_kwargs: html)
+    qtbot.addWidget(view)
+    view.show()
+    _open(worker, view, _summary(), "<p>本文のみ、画像なし</p>")
+
+    assert not view.remote_images_button.parentWidget().isVisible()
+
+
+def test_remote_images_banner_shown_for_remote_image_reference(qtbot: Any) -> None:
+    worker = _FakeWorker()
+    view = DetailView(cast(Any, worker), lambda html, **_kwargs: html)
+    qtbot.addWidget(view)
+    view.show()
+    _open(worker, view, _summary(), '<img src="https://example.test/pixel.gif">')
+
+    assert view.remote_images_button.parentWidget().isVisible()
+
+    view.remote_images_button.click()
+    assert not view.remote_images_button.parentWidget().isVisible()

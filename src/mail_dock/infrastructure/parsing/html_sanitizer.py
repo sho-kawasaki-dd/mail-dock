@@ -20,6 +20,7 @@ _REMOVED_TAGS = (
 _DANGEROUS_URL_RE = re.compile(r"[\x00-\x20]+")
 _CSP_HTTP_EQUIV = "content-security-policy"
 _REFRESH_HTTP_EQUIV = "refresh"
+_CSS_REMOTE_URL_RE = re.compile(r"url\(\s*['\"]?https?://", re.IGNORECASE)
 
 
 def _attribute_text(tag: Tag, name: str) -> str:
@@ -32,6 +33,27 @@ def _attribute_text(tag: Tag, name: str) -> str:
 def _is_dangerous_url(value: object) -> bool:
     normalized = _DANGEROUS_URL_RE.sub("", str(value)).casefold()
     return normalized.startswith(("javascript:", "data:"))
+
+
+def _is_remote_image_url(value: object) -> bool:
+    normalized = _DANGEROUS_URL_RE.sub("", str(value)).casefold()
+    return normalized.startswith(("http://", "https://"))
+
+
+def contains_remote_image_reference(html: str) -> bool:
+    """Return whether ``html`` references any http(s) image via ``<img>`` or CSS."""
+    soup = BeautifulSoup(html, "html.parser")
+    for img in soup.find_all("img"):
+        if _is_remote_image_url(_attribute_text(img, "src")):
+            return True
+    for tag in soup.find_all(True):
+        style = _attribute_text(tag, "style")
+        if style and _CSS_REMOTE_URL_RE.search(style):
+            return True
+    for style_tag in soup.find_all("style"):
+        if style_tag.string and _CSS_REMOTE_URL_RE.search(style_tag.string):
+            return True
+    return False
 
 
 def _direct_child(parent: Tag, name: str) -> Tag | None:

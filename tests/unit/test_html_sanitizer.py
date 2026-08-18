@@ -3,7 +3,10 @@ from __future__ import annotations
 from bs4 import BeautifulSoup
 from bs4.element import Tag
 
-from mail_dock.infrastructure.parsing.html_sanitizer import sanitize_mail_html
+from mail_dock.infrastructure.parsing.html_sanitizer import (
+    contains_remote_image_reference,
+    sanitize_mail_html,
+)
 
 
 def _first_tag(soup: BeautifulSoup, name: str) -> Tag:
@@ -77,3 +80,24 @@ def test_sanitizer_handles_empty_and_malformed_html() -> None:
         assert result.head is not None
         assert result.body is not None
         assert result.head.find("meta") is not None
+
+
+def test_contains_remote_image_reference_detects_img_tag() -> None:
+    assert contains_remote_image_reference('<img src="https://example.test/pixel.gif">')
+    assert contains_remote_image_reference('<img src="HTTP://example.test/pixel.gif">')
+
+
+def test_contains_remote_image_reference_detects_css_background() -> None:
+    assert contains_remote_image_reference(
+        '<div style="background-image: url(https://example.test/bg.png)"></div>'
+    )
+    assert contains_remote_image_reference(
+        "<style>.x { background: url('https://example.test/bg.png'); }</style>"
+    )
+
+
+def test_contains_remote_image_reference_ignores_local_and_missing_images() -> None:
+    assert not contains_remote_image_reference("<p>Hello</p>")
+    assert not contains_remote_image_reference('<img src="cid:logo">')
+    assert not contains_remote_image_reference('<img src="data:image/png;base64,AAA">')
+
