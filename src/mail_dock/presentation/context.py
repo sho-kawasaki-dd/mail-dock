@@ -233,9 +233,7 @@ class AppContext:
 
         window = MainWindow(
             self,
-            on_storage_root_switch=(
-                on_storage_root_switch or self.storage_root_switch_handler
-            ),
+            on_storage_root_switch=(on_storage_root_switch or self.storage_root_switch_handler),
             on_storage_setup=on_storage_setup or self.storage_setup_handler,
         )
         if self.window_created_handler is not None:

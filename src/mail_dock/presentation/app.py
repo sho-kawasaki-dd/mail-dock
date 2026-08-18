@@ -483,10 +483,12 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
                 expected_root_uuid=active_settings.storage_root_uuid,
                 on_root_confirmed=start_session,
                 on_root_probe=probe_root,
-                on_root_identity_probe=lambda path: probe(
-                    path,
-                    active_settings.storage_root_uuid,
-                ).value,
+                on_root_identity_probe=lambda path: (
+                    probe(
+                        path,
+                        active_settings.storage_root_uuid,
+                    ).value
+                ),
                 check_root_space=lambda path: check_free_space(path).value,
                 resolve_drive_kind=lambda path: drive_kind(path).value,
                 resolve_free_space=free_space,

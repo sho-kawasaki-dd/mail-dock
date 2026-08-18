@@ -82,7 +82,9 @@ class AccountDialog(QDialog):
     def _build_ui(self) -> None:
         account = self._existing_account
         self.setWindowTitle(
-            strings.SETTINGS_BUTTON_EDIT_ACCOUNT if self._editing else strings.SETTINGS_BUTTON_ADD_ACCOUNT
+            strings.SETTINGS_BUTTON_EDIT_ACCOUNT
+            if self._editing
+            else strings.SETTINGS_BUTTON_ADD_ACCOUNT
         )
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -510,7 +512,9 @@ class SettingsDialog(QDialog):
         self._account_list.itemDoubleClicked.connect(self._edit_account)
         self._add_account_button = QPushButton(strings.SETTINGS_BUTTON_ADD_ACCOUNT, accounts_group)
         self._add_account_button.clicked.connect(self._add_account)
-        self._edit_account_button = QPushButton(strings.SETTINGS_BUTTON_EDIT_ACCOUNT, accounts_group)
+        self._edit_account_button = QPushButton(
+            strings.SETTINGS_BUTTON_EDIT_ACCOUNT, accounts_group
+        )
         self._edit_account_button.setEnabled(False)
         self._edit_account_button.clicked.connect(self._edit_account)
         accounts_controls.addWidget(self._add_account_button)

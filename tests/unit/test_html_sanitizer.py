@@ -100,4 +100,3 @@ def test_contains_remote_image_reference_ignores_local_and_missing_images() -> N
     assert not contains_remote_image_reference("<p>Hello</p>")
     assert not contains_remote_image_reference('<img src="cid:logo">')
     assert not contains_remote_image_reference('<img src="data:image/png;base64,AAA">')
-

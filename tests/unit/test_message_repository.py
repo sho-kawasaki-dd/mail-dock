@@ -69,9 +69,7 @@ def test_add_message_replaces_lone_surrogates_in_contents(
     )
     repository.commit_batch()
 
-    contents = db_conn.execute(
-        "SELECT subject_norm, body_text FROM message_contents"
-    ).fetchone()
+    contents = db_conn.execute("SELECT subject_norm, body_text FROM message_contents").fetchone()
     assert contents == ("broken? subject", "body? text")
 
 
@@ -114,16 +112,12 @@ def test_flag_refresh_repository_operations_and_modseq_reset(
     )
     repository.commit_batch()
 
-    items = repository.list_flag_refresh_items(
-        "account", folder_id, 11, "2026-07-15T00:00:00Z"
-    )
+    items = repository.list_flag_refresh_items("account", folder_id, 11, "2026-07-15T00:00:00Z")
     assert items == [{"uid": 2, "imap_flags": "\\Flagged", "flags_seen_at": None}]
 
     repository.begin_batch()
     repository.update_flags("account", folder_id, 11, 2, "\\Seen \\Flagged", "2026-08-18T00:00:00Z")
-    repository.touch_flags_seen_at(
-        "account", folder_id, 11, [1], "2026-08-18T00:00:00Z"
-    )
+    repository.touch_flags_seen_at("account", folder_id, 11, [1], "2026-08-18T00:00:00Z")
     repository.commit_batch()
 
     rows = db_conn.execute(
@@ -142,9 +136,7 @@ def test_flag_refresh_repository_operations_and_modseq_reset(
 
 def test_flag_refresh_index_exists(db_conn: sqlite3.Connection, tmp_path: Path) -> None:
     _repository(db_conn, tmp_path / "metadata.db")
-    index_columns = db_conn.execute(
-        "PRAGMA index_info(idx_msg_flag_refresh)"
-    ).fetchall()
+    index_columns = db_conn.execute("PRAGMA index_info(idx_msg_flag_refresh)").fetchall()
     assert [row[2] for row in index_columns] == ["folder_id", "uidvalidity", "internal_date"]
 
 

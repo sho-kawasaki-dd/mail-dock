@@ -332,20 +332,26 @@ class MainWindow(QMainWindow):
         selected = QFileDialog.getExistingDirectory(self, strings.MAIN_MENU_STORAGE_SWITCH)
         if not selected:
             return
-        if self.has_active_operations() and not ConfirmationDialog(
-            strings.DIALOG_CONFIRM_STORAGE_SWITCH_BUSY,
-            self,
-        ).confirmed():
+        if (
+            self.has_active_operations()
+            and not ConfirmationDialog(
+                strings.DIALOG_CONFIRM_STORAGE_SWITCH_BUSY,
+                self,
+            ).confirmed()
+        ):
             return
         self._on_storage_root_switch(Path(selected))
 
     def _request_storage_setup(self) -> None:
         if self._on_storage_setup is None:
             return
-        if self.has_active_operations() and not ConfirmationDialog(
-            strings.DIALOG_CONFIRM_STORAGE_SETUP_BUSY,
-            self,
-        ).confirmed():
+        if (
+            self.has_active_operations()
+            and not ConfirmationDialog(
+                strings.DIALOG_CONFIRM_STORAGE_SETUP_BUSY,
+                self,
+            ).confirmed()
+        ):
             return
         self._on_storage_setup(None)
 

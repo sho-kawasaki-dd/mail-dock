@@ -435,9 +435,7 @@ class OnamaeImapFetcher(BaseMailFetcher):
         if allow_plain:
             for item in items:
                 text = (
-                    item.decode("ascii", errors="replace")
-                    if isinstance(item, bytes)
-                    else str(item)
+                    item.decode("ascii", errors="replace") if isinstance(item, bytes) else str(item)
                 )
                 if text.strip().isdigit():
                     return int(text.strip())

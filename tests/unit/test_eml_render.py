@@ -61,8 +61,7 @@ def test_renderer_recovers_halfwidth_kana_mislabeled_as_plain_iso_2022_jp() -> N
     # ESC ( I half-width kana is common in real mail but rejected by the strict codec.
     body = b"Contact: \x1b(I\x31\x32\x33\x1b(B desu"
     raw = (
-        b"Content-Type: text/plain; charset=iso-2022-jp\r\n"
-        b"Content-Transfer-Encoding: 8bit\r\n\r\n"
+        b"Content-Type: text/plain; charset=iso-2022-jp\r\nContent-Transfer-Encoding: 8bit\r\n\r\n"
     ) + body
 
     rendered = extract_render_parts(raw)

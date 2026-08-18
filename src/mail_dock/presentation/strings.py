@@ -296,8 +296,12 @@ SETTINGS_LABEL_USERNAME = "ユーザー名"
 SETTINGS_LABEL_PASSWORD = "パスワード"
 SETTINGS_LABEL_DISPLAY_NAME = "表示名"
 SETTINGS_LABEL_ACCOUNT_ID = "account_id"
-SETTINGS_HINT_PASSWORD_UNCHANGED = "変更する場合のみ入力してください（空欄なら現在のパスワードを維持します）"
-SETTINGS_HINT_ACCOUNT_ID_LOCKED = "登録後は変更できません（ストレージ区画と資格情報のキーに使われています）"
+SETTINGS_HINT_PASSWORD_UNCHANGED = (
+    "変更する場合のみ入力してください（空欄なら現在のパスワードを維持します）"
+)
+SETTINGS_HINT_ACCOUNT_ID_LOCKED = (
+    "登録後は変更できません（ストレージ区画と資格情報のキーに使われています）"
+)
 
 SAVE_DIALOG_TITLE = "ファイルの保存先を選択"
 SAVE_ATTACHMENT_SANITIZED = "ファイル名が変更されました: {original} → {sanitized}"
