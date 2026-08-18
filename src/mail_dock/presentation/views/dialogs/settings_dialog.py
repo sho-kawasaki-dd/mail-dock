@@ -35,7 +35,11 @@ from mail_dock.domain.repository import MessageRecord
 from mail_dock.presentation import strings
 from mail_dock.presentation.errors import present_error
 from mail_dock.presentation.threads.worker import Worker
-from mail_dock.usecases.register_account import register_account
+from mail_dock.usecases.register_account import (
+    load_credentials,
+    register_account,
+    update_account,
+)
 from mail_dock.usecases.sync_folders import refresh_folders, set_sync_target
 
 from .progress_dialog import ProgressDialog
@@ -50,13 +54,21 @@ class _OperationResult:
 
 
 class AccountDialog(QDialog):
-    """Collect and register one account without exposing its password to SQLite."""
+    """Collect a new account, or edit an existing one, without exposing its password to SQLite."""
 
     account_added = Signal(str)
+    account_updated = Signal(str)
 
-    def __init__(self, context: Any, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        context: Any,
+        parent: QWidget | None = None,
+        account: MessageRecord | None = None,
+    ) -> None:
         super().__init__(parent)
         self._context = context
+        self._existing_account = account
+        self._editing = account is not None
         self._worker = Worker(getattr(context, "connection_manager", None))
         self._worker.result.connect(self._operation_succeeded)
         self._worker.failed.connect(self._operation_failed)
@@ -68,7 +80,10 @@ class AccountDialog(QDialog):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        self.setWindowTitle(strings.SETTINGS_BUTTON_ADD_ACCOUNT)
+        account = self._existing_account
+        self.setWindowTitle(
+            strings.SETTINGS_BUTTON_EDIT_ACCOUNT if self._editing else strings.SETTINGS_BUTTON_ADD_ACCOUNT
+        )
         layout = QVBoxLayout(self)
         form = QFormLayout()
 
@@ -83,6 +98,22 @@ class AccountDialog(QDialog):
         self._display_name_edit = QLineEdit(self)
         self._status_label = QLabel(self)
         self._status_label.setWordWrap(True)
+
+        if account is not None:
+            self._account_id_edit.setText(str(account.get("id", "")))
+            self._account_id_edit.setReadOnly(True)
+            self._account_id_edit.setToolTip(strings.SETTINGS_HINT_ACCOUNT_ID_LOCKED)
+            self._host_edit.setText(str(account.get("host", "")))
+            self._port_edit.setValue(int(account.get("port") or 993))
+            self._username_edit.setText(str(account.get("username", "")))
+            self._display_name_edit.setText(str(account.get("display_name") or ""))
+            self._password_edit.setPlaceholderText(strings.SETTINGS_HINT_PASSWORD_UNCHANGED)
+        # Captured after prefilling so unrelated display-name-only edits skip the connection test.
+        self._original_connection_values = (
+            self._host_edit.text().strip(),
+            self._port_edit.value(),
+            self._username_edit.text().strip(),
+        )
 
         for field in (
             self._account_id_edit,
@@ -109,13 +140,35 @@ class AccountDialog(QDialog):
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
             parent=self,
         )
-        buttons.accepted.connect(self._register_account)
+        buttons.accepted.connect(self._save_account)
         buttons.rejected.connect(self.reject)
         self._buttons = buttons
         layout.addWidget(buttons)
 
     def _invalidate_connection_test(self, *_args: object) -> None:
         self._connection_test_passed = False
+
+    def _connection_fields_changed(self) -> bool:
+        """Whether host/port/username/password differ from the stored account.
+
+        Editing only the display name should not force a connection re-test.
+        """
+
+        if not self._editing:
+            return True
+        if self._password_edit.text():
+            return True
+        current = (
+            self._host_edit.text().strip(),
+            self._port_edit.value(),
+            self._username_edit.text().strip(),
+        )
+        return current != self._original_connection_values
+
+    def _resolved_test_password(self, values: dict[str, Any]) -> str:
+        if values["password"]:
+            return cast(str, values["password"])
+        return load_credentials(self._context.credential_store, values["account_id"])
 
     def _test_connection(self) -> None:
         values = self._account_values()
@@ -131,38 +184,63 @@ class AccountDialog(QDialog):
         self._connection_test_passed = False
         self._test_button.setEnabled(False)
         self._status_label.setText(strings.SETTINGS_STATUS_TESTING_CONNECTION)
-        token = self._submit("connection", lambda: _test_connection(self._context, values))
+        token = self._submit(
+            "connection",
+            lambda: _test_connection(
+                self._context, {**values, "password": self._resolved_test_password(values)}
+            ),
+        )
         self._show_progress(strings.SETTINGS_STATUS_TESTING_CONNECTION, token)
 
-    def _register_account(self) -> None:
+    def _save_account(self) -> None:
         values = self._account_values()
         if values is None:
             self._status_label.setText(strings.SETTINGS_STATUS_ACCOUNT_REQUIRED)
             return
-        if not self._connection_test_passed:
+        if self._connection_fields_changed() and not self._connection_test_passed:
             self._status_label.setText(strings.SETTINGS_STATUS_CONNECTION_REQUIRED)
             return
         self._buttons.setEnabled(False)
-        self._submit(
-            "register",
-            lambda: register_account(
-                self._context.create_message_repository(),
-                self._context.credential_store,
-                account_id=values["account_id"],
-                host=values["host"],
-                port=values["port"],
-                username=values["username"],
-                password=values["password"],
-                display_name=values["display_name"] or None,
-            ),
-        )
+        if self._editing:
+            existing = self._existing_account or {}
+            is_enabled = bool(existing.get("is_enabled", 1))
+            self._submit(
+                "update",
+                lambda: update_account(
+                    self._context.create_message_repository(),
+                    self._context.credential_store,
+                    account_id=values["account_id"],
+                    host=values["host"],
+                    port=values["port"],
+                    username=values["username"],
+                    password=values["password"] or None,
+                    display_name=values["display_name"] or None,
+                    is_enabled=is_enabled,
+                ),
+            )
+        else:
+            self._submit(
+                "register",
+                lambda: register_account(
+                    self._context.create_message_repository(),
+                    self._context.credential_store,
+                    account_id=values["account_id"],
+                    host=values["host"],
+                    port=values["port"],
+                    username=values["username"],
+                    password=values["password"],
+                    display_name=values["display_name"] or None,
+                ),
+            )
 
     def _account_values(self) -> dict[str, Any] | None:
         account_id = self._account_id_edit.text().strip()
         host = self._host_edit.text().strip()
         username = self._username_edit.text().strip()
         password = self._password_edit.text()
-        if not account_id or not host or not username or not password:
+        if not account_id or not host or not username:
+            return None
+        if not self._editing and not password:
             return None
         return {
             "account_id": account_id,
@@ -198,6 +276,12 @@ class AccountDialog(QDialog):
             account_id = value.value
             if isinstance(account_id, str):
                 self.account_added.emit(account_id)
+                self._stop_worker()
+                super().accept()
+        elif value.operation == "update":
+            account_id = value.value
+            if isinstance(account_id, str):
+                self.account_updated.emit(account_id)
                 self._stop_worker()
                 super().accept()
 
@@ -422,9 +506,14 @@ class SettingsDialog(QDialog):
         self._account_list = QListWidget(accounts_group)
         self._account_list.setObjectName("accountList")
         self._account_list.currentItemChanged.connect(self._account_selected)
+        self._account_list.itemDoubleClicked.connect(self._edit_account)
         self._add_account_button = QPushButton(strings.SETTINGS_BUTTON_ADD_ACCOUNT, accounts_group)
         self._add_account_button.clicked.connect(self._add_account)
+        self._edit_account_button = QPushButton(strings.SETTINGS_BUTTON_EDIT_ACCOUNT, accounts_group)
+        self._edit_account_button.setEnabled(False)
+        self._edit_account_button.clicked.connect(self._edit_account)
         accounts_controls.addWidget(self._add_account_button)
+        accounts_controls.addWidget(self._edit_account_button)
         accounts_layout.addWidget(self._account_list)
         accounts_layout.addLayout(accounts_controls)
         layout.addWidget(accounts_group)
@@ -482,6 +571,7 @@ class SettingsDialog(QDialog):
     ) -> None:
         account_id = current.data(Qt.ItemDataRole.UserRole) if current is not None else None
         self._selected_account_id = account_id if isinstance(account_id, str) else None
+        self._edit_account_button.setEnabled(self._selected_account_id is not None)
         self._load_folders()
 
     def _load_folders(self) -> None:
@@ -553,6 +643,20 @@ class SettingsDialog(QDialog):
     def _account_added(self, account_id: str) -> None:
         self._selected_account_id = account_id
         self._folder_status.setText(strings.SETTINGS_STATUS_ACCOUNT_ADDED)
+        self._load_accounts()
+
+    def _edit_account(self, *_args: object) -> None:
+        account_id = self._selected_account_id
+        account = next((item for item in self._accounts if item.get("id") == account_id), None)
+        if account is None:
+            return
+        dialog = AccountDialog(self._context, self, account=account)
+        dialog.account_updated.connect(self._account_updated)
+        dialog.exec()
+
+    def _account_updated(self, account_id: str) -> None:
+        self._selected_account_id = account_id
+        self._folder_status.setText(strings.SETTINGS_STATUS_ACCOUNT_UPDATED)
         self._load_accounts()
 
     def _submit(self, operation: str, callback: Callable[[], object]) -> CancelToken:
@@ -635,6 +739,7 @@ class SettingsDialog(QDialog):
         self._account_list.setEnabled(not busy)
         self._folder_list.setEnabled(not busy)
         self._add_account_button.setEnabled(not busy)
+        self._edit_account_button.setEnabled(not busy and self._selected_account_id is not None)
         self._refresh_folders_button.setEnabled(not busy)
         self._save_folders_button.setEnabled(not busy)
         self._apply_button.setEnabled(not busy)

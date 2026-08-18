@@ -39,6 +39,43 @@ def register_account(
     return account_id
 
 
+def update_account(
+    repo: BaseMessageRepository,
+    credential_store: BaseCredentialStore,
+    *,
+    account_id: str,
+    host: str,
+    port: int,
+    username: str,
+    password: str | None,
+    display_name: str | None,
+    is_enabled: bool,
+) -> str:
+    """Update connection details for an existing account without renaming it.
+
+    ``account_id`` is immutable once registered: it is the credential-store
+    key and the storage/foreign-key anchor for that account's folders and
+    messages, so this function never changes it. ``password`` is left as-is
+    in the credential store unless a non-empty replacement is supplied.
+    """
+
+    validate_account_id(account_id)
+    if password:
+        credential_store.set_password(account_id, password)
+    repo.upsert_account(
+        {
+            "id": account_id,
+            "provider_type": "onamae_imap",
+            "display_name": display_name,
+            "host": host,
+            "port": port,
+            "username": username,
+            "is_enabled": int(is_enabled),
+        }
+    )
+    return account_id
+
+
 def load_credentials(credential_store: BaseCredentialStore, account_id: str) -> str:
     """Load an account password or signal that credentials must be supplied."""
 

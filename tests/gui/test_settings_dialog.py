@@ -6,7 +6,8 @@ import pytest
 from PySide6.QtGui import QStandardItemModel
 
 from mail_dock import config
-from mail_dock.presentation.views.dialogs.settings_dialog import SettingsDialog
+from mail_dock.presentation import strings
+from mail_dock.presentation.views.dialogs.settings_dialog import AccountDialog, SettingsDialog
 
 pytestmark = pytest.mark.gui
 
@@ -46,6 +47,101 @@ class _Context:
     def reprobe_storage(self) -> dict[str, object]:
         self.reprobe_calls += 1
         return {"capability_level": "degraded"}
+
+
+class _AccountRepository:
+    def __init__(self, account: dict[str, object]) -> None:
+        self.accounts = {str(account["id"]): dict(account)}
+
+    def upsert_account(self, account: dict[str, object]) -> str:
+        account_id = str(account["id"])
+        self.accounts[account_id] = dict(account)
+        return account_id
+
+    def list_accounts(self) -> list[dict[str, object]]:
+        return list(self.accounts.values())
+
+
+class _CredentialStore:
+    def __init__(self) -> None:
+        self.passwords: dict[str, str] = {}
+
+    def set_password(self, account_id: str, password: str) -> None:
+        self.passwords[account_id] = password
+
+    def get_password(self, account_id: str) -> str | None:
+        return self.passwords.get(account_id)
+
+    def delete_password(self, account_id: str) -> None:
+        self.passwords.pop(account_id, None)
+
+
+class _AccountEditContext:
+    def __init__(self, repository: _AccountRepository, credential_store: _CredentialStore) -> None:
+        self.connection_manager = None
+        self.credential_store = credential_store
+        self._repository = repository
+
+    def create_message_repository(self) -> _AccountRepository:
+        return self._repository
+
+
+def _editable_account() -> dict[str, object]:
+    return {
+        "id": "account-1",
+        "provider_type": "onamae_imap",
+        "display_name": None,
+        "host": "imap.example.com",
+        "port": 993,
+        "username": "user",
+        "is_enabled": 1,
+    }
+
+
+def test_account_dialog_edit_locks_account_id_and_prefills_fields(qtbot: Any) -> None:
+    account = _editable_account()
+    repository = _AccountRepository(account)
+    credentials = _CredentialStore()
+    dialog = AccountDialog(_AccountEditContext(repository, credentials), account=account)
+    qtbot.addWidget(dialog)
+
+    assert dialog._account_id_edit.text() == "account-1"
+    assert dialog._account_id_edit.isReadOnly()
+    assert dialog._host_edit.text() == "imap.example.com"
+    assert dialog._username_edit.text() == "user"
+    dialog._stop_worker()
+
+
+def test_account_dialog_edit_saves_display_name_without_connection_test(qtbot: Any) -> None:
+    account = _editable_account()
+    repository = _AccountRepository(account)
+    credentials = _CredentialStore()
+    credentials.passwords["account-1"] = "secret"
+    dialog = AccountDialog(_AccountEditContext(repository, credentials), account=account)
+    qtbot.addWidget(dialog)
+
+    dialog._display_name_edit.setText("\u4ed5\u4e8b")
+    with qtbot.waitSignal(dialog.account_updated, timeout=2_000):
+        dialog._save_account()
+
+    assert repository.accounts["account-1"]["display_name"] == "\u4ed5\u4e8b"
+    assert credentials.passwords["account-1"] == "secret"
+    dialog._stop_worker()
+
+
+def test_account_dialog_edit_requires_connection_test_when_host_changes(qtbot: Any) -> None:
+    account = _editable_account()
+    repository = _AccountRepository(account)
+    credentials = _CredentialStore()
+    dialog = AccountDialog(_AccountEditContext(repository, credentials), account=account)
+    qtbot.addWidget(dialog)
+
+    dialog._host_edit.setText("imap.other-example.com")
+    dialog._save_account()
+
+    assert dialog._status_label.text() == strings.SETTINGS_STATUS_CONNECTION_REQUIRED
+    assert repository.accounts["account-1"]["host"] == "imap.example.com"
+    dialog._stop_worker()
 
 
 def test_active_settings_are_saved_and_phase4_controls_are_absent(qtbot: Any) -> None:
