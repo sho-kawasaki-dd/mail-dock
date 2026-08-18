@@ -794,6 +794,8 @@ class MainWindow(QMainWindow):
     def _show_settings(self) -> None:
         dialog = SettingsDialog(self.context, self)
         dialog.settings_saved.connect(self._settings_changed)
+        # Account add/edit persists immediately, independent of the dialog's own OK/Cancel.
+        dialog.accounts_changed.connect(self.sync_worker.load_folder_tree)
         dialog.exec()
 
     def _settings_changed(self, settings: object) -> None:

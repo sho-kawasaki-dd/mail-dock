@@ -201,6 +201,18 @@ def test_keyring_is_disabled_when_backend_is_unsupported(qtbot: Any) -> None:
     dialog._stop_worker()
 
 
+def test_account_added_and_updated_emit_accounts_changed(qtbot: Any) -> None:
+    context = _Context()
+    dialog = SettingsDialog(context)
+    qtbot.addWidget(dialog)
+
+    with qtbot.waitSignal(dialog.accounts_changed, timeout=2_000):
+        dialog._account_added("account-1")
+    with qtbot.waitSignal(dialog.accounts_changed, timeout=2_000):
+        dialog._account_updated("account-1")
+    dialog._stop_worker()
+
+
 def test_storage_reprobe_button_uses_injected_context_callback(qtbot: Any) -> None:
     context = _Context()
     dialog = SettingsDialog(context)

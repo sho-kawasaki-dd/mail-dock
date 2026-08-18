@@ -329,6 +329,7 @@ class SettingsDialog(QDialog):
     """
 
     settings_saved = Signal(object)
+    accounts_changed = Signal()
 
     def __init__(self, context: Any, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -644,6 +645,7 @@ class SettingsDialog(QDialog):
         self._selected_account_id = account_id
         self._folder_status.setText(strings.SETTINGS_STATUS_ACCOUNT_ADDED)
         self._load_accounts()
+        self.accounts_changed.emit()
 
     def _edit_account(self, *_args: object) -> None:
         account_id = self._selected_account_id
@@ -658,6 +660,7 @@ class SettingsDialog(QDialog):
         self._selected_account_id = account_id
         self._folder_status.setText(strings.SETTINGS_STATUS_ACCOUNT_UPDATED)
         self._load_accounts()
+        self.accounts_changed.emit()
 
     def _submit(self, operation: str, callback: Callable[[], object]) -> CancelToken:
         self._worker.cancel_all()
