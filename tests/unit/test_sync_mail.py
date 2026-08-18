@@ -7,7 +7,11 @@ from typing import Any
 
 import pytest
 
-from mail_dock.domain.errors import AuthenticationError, PermanentError, StorageError
+from mail_dock.domain.errors import (
+    AuthenticationError,
+    PermanentError,
+    StorageError,
+)
 from mail_dock.domain.fetcher import CancelToken, RemoteFolder, RemoteMessageRef
 from mail_dock.domain.messages import ParsedMessage, StoredEml
 from mail_dock.domain.ports import BaseEmlStorage, BaseManifestWriter, JSONValue
@@ -112,6 +116,7 @@ class FlagTrackingFetcher(TrackingFetcher):
         *args: Any,
         condstore: bool = False,
         highest_modseq: int | None = None,
+        delta_uids: Iterable[int] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -120,6 +125,7 @@ class FlagTrackingFetcher(TrackingFetcher):
         self.flag_calls: list[tuple[str, tuple[int, ...]]] = []
         self.flag_since_calls: list[tuple[str, int]] = []
         self.return_no_deltas = False
+        self.delta_uids = None if delta_uids is None else set(delta_uids)
 
     def iter_flags(
         self,
@@ -140,8 +146,15 @@ class FlagTrackingFetcher(TrackingFetcher):
         cancel: CancelToken | None = None,
     ) -> Iterator[RemoteMessageRef]:
         self.flag_since_calls.append((raw_name, modseq))
-        if not self.return_no_deltas:
+        if self.return_no_deltas:
+            return
+        if self.delta_uids is None:
             yield from super().iter_flags_since(raw_name, modseq, cancel=cancel)
+            return
+        for uid in sorted(self.delta_uids):
+            message = self.messages.get((raw_name, uid))
+            if message is not None:
+                yield RemoteMessageRef(uid=uid, flags=message.ref.flags)
 
     def get_highest_modseq(self) -> int | None:
         return self.highest_modseq
@@ -157,6 +170,33 @@ class FlagFailureFetcher(FlagTrackingFetcher):
     ) -> Iterator[RemoteMessageRef]:
         del raw_name, uids, cancel
         raise PermanentError("flag refresh failed")
+
+
+class FlagAuthenticationFailureFetcher(FlagTrackingFetcher):
+    def iter_flags(
+        self,
+        raw_name: str,
+        uids: Iterable[int],
+        *,
+        cancel: CancelToken | None = None,
+    ) -> Iterator[RemoteMessageRef]:
+        del raw_name, uids, cancel
+        raise AuthenticationError("flag credentials rejected")
+
+
+class FlagCancellationFetcher(FlagTrackingFetcher):
+    cancel_on_since = False
+
+    def iter_flags_since(
+        self,
+        raw_name: str,
+        modseq: int,
+        *,
+        cancel: CancelToken | None = None,
+    ) -> Iterator[RemoteMessageRef]:
+        if self.cancel_on_since and cancel is not None:
+            cancel.cancel()
+        yield from super().iter_flags_since(raw_name, modseq, cancel=cancel)
 
 
 class AuthenticationFailureFetcher(FakeFetcher):
@@ -195,9 +235,10 @@ def _seed_flag_refresh_message(
     repo: InMemoryMessageRepository,
     folder_id: int,
     *,
+    uid: int = 1,
     flags_seen_at: str = "2026-01-01T00:00:00Z",
 ) -> None:
-    message = repo.get_message_by_uid("account", folder_id, 41, 1)
+    message = repo.get_message_by_uid("account", folder_id, 41, uid)
     assert message is not None
     repo.messages[int(message["id"])]["flags_seen_at"] = flags_seen_at
 
@@ -786,3 +827,254 @@ def test_flag_refresh_fetch_error_isolated_from_account_sync() -> None:
 
     assert result.cancelled is False
     assert repo.folders[folder_id].get("highest_modseq") is None
+
+
+def test_flag_refresh_limits_window_and_fetches_only_expired_uids() -> None:
+    recent = datetime(2026, 7, 30, tzinfo=UTC)
+    old = datetime(2020, 1, 1, tzinfo=UTC)
+    fetcher = FlagTrackingFetcher(
+        folders=[RemoteFolder("INBOX", "Inbox", uidvalidity=41)],
+        messages={
+            "INBOX": [
+                RemoteMessageRef(uid=1, internal_date=old, flags=(r"\Seen",)),
+                RemoteMessageRef(uid=2, internal_date=recent, flags=(r"\Seen",)),
+            ]
+        },
+        eml_bytes={("INBOX", 1): _eml(1), ("INBOX", 2): _eml(2)},
+    )
+    repo, folder_id, storage, manifest = _complete_initial_sync(fetcher)
+    _seed_flag_refresh_message(repo, folder_id, uid=2)
+    fetcher.add_message(
+        "INBOX", 1, _eml(1), ref=RemoteMessageRef(uid=1, flags=(r"\Flagged",))
+    )
+    fetcher.add_message(
+        "INBOX", 2, _eml(2), ref=RemoteMessageRef(uid=2, flags=(r"\Flagged",))
+    )
+
+    sync_account(
+        fetcher,
+        repo,
+        storage,
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+        cancel=CancelToken(),
+    )
+
+    old_message = repo.get_message_by_uid("account", folder_id, 41, 1)
+    recent_message = repo.get_message_by_uid("account", folder_id, 41, 2)
+    assert old_message is not None and recent_message is not None
+    assert old_message["imap_flags"] == r"\Seen"
+    assert recent_message["imap_flags"] == r"\Flagged"
+    assert fetcher.flag_calls == [("INBOX", (2,))]
+
+
+def test_flag_refresh_skips_imap_when_no_uid_has_expired() -> None:
+    fetcher = _flag_fetcher()
+    repo, _, storage, manifest = _complete_initial_sync(fetcher)
+
+    sync_account(
+        fetcher,
+        repo,
+        storage,
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+        cancel=CancelToken(),
+    )
+
+    assert fetcher.flag_calls == []
+    assert fetcher.flag_since_calls == []
+
+
+def test_condstore_updates_fresh_delta_and_touches_expired_missing_delta() -> None:
+    recent = datetime(2026, 7, 30, tzinfo=UTC)
+    fetcher = FlagTrackingFetcher(
+        folders=[RemoteFolder("INBOX", "Inbox", uidvalidity=41)],
+        messages={
+            "INBOX": [
+                RemoteMessageRef(uid=1, internal_date=recent, flags=(r"\Seen",)),
+                RemoteMessageRef(uid=2, internal_date=recent, flags=(r"\Seen",)),
+            ]
+        },
+        eml_bytes={("INBOX", 1): _eml(1), ("INBOX", 2): _eml(2)},
+        condstore=True,
+        highest_modseq=10,
+    )
+    repo, folder_id, storage, manifest = _complete_initial_sync(fetcher)
+    _seed_flag_refresh_message(repo, folder_id, uid=1)
+    sync_account(
+        fetcher,
+        repo,
+        storage,
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+        cancel=CancelToken(),
+    )
+    _seed_flag_refresh_message(repo, folder_id, uid=1)
+    fetcher.delta_uids = {2}
+    fetcher.highest_modseq = 11
+    fetcher.add_message(
+        "INBOX", 2, _eml(2), ref=RemoteMessageRef(uid=2, flags=(r"\Flagged",))
+    )
+
+    sync_account(
+        fetcher,
+        repo,
+        storage,
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+        cancel=CancelToken(),
+    )
+
+    expired_message = repo.get_message_by_uid("account", folder_id, 41, 1)
+    fresh_message = repo.get_message_by_uid("account", folder_id, 41, 2)
+    assert expired_message is not None and fresh_message is not None
+    assert expired_message["imap_flags"] == r"\Seen"
+    assert expired_message["flags_seen_at"] != "2026-01-01T00:00:00Z"
+    assert fresh_message["imap_flags"] == r"\Flagged"
+    assert fetcher.flag_since_calls[-1] == ("INBOX", 10)
+    assert repo.folders[folder_id]["highest_modseq"] == 11
+
+
+def test_condstore_nomodseq_uses_ttl_fallback_and_clears_saved_modseq() -> None:
+    fetcher = _flag_fetcher(condstore=True, highest_modseq=10)
+    repo, folder_id, storage, manifest = _complete_initial_sync(fetcher)
+    _seed_flag_refresh_message(repo, folder_id)
+    sync_account(
+        fetcher,
+        repo,
+        storage,
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+        cancel=CancelToken(),
+    )
+    _seed_flag_refresh_message(repo, folder_id)
+    fetcher.highest_modseq = None
+    fetcher.add_message(
+        "INBOX", 1, _eml(1), ref=RemoteMessageRef(uid=1, flags=(r"\Flagged",))
+    )
+
+    sync_account(
+        fetcher,
+        repo,
+        storage,
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+        cancel=CancelToken(),
+    )
+
+    message = repo.get_message_by_uid("account", folder_id, 41, 1)
+    assert message is not None
+    assert message["imap_flags"] == r"\Flagged"
+    assert fetcher.flag_calls[-1] == ("INBOX", (1,))
+    assert fetcher.flag_since_calls == []
+    assert repo.folders[folder_id]["highest_modseq"] is None
+
+
+def test_condstore_modseq_backtracking_rebuilds_baseline() -> None:
+    fetcher = _flag_fetcher(condstore=True, highest_modseq=10)
+    repo, folder_id, storage, manifest = _complete_initial_sync(fetcher)
+    _seed_flag_refresh_message(repo, folder_id)
+    sync_account(
+        fetcher,
+        repo,
+        storage,
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+        cancel=CancelToken(),
+    )
+    _seed_flag_refresh_message(repo, folder_id)
+    fetcher.highest_modseq = 9
+    fetcher.add_message(
+        "INBOX", 1, _eml(1), ref=RemoteMessageRef(uid=1, flags=(r"\Flagged",))
+    )
+
+    sync_account(
+        fetcher,
+        repo,
+        storage,
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+        cancel=CancelToken(),
+    )
+
+    assert fetcher.flag_calls[-1] == ("INBOX", (1,))
+    assert fetcher.flag_since_calls == []
+    assert repo.folders[folder_id]["highest_modseq"] == 9
+
+
+def test_flag_refresh_cancellation_keeps_previous_modseq() -> None:
+    fetcher = FlagCancellationFetcher(
+        folders=[RemoteFolder("INBOX", "Inbox", uidvalidity=41)],
+        messages={
+            "INBOX": [
+                RemoteMessageRef(
+                    uid=1,
+                    internal_date=datetime(2026, 7, 30, tzinfo=UTC),
+                    flags=(r"\Seen",),
+                )
+            ]
+        },
+        eml_bytes={("INBOX", 1): _eml(1)},
+        condstore=True,
+        highest_modseq=10,
+    )
+    repo, folder_id, storage, manifest = _complete_initial_sync(fetcher)
+    _seed_flag_refresh_message(repo, folder_id)
+    sync_account(
+        fetcher,
+        repo,
+        storage,
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+        cancel=CancelToken(),
+    )
+    _seed_flag_refresh_message(repo, folder_id)
+    fetcher.highest_modseq = 11
+    fetcher.cancel_on_since = True
+
+    result = sync_account(
+        fetcher,
+        repo,
+        storage,
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+        cancel=CancelToken(),
+    )
+
+    assert result.cancelled is True
+    assert repo.folders[folder_id]["highest_modseq"] == 10
+
+
+def test_flag_refresh_authentication_error_aborts_account_sync() -> None:
+    fetcher = FlagAuthenticationFailureFetcher(
+        folders=[RemoteFolder("INBOX", "Inbox", uidvalidity=41)],
+        messages={
+            "INBOX": [
+                RemoteMessageRef(uid=1, internal_date=datetime(2026, 7, 30, tzinfo=UTC))
+            ]
+        },
+        eml_bytes={("INBOX", 1): _eml(1)},
+    )
+    repo, folder_id, storage, manifest = _complete_initial_sync(fetcher)
+    _seed_flag_refresh_message(repo, folder_id)
+
+    with pytest.raises(AuthenticationError, match="flag credentials rejected"):
+        sync_account(
+            fetcher,
+            repo,
+            storage,
+            manifest,
+            account_id="account",
+            options=SyncOptions(),
+            cancel=CancelToken(),
+        )

@@ -127,12 +127,12 @@
 
 ### **Group F: テスト**
 
-- [ ] `tests/unit/test_sync_mail.py` にフラグリフレッシュの単体テストを追加する（対象範囲、TTLによる実行抑止、初回基準点、CONDSTORE差分、TTL未到来差分、CONDSTORE応答なし時のtouch、非対応・NOMODSEQ・MODSEQ後退時のフォールバック、フォールバック応答欠落UID、認証失敗、一般FetchError、キャンセルを検証）
-- [ ] `tests/unit/test_message_repository.py` に `list_flag_refresh_items`, `update_flags`, `touch_flags_seen_at`, `set_highest_modseq`、UIDVALIDITY変更時のリセット、候補検索インデックスの単体テストを追加する
-- [ ] `tests/unit/test_fetcher.py` / `test_imap_common.py` に単一 bytes の FLAGS レスポンスパース、`HIGHESTMODSEQ` / `NOMODSEQ`、`iter_flags` / `iter_flags_since`、キャンセルのテストを追加する
-- [ ] `tests/integration/` に結合テストを追加し、初回基準点の確立後、サーバー側のフラグ変更が次回同期で反映され、MODSEQが正常完了時だけ進むことを検証する
-- [ ] `tests/unit/test_config.py` に新設定項目のテストを追加する
-- [ ] `tests/gui/` の一覧・詳細ツールチップ表示テストを更新し、確認日時あり・なしの両方を検証する
+- [x] `tests/unit/test_sync_mail.py` にフラグリフレッシュの単体テストを追加する（対象範囲、TTLによる実行抑止、初回基準点、CONDSTORE差分、TTL未到来差分、CONDSTORE応答なし時のtouch、非対応・NOMODSEQ・MODSEQ後退時のフォールバック、フォールバック応答欠落UID、認証失敗、一般FetchError、キャンセルを検証）
+- [x] `tests/unit/test_message_repository.py` に `list_flag_refresh_items`, `update_flags`, `touch_flags_seen_at`, `set_highest_modseq`、UIDVALIDITY変更時のリセット、候補検索インデックスの単体テストを追加する
+- [x] `tests/unit/test_fetcher.py` / `test_imap_common.py` に単一 bytes の FLAGS レスポンスパース、`HIGHESTMODSEQ` / `NOMODSEQ`、`iter_flags` / `iter_flags_since`、キャンセルのテストを追加する
+- [x] `tests/integration/` に結合テストを追加し、初回基準点の確立後、サーバー側のフラグ変更が次回同期で反映され、MODSEQが正常完了時だけ進むことを検証する
+- [x] `tests/unit/test_config.py` に新設定項目のテストを追加する
+- [x] `tests/gui/` の一覧・詳細ツールチップ表示テストを更新し、確認日時あり・なしの両方を検証する
 
 ### **Group G: ドキュメント整合**
 
