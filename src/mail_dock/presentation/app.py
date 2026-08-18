@@ -332,6 +332,11 @@ class _GuiRuntime:
             self.verification_thread.wait()
         if self.window is not None:
             _stop_window(self.window, self.context)
+            # Prevent Qt's quitOnLastWindowClosed from ending app.exec() before
+            # verify_and_show() shows the replacement window (root switch/setup).
+            set_attribute = getattr(self.window, "setAttribute", None)
+            if callable(set_attribute):
+                set_attribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
             close = getattr(self.window, "close", None)
             if callable(close):
                 close()
