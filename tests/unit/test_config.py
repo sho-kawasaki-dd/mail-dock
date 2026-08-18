@@ -24,6 +24,9 @@ def test_load_returns_defaults_when_file_is_missing(config_path: Path) -> None:
     assert config.db_backup_to_local_disk is False
     assert config.storage_profiles == {}
     assert config.credential_storage == "keyring"
+    assert config.flag_refresh_enabled is True
+    assert config.flag_refresh_window_days == 30
+    assert config.flag_refresh_min_interval_seconds == 3600
 
 
 def test_save_and_load_preserve_unknown_keys(config_path: Path) -> None:
@@ -42,6 +45,18 @@ def test_save_and_load_preserve_unknown_keys(config_path: Path) -> None:
     }
 
 
+def test_save_and_load_round_trip_flag_refresh_settings(config_path: Path) -> None:
+    config = config_module.AppConfig(
+        flag_refresh_enabled=False,
+        flag_refresh_window_days=14,
+        flag_refresh_min_interval_seconds=900,
+    )
+
+    config_module.save(config)
+
+    assert config_module.load() == config
+
+
 def test_load_rejects_future_schema(config_path: Path) -> None:
     config_path.write_text(json.dumps({"schema_version": 3}), encoding="utf-8")
 
@@ -57,6 +72,9 @@ def test_load_rejects_future_schema(config_path: Path) -> None:
         ("remote_delete_mode", "invalid"),
         ("heartbeat_interval_sec", 0),
         ("sync_on_startup", "yes"),
+        ("flag_refresh_enabled", "yes"),
+        ("flag_refresh_window_days", 0),
+        ("flag_refresh_min_interval_seconds", 0),
     ],
 )
 def test_load_rejects_invalid_values(config_path: Path, field_name: str, value: object) -> None:

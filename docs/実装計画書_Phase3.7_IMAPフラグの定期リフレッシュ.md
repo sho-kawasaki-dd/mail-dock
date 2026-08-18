@@ -96,9 +96,9 @@
 
 ### **Group C: 設定**
 
-- [ ] `AppConfig` に `flag_refresh_enabled` / `flag_refresh_window_days` / `flag_refresh_min_interval_seconds` を追加し、バリデーション・シリアライズ・既定値マージに組み込む
-- [ ] `SyncOptions` に同3項目を追加する
-- [ ] `__main__.py` / `presentation/threads/sync_worker.py` / `presentation/views/main_window.py` の `SyncOptions(...)` 呼び出しに新設定を反映する
+- [x] `AppConfig` に `flag_refresh_enabled` / `flag_refresh_window_days` / `flag_refresh_min_interval_seconds` を追加し、バリデーション・シリアライズ・既定値マージに組み込む
+- [x] `SyncOptions` に同3項目を追加する
+- [x] `__main__.py` / `presentation/threads/sync_worker.py` / `presentation/views/main_window.py` の `SyncOptions(...)` 呼び出しに新設定を反映する
 
 ### **Group D: 同期ユースケース**
 

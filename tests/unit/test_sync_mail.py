@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 
@@ -13,6 +14,21 @@ from mail_dock.domain.ports import BaseEmlStorage, BaseManifestWriter, JSONValue
 from mail_dock.usecases.sync_mail import SyncOptions, sync_account
 from tests.support.fake_fetcher import FakeFetcher, FakeMessage
 from tests.support.in_memory_repository import InMemoryMessageRepository
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("flag_refresh_enabled", "yes"),
+        ("flag_refresh_window_days", 0),
+        ("flag_refresh_min_interval_seconds", 0),
+    ],
+)
+def test_sync_options_reject_invalid_flag_refresh_settings(
+    field_name: str, value: object
+) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        SyncOptions(**dict[str, Any]({field_name: value}))
 
 
 class MemoryStorage(BaseEmlStorage):

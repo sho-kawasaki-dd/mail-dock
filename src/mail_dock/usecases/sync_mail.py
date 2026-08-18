@@ -35,10 +35,19 @@ class SyncOptions:
     """Provider-independent options for one account synchronization."""
 
     max_message_bytes: int = 50 * 1024 * 1024
+    flag_refresh_enabled: bool = True
+    flag_refresh_window_days: int = 30
+    flag_refresh_min_interval_seconds: int = 3600
 
     def __post_init__(self) -> None:
         if self.max_message_bytes <= 0:
             raise ValueError("max_message_bytes must be positive")
+        if not isinstance(self.flag_refresh_enabled, bool):
+            raise TypeError("flag_refresh_enabled must be a boolean")
+        if self.flag_refresh_window_days <= 0:
+            raise ValueError("flag_refresh_window_days must be positive")
+        if self.flag_refresh_min_interval_seconds <= 0:
+            raise ValueError("flag_refresh_min_interval_seconds must be positive")
 
 
 @dataclass(frozen=True)

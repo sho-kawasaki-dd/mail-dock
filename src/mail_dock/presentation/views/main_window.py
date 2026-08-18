@@ -101,7 +101,12 @@ class MainWindow(QMainWindow):
             context.create_eml_storage,
             context.create_manifest_writer,
             renderer_factory=context.create_message_renderer,
-            sync_options=SyncOptions(max_message_bytes=context.settings.max_message_bytes),
+            sync_options=SyncOptions(
+                max_message_bytes=context.settings.max_message_bytes,
+                flag_refresh_enabled=context.settings.flag_refresh_enabled,
+                flag_refresh_window_days=context.settings.flag_refresh_window_days,
+                flag_refresh_min_interval_seconds=context.settings.flag_refresh_min_interval_seconds,
+            ),
             connection_manager=context.connection_manager,
         )
         self.query_worker.start()
@@ -807,7 +812,14 @@ class MainWindow(QMainWindow):
     def _settings_changed(self, settings: object) -> None:
         if not isinstance(settings, config.AppConfig):
             return
-        self.sync_worker.set_sync_options(SyncOptions(max_message_bytes=settings.max_message_bytes))
+        self.sync_worker.set_sync_options(
+            SyncOptions(
+                max_message_bytes=settings.max_message_bytes,
+                flag_refresh_enabled=settings.flag_refresh_enabled,
+                flag_refresh_window_days=settings.flag_refresh_window_days,
+                flag_refresh_min_interval_seconds=settings.flag_refresh_min_interval_seconds,
+            )
+        )
         self.detail_view.set_block_remote_images(settings.block_remote_images)
         root_uuid = getattr(self.context, "root_uuid", None)
         raw_profile = (

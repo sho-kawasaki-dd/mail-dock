@@ -888,7 +888,12 @@ def _run_sync_command(
                     storage,
                     manifest,
                     account_id=account_id,
-                    options=SyncOptions(max_message_bytes=settings.max_message_bytes),
+                    options=SyncOptions(
+                        max_message_bytes=settings.max_message_bytes,
+                        flag_refresh_enabled=settings.flag_refresh_enabled,
+                        flag_refresh_window_days=settings.flag_refresh_window_days,
+                        flag_refresh_min_interval_seconds=settings.flag_refresh_min_interval_seconds,
+                    ),
                     cancel=token,
                     on_progress=_print_sync_progress,
                 )

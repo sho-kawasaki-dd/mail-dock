@@ -53,6 +53,9 @@ class AppConfig:
     storage_root_uuid: str | None = None
     sync_on_startup: bool = True
     sync_interval_minutes: int = 60
+    flag_refresh_enabled: bool = True
+    flag_refresh_window_days: int = 30
+    flag_refresh_min_interval_seconds: int = 3600
     max_message_bytes: int = 50 * 1024 * 1024
     remote_delete_mode: str = "trash"
     remote_trash_folder: str | None = None
@@ -107,6 +110,9 @@ _KNOWN_FIELDS = frozenset(
         "storage_root_uuid",
         "sync_on_startup",
         "sync_interval_minutes",
+        "flag_refresh_enabled",
+        "flag_refresh_window_days",
+        "flag_refresh_min_interval_seconds",
         "max_message_bytes",
         "remote_delete_mode",
         "remote_trash_folder",
@@ -249,6 +255,12 @@ def _validate_config(config: AppConfig) -> None:
     _require_optional_string(config.storage_root_uuid, "storage_root_uuid")
     _require_bool(config.sync_on_startup, "sync_on_startup")
     _require_non_negative(config.sync_interval_minutes, "sync_interval_minutes")
+    _require_bool(config.flag_refresh_enabled, "flag_refresh_enabled")
+    _require_positive(config.flag_refresh_window_days, "flag_refresh_window_days")
+    _require_positive(
+        config.flag_refresh_min_interval_seconds,
+        "flag_refresh_min_interval_seconds",
+    )
     _require_positive(config.max_message_bytes, "max_message_bytes")
     _require_mode(config.remote_delete_mode, "remote_delete_mode", REMOTE_DELETE_MODES)
     _require_optional_string(config.remote_trash_folder, "remote_trash_folder")
@@ -317,6 +329,21 @@ def _decode(data: dict[str, JSONValue]) -> AppConfig:
         sync_interval_minutes=_require_int(
             known.get("sync_interval_minutes", defaults.sync_interval_minutes),
             "sync_interval_minutes",
+        ),
+        flag_refresh_enabled=_require_bool(
+            known.get("flag_refresh_enabled", defaults.flag_refresh_enabled),
+            "flag_refresh_enabled",
+        ),
+        flag_refresh_window_days=_require_int(
+            known.get("flag_refresh_window_days", defaults.flag_refresh_window_days),
+            "flag_refresh_window_days",
+        ),
+        flag_refresh_min_interval_seconds=_require_int(
+            known.get(
+                "flag_refresh_min_interval_seconds",
+                defaults.flag_refresh_min_interval_seconds,
+            ),
+            "flag_refresh_min_interval_seconds",
         ),
         max_message_bytes=_require_int(
             known.get("max_message_bytes", defaults.max_message_bytes), "max_message_bytes"
@@ -392,6 +419,9 @@ def _encode(config: AppConfig) -> dict[str, JSONValue]:
             "storage_root_uuid": config.storage_root_uuid,
             "sync_on_startup": config.sync_on_startup,
             "sync_interval_minutes": config.sync_interval_minutes,
+            "flag_refresh_enabled": config.flag_refresh_enabled,
+            "flag_refresh_window_days": config.flag_refresh_window_days,
+            "flag_refresh_min_interval_seconds": config.flag_refresh_min_interval_seconds,
             "max_message_bytes": config.max_message_bytes,
             "remote_delete_mode": config.remote_delete_mode,
             "remote_trash_folder": config.remote_trash_folder,
