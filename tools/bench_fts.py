@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
 from pathlib import Path
-from typing import Final, cast
+from typing import Any, Final, cast
 
 REPOSITORY_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 for import_root in (REPOSITORY_ROOT, REPOSITORY_ROOT / "src"):
@@ -375,7 +375,7 @@ def _query_plan(
     )
 
 
-def _probe_short_match(connection: sqlite3.Connection) -> dict[str, object]:
+def _probe_short_match(connection: sqlite3.Connection) -> dict[str, Any]:
     term, _ = _find_rare_terms(connection, 2, use_like=True)
     match_count = _count_match(connection, term)
     like_count = _count_like(connection, term)
@@ -388,7 +388,7 @@ def _probe_short_match(connection: sqlite3.Connection) -> dict[str, object]:
     }
 
 
-def _probe_syntax_escaping() -> dict[str, object]:
+def _probe_syntax_escaping() -> dict[str, Any]:
     connection = sqlite3.connect(":memory:")
     try:
         connection.execute(
@@ -398,7 +398,7 @@ def _probe_syntax_escaping() -> dict[str, object]:
             "INSERT INTO a4_syntax_fts(content) VALUES (?)",
             ('literal * ^ - ( ) : NEAR AND OR NOT "',),
         )
-        cases: list[dict[str, object]] = []
+        cases: list[dict[str, Any]] = []
         for raw_term in A4_SYNTAX_TOKENS:
             quoted_term = _quote_fts_term(raw_term)
             raw_error: str | None = None
@@ -443,7 +443,7 @@ def _measure_like_target(
     *,
     warmups: int,
     iterations: int,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     timing, hit_count = _time_query(
         connection,
         sql,
@@ -464,10 +464,10 @@ def _probe_like_reuse(
     *,
     warmups: int,
     iterations: int,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     short_term, _ = _find_rare_terms(connection, 2, use_like=True)
     long_term, _ = _find_rare_terms(connection, 3, use_like=True)
-    measurements: dict[str, object] = {}
+    measurements: dict[str, Any] = {}
     for label, term in (("2_characters", short_term), ("3_characters", long_term)):
         pattern = _escape_like(term)
         fts_sql = "SELECT rowid FROM messages_fts WHERE body_text LIKE ?"
@@ -551,7 +551,7 @@ def _measure_detail_variants(
     *,
     warmups: int,
     iterations: int,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     rows = [
         tuple(row)
         for row in connection.execute(
@@ -568,7 +568,7 @@ def _measure_detail_variants(
     if not phrase_term:
         raise RuntimeError("Synthetic database has no subject for phrase probe")
 
-    measurements: dict[str, object] = {}
+    measurements: dict[str, Any] = {}
     for detail in A4_DETAIL_MODES:
         variant = _detail_variant_connection(rows, detail)
         try:
@@ -639,7 +639,7 @@ def _measure_detail_variants(
         "phrase_probe": phrase_term,
         "variants": measurements,
         "phrase_requires_detail_full": all(
-            bool(measurements[detail]["phrase"]["supported"]) == (detail == "full")  # type: ignore[index]
+            bool(measurements[detail]["phrase"]["supported"]) == (detail == "full")
             for detail in A4_DETAIL_MODES
         ),
     }
@@ -651,7 +651,7 @@ def check_a4_dataset(
     *,
     warmups: int,
     iterations: int,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Run the manual A-4 behavior and tokenizer probes against one dataset."""
 
     database_path = output_root / str(count) / "messages.db"
@@ -802,8 +802,8 @@ def _measure_queries(
     *,
     warmups: int,
     iterations: int,
-) -> dict[str, dict[str, object]]:
-    measurements: dict[str, dict[str, object]] = {}
+) -> dict[str, dict[str, Any]]:
+    measurements: dict[str, dict[str, Any]] = {}
     for spec in _build_query_specs(connection):
         if spec.path == "MATCH":
             sql, parameters = _fts_match_sql(spec)
@@ -884,7 +884,7 @@ def _measure_sorting(
     *,
     warmups: int,
     iterations: int,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     count_row = connection.execute("SELECT count(*) FROM messages").fetchone()
     if count_row is None:
         raise RuntimeError("SQLite did not return the message count")
@@ -916,7 +916,7 @@ def _measure_sorting(
         ORDER BY COALESCE(date_sent, internal_date, '') DESC, id DESC
         LIMIT ?
     """
-    measurements: dict[str, object] = {
+    measurements: dict[str, Any] = {
         "requested_deep_offset": requested_offset,
         "measured_deep_offset": deep_offset,
     }
@@ -967,7 +967,7 @@ def _measure_structured_filter(
     *,
     warmups: int,
     iterations: int,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     folder_row = connection.execute(
         "SELECT id FROM folders WHERE account_id = ? AND raw_name = ?",
         (ACCOUNT_ID, FOLDER_NAME),
@@ -1080,12 +1080,12 @@ def _measure_insert_throughput(
     connection: sqlite3.Connection,
     *,
     iterations: int,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     count_row = connection.execute("SELECT count(*) FROM message_contents").fetchone()
     if count_row is None:
         raise RuntimeError("SQLite did not return the content count")
     contents = _load_contents(connection, min(1_000, int(count_row[0])))
-    measurements: dict[str, object] = {"rows": len(contents)}
+    measurements: dict[str, Any] = {"rows": len(contents)}
     for enabled in (False, True):
         timing = _measure_insert_variant(
             contents,
@@ -1108,7 +1108,7 @@ def measure_dataset(
     *,
     warmups: int,
     iterations: int,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Measure every A-3 operation against one generated corpus."""
 
     dataset_root = output_root / str(count)
@@ -1150,12 +1150,12 @@ def _linear_extrapolation(points: Sequence[tuple[int, float]], target: int) -> f
     return max(0.0, y_mean + slope * (target - x_mean))
 
 
-def _build_extrapolation(reports: Sequence[dict[str, object]]) -> dict[str, object]:
+def _build_extrapolation(reports: Sequence[dict[str, Any]]) -> dict[str, Any]:
     target = 50_000
 
     def size_points(key: str) -> list[tuple[int, float]]:
         return [
-            (int(report["count"]), float(report["sizes"][key]))  # type: ignore[index]
+            (int(report["count"]), float(report["sizes"][key]))
             for report in reports
         ]
 
@@ -1180,12 +1180,12 @@ def _build_extrapolation(reports: Sequence[dict[str, object]]) -> dict[str, obje
     )
 
     query_names = reports[0]["queries"]
-    query_extrapolation: dict[str, object] = {}
-    for name in query_names:  # type: ignore[union-attr]
+    query_extrapolation: dict[str, Any] = {}
+    for name in query_names:
         query_extrapolation[name] = {
             field: _linear_extrapolation(
                 [
-                    (int(report["count"]), float(report["queries"][name][field]))  # type: ignore[index]
+                    (int(report["count"]), float(report["queries"][name][field]))
                     for report in reports
                 ],
                 target,
@@ -1193,14 +1193,14 @@ def _build_extrapolation(reports: Sequence[dict[str, object]]) -> dict[str, obje
             for field in ("p50_ms", "p95_ms")
         }
     match_p95 = max(
-        float(values["p95_ms"])  # type: ignore[index]
+        float(values["p95_ms"])
         for name, values in query_extrapolation.items()
-        if str(reports[0]["queries"][name]["path"]) == "MATCH"  # type: ignore[index]
+        if str(reports[0]["queries"][name]["path"]) == "MATCH"
     )
     like_p95 = max(
-        float(values["p95_ms"])  # type: ignore[index]
+        float(values["p95_ms"])
         for name, values in query_extrapolation.items()
-        if str(reports[0]["queries"][name]["path"]) == "LIKE"  # type: ignore[index]
+        if str(reports[0]["queries"][name]["path"]) == "LIKE"
     )
     return {
         "target_count": target,
@@ -1222,7 +1222,7 @@ def _build_extrapolation(reports: Sequence[dict[str, object]]) -> dict[str, obje
     }
 
 
-def _print_report(results: dict[str, object]) -> None:
+def _print_report(results: dict[str, Any]) -> None:
     print(f"\n=== {results['count']} messages ===")
     sizes = results["sizes"]
     print(
@@ -1230,87 +1230,87 @@ def _print_report(results: dict[str, object]) -> None:
         "message_contents={message_contents_page_bytes} B, "
         "messages_fts={messages_fts_page_bytes} B, page ratio={page_ratio:.2f}x, "
         "payload ratio={payload_ratio:.2f}x".format(
-            database_file_bytes=float(sizes["database_file_bytes"]) / 1024 / 1024,  # type: ignore[index]
-            message_contents_page_bytes=sizes["message_contents_page_bytes"],  # type: ignore[index]
-            messages_fts_page_bytes=sizes["messages_fts_page_bytes"],  # type: ignore[index]
-            page_ratio=float(sizes["fts_to_message_contents_page_ratio"]),  # type: ignore[index]
-            payload_ratio=float(sizes["fts_to_message_contents_payload_ratio"]),  # type: ignore[index]
+            database_file_bytes=float(sizes["database_file_bytes"]) / 1024 / 1024,
+            message_contents_page_bytes=sizes["message_contents_page_bytes"],
+            messages_fts_page_bytes=sizes["messages_fts_page_bytes"],
+            page_ratio=float(sizes["fts_to_message_contents_page_ratio"]),
+            payload_ratio=float(sizes["fts_to_message_contents_payload_ratio"]),
         )
     )
     print("queries (p50/p95 ms, hits):")
-    for name, measurement in results["queries"].items():  # type: ignore[union-attr]
+    for name, measurement in results["queries"].items():
         print(
             f"  {name:28} {measurement['p50_ms']:8.3f}/{measurement['p95_ms']:8.3f} "
-            f"hits={measurement['hit_count']}"  # type: ignore[index]
+            f"hits={measurement['hit_count']}"
         )
     sorting = results["sorting"]
     print(
         f"sorting: deep offset={sorting['measured_deep_offset']} "
-        f"(requested {sorting['requested_deep_offset']})"  # type: ignore[index]
+        f"(requested {sorting['requested_deep_offset']})"
     )
     for name in ("without_expression_index", "with_expression_index"):
-        measurement = sorting[name]  # type: ignore[index]
+        measurement = sorting[name]
         print(
-            f"  {name:28} first={measurement['first_page']['p50_ms']:.3f}/"  # type: ignore[index]
-            f"{measurement['first_page']['p95_ms']:.3f} ms, "  # type: ignore[index]
-            f"keyset={measurement['deep_keyset_page']['p50_ms']:.3f}/"  # type: ignore[index]
-            f"{measurement['deep_keyset_page']['p95_ms']:.3f} ms"  # type: ignore[index]
+            f"  {name:28} first={measurement['first_page']['p50_ms']:.3f}/"
+            f"{measurement['first_page']['p95_ms']:.3f} ms, "
+            f"keyset={measurement['deep_keyset_page']['p50_ms']:.3f}/"
+            f"{measurement['deep_keyset_page']['p95_ms']:.3f} ms"
         )
     structured = results["structured_filter"]
     print(
         f"structured filter: {structured['p50_ms']:.3f}/{structured['p95_ms']:.3f} ms, "
-        f"hits={structured['hit_count']}"  # type: ignore[index]
+        f"hits={structured['hit_count']}"
     )
     print("insert throughput:")
     for name in ("without_triggers", "with_triggers"):
-        measurement = results["insert_throughput"][name]  # type: ignore[index]
+        measurement = results["insert_throughput"][name]
         print(
-            f"  {name:28} {measurement['p50_rows_per_second']:.1f} rows/s "  # type: ignore[index]
-            f"(p50 {measurement['p50_ms']:.3f} ms)"  # type: ignore[index]
+            f"  {name:28} {measurement['p50_rows_per_second']:.1f} rows/s "
+            f"(p50 {measurement['p50_ms']:.3f} ms)"
         )
 
 
-def _print_a4_report(results: dict[str, object]) -> None:
+def _print_a4_report(results: dict[str, Any]) -> None:
     print(f"\n=== A-4 behavior checks: {results['count']} messages ===")
     short_match = results["short_match"]
     print(
-        f"2-character MATCH term={short_match['term']!r}: "  # type: ignore[index]
-        f"MATCH hits={short_match['match_count']}, "  # type: ignore[index]
-        f"LIKE hits={short_match['like_count']} "  # type: ignore[index]
-        f"({'PASS' if short_match['match_returns_zero'] else 'FAIL'} MATCH=0)"  # type: ignore[index]
+        f"2-character MATCH term={short_match['term']!r}: "
+        f"MATCH hits={short_match['match_count']}, "
+        f"LIKE hits={short_match['like_count']} "
+        f"({'PASS' if short_match['match_returns_zero'] else 'FAIL'} MATCH=0)"
     )
     escaping = results["syntax_escaping"]
     print(
-        f"FTS escaping: raw errors={escaping['raw_parse_error_count']}, "  # type: ignore[index]
-        f"quoted errors={escaping['quoted_parse_error_count']} "  # type: ignore[index]
-        f"({'PASS' if escaping['all_quoted_terms_safe'] else 'FAIL'} quoted)"  # type: ignore[index]
+        f"FTS escaping: raw errors={escaping['raw_parse_error_count']}, "
+        f"quoted errors={escaping['quoted_parse_error_count']} "
+        f"({'PASS' if escaping['all_quoted_terms_safe'] else 'FAIL'} quoted)"
     )
     reuse = results["like_index_reuse"]
     print(
-        f"LIKE reuse decision: {'REUSE' if reuse['two_character_reusable'] else 'DO NOT REUSE'} "  # type: ignore[index]
+        f"LIKE reuse decision: {'REUSE' if reuse['two_character_reusable'] else 'DO NOT REUSE'} "
         "trigram index for 2-character terms"
     )
-    for label, measurement in reuse["measurements"].items():  # type: ignore[union-attr]
+    for label, measurement in reuse["measurements"].items():
         print(
-            f"  {label:14} term={measurement['term']!r}, "  # type: ignore[index]
-            f"FTS p95={measurement['fts_table']['p95_ms']:.3f} ms, "  # type: ignore[index]
-            f"message_contents p95={measurement['message_contents']['p95_ms']:.3f} ms"  # type: ignore[index]
+            f"  {label:14} term={measurement['term']!r}, "
+            f"FTS p95={measurement['fts_table']['p95_ms']:.3f} ms, "
+            f"message_contents p95={measurement['message_contents']['p95_ms']:.3f} ms"
         )
     details = results["detail_comparison"]
     print(
         f"detail phrase support: "
-        f"({'PASS' if details['phrase_requires_detail_full'] else 'FAIL'} full only)"  # type: ignore[index]
+        f"({'PASS' if details['phrase_requires_detail_full'] else 'FAIL'} full only)"
     )
-    for detail, measurement in details["variants"].items():  # type: ignore[union-attr]
-        match_10 = measurement["match_10"]  # type: ignore[index]
+    for detail, measurement in details["variants"].items():
+        match_10 = measurement["match_10"]
         match_10_text = (
             f"MATCH10 {match_10['p95_ms']:.3f} ms"
             if match_10["supported"]
             else f"MATCH10 unsupported ({match_10['error']})"
         )
         print(
-            f"  detail={detail:6} FTS={measurement['fts_page_bytes']} B, "  # type: ignore[index]
-            f"MATCH3 p95={measurement['match_3']['p95_ms']:.3f} ms, "  # type: ignore[index]
+            f"  detail={detail:6} FTS={measurement['fts_page_bytes']} B, "
+            f"MATCH3 p95={measurement['match_3']['p95_ms']:.3f} ms, "
             f"{match_10_text}"
         )
 
@@ -1443,7 +1443,7 @@ def main() -> None:
     output_root.mkdir(parents=True, exist_ok=True)
 
     if args.measure:
-        reports: list[dict[str, object]] = []
+        reports: list[dict[str, Any]] = []
         for count in args.counts:
             dataset_root = output_root / str(count)
             if not dataset_root.exists():
@@ -1471,7 +1471,7 @@ def main() -> None:
         size_ratio = extrapolated_sizes["fts_to_message_contents_page_ratio"]
         print(
             f"sizes: message_contents={content_mib:.1f} MiB, "
-            f"messages_fts={fts_mib:.1f} MiB, ratio={size_ratio:.2f}x"  # type: ignore[union-attr]
+            f"messages_fts={fts_mib:.1f} MiB, ratio={size_ratio:.2f}x"
         )
         targets = extrapolation["targets"]
         print(
@@ -1479,7 +1479,7 @@ def main() -> None:
             f"({'PASS' if targets['match_under_300ms'] else 'FAIL'} <= 300 ms), "
             f"LIKE p95 max={targets['like_p95_ms_max']:.3f} ms "
             f"({'PASS' if targets['like_under_3s'] else 'FAIL'} <= 3 s), "
-            f"FTS ratio {'PASS' if targets['fts_ratio_at_most_5'] else 'FAIL'} (<= 5x)"  # type: ignore[index]
+            f"FTS ratio {'PASS' if targets['fts_ratio_at_most_5'] else 'FAIL'} (<= 5x)"
         )
         results = {
             "sqlite_version": sqlite3.sqlite_version,
@@ -1499,7 +1499,7 @@ def main() -> None:
         return
 
     if args.check_a4:
-        reports: list[dict[str, object]] = []
+        a4_reports: list[dict[str, Any]] = []
         for count in args.counts:
             dataset_root = output_root / str(count)
             if not dataset_root.exists():
@@ -1516,7 +1516,7 @@ def main() -> None:
                 warmups=args.warmups,
                 iterations=args.iterations,
             )
-            reports.append(report)
+            a4_reports.append(report)
             _print_a4_report(report)
         if args.results is not None:
             results_path = args.results.resolve()
@@ -1527,7 +1527,7 @@ def main() -> None:
                         "sqlite_version": sqlite3.sqlite_version,
                         "warmups": args.warmups,
                         "iterations": args.iterations,
-                        "a4": reports,
+                        "a4": a4_reports,
                     },
                     ensure_ascii=False,
                     indent=2,
