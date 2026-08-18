@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime
 from html import escape
 from typing import Literal, Protocol, cast
 
@@ -29,6 +28,7 @@ from mail_dock.domain.messages import RenderedMessage
 from mail_dock.domain.search import MessageDetail, MessageFilter, MessageSummary
 from mail_dock.presentation import strings
 from mail_dock.presentation.errors import user_message
+from mail_dock.presentation.formatting import format_local_datetime
 from mail_dock.usecases.open_message import OpenedMessage
 
 from ..web.interceptor import MailUrlRequestInterceptor
@@ -327,7 +327,7 @@ class DetailView(QWidget):
         self._header_values["recipient"].setText(getattr(message, "recipient", ""))
         self._header_values["cc"].setText(getattr(message, "cc", ""))
         self._header_values["date"].setText(
-            _format_date(message.date_sent or message.internal_date)
+            format_local_datetime(message.date_sent or message.internal_date)
         )
         self._header_values["account"].setText(message.account_id)
         self._header_values["folder"].setText(message.folder_display_name)
@@ -461,12 +461,6 @@ class DetailView(QWidget):
     def _cancel_request(self, channel: str, request_id: int | None) -> None:
         if request_id is not None:
             self._worker.cancel(channel)
-
-
-def _format_date(value: datetime | None) -> str:
-    if value is None:
-        return ""
-    return value.strftime("%Y-%m-%d %H:%M")
 
 
 def _format_size(size_bytes: int) -> str:

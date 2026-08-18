@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime
 from typing import Literal, Protocol
 
 from PySide6.QtCore import (
@@ -23,6 +22,7 @@ from mail_dock.domain.search import (
     SearchPage,
 )
 from mail_dock.presentation import strings
+from mail_dock.presentation.formatting import format_local_datetime
 
 SearchMode = Literal["and", "or"]
 ListSearchChannel = Literal["list/search"]
@@ -406,7 +406,7 @@ class MessageTableModel(QAbstractTableModel):
     @staticmethod
     def _display_value(summary: MessageSummary, column: int) -> str:
         values = (
-            _format_datetime(summary.date_sent or summary.internal_date),
+            format_local_datetime(summary.date_sent or summary.internal_date),
             summary.account_id,
             summary.folder_display_name,
             summary.sender,
@@ -436,12 +436,6 @@ class MessageTableModel(QAbstractTableModel):
         if summary.local_state == "purged":
             return strings.STATUS_LOCAL_PURGED
         return None
-
-
-def _format_datetime(value: datetime | None) -> str:
-    if value is None:
-        return ""
-    return value.strftime("%Y-%m-%d %H:%M")
 
 
 def _format_size(size_bytes: int | None) -> str:

@@ -183,9 +183,10 @@ def test_columns_render_summary_values(qtbot: object) -> None:
         model.data(model.index(0, column)) for column in range(model.columnCount(QModelIndex()))
     ]
 
+    expected_date = _summary().date_sent.astimezone().strftime("%Y-%m-%d %H:%M")
     assert headers == ["日付", "アカウント", "フォルダ", "差出人", "件名", "サイズ"]
     assert values == [
-        "2026-01-02 03:04",
+        expected_date,
         "account-1",
         "受信箱",
         "sender@example.com",
