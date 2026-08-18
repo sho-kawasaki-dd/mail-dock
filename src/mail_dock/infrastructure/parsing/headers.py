@@ -12,11 +12,43 @@ from urllib.parse import unquote_to_bytes
 
 from mail_dock.domain.normalize import replace_surrogates
 
+from .charset import normalize_charset_label
+
 _PARAMETER_NAME: Final[re.Pattern[str]] = re.compile(
     r"^(?P<name>[^*]+)(?:\*(?P<index>\d+)(?P<encoded>\*)?|(?P<extended>\*))?$",
     re.IGNORECASE,
 )
 _MESSAGE_ID: Final[re.Pattern[str]] = re.compile(r"<[^>]+>")
+_ISO2022_JP_LABELS = frozenset({"iso-2022-jp", "iso2022_jp"})
+
+
+def _iso2022_jp_ext_repaired_pairs(
+    value: str,
+) -> list[tuple[bytes | str, str | None]] | None:
+    """Retry encoded words declared as plain iso-2022-jp with the MS/extended codec.
+
+    Real senders often emit half-width kana or JIS X 0212 kanji while still
+    declaring the plain "iso-2022-jp" label, which Python's strict codec rejects.
+    """
+    try:
+        pairs = decode_header(value)
+    except (LookupError, UnicodeError, ValueError, IndexError):
+        return None
+
+    repaired: list[tuple[bytes | str, str | None]] = []
+    changed = False
+    for payload, charset_name in pairs:
+        normalized = normalize_charset_label(charset_name or "")
+        if isinstance(payload, bytes) and normalized in _ISO2022_JP_LABELS:
+            try:
+                payload.decode("iso2022_jp_ext", errors="strict")
+            except UnicodeDecodeError:
+                pass
+            else:
+                charset_name = "iso2022_jp_ext"
+                changed = True
+        repaired.append((payload, charset_name))
+    return repaired if changed else None
 
 
 def decode_header_value(value: str | None) -> str:
@@ -28,6 +60,13 @@ def decode_header_value(value: str | None) -> str:
         decoded = str(make_header(decode_header(value)))
         return replace_surrogates(value if value and not decoded else decoded)
     except (LookupError, UnicodeError, ValueError):
+        repaired = _iso2022_jp_ext_repaired_pairs(value)
+        if repaired is not None:
+            try:
+                decoded = str(make_header(repaired))
+                return replace_surrogates(value if value and not decoded else decoded)
+            except (LookupError, UnicodeError, ValueError):
+                pass
         return replace_surrogates(value)
 
 

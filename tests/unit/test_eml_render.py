@@ -57,6 +57,19 @@ def test_renderer_decodes_html_in_declared_japanese_charsets(charset: str) -> No
     assert rendered.html_body == body
 
 
+def test_renderer_recovers_halfwidth_kana_mislabeled_as_plain_iso_2022_jp() -> None:
+    # ESC ( I half-width kana is common in real mail but rejected by the strict codec.
+    body = b"Contact: \x1b(I\x31\x32\x33\x1b(B desu"
+    raw = (
+        b"Content-Type: text/plain; charset=iso-2022-jp\r\n"
+        b"Content-Transfer-Encoding: 8bit\r\n\r\n"
+    ) + body
+
+    rendered = extract_render_parts(raw)
+
+    assert rendered.text_body == "Contact: ｱｲｳ desu"
+
+
 def test_renderer_class_implements_renderer_port() -> None:
     renderer = EmlMessageRenderer()
 

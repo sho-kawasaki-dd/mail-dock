@@ -1,3 +1,4 @@
+import base64
 from datetime import UTC, datetime, timedelta, timezone
 from email import policy
 from email.message import Message
@@ -31,6 +32,14 @@ def test_decode_header_value_handles_rfc2047_and_malformed_input() -> None:
 
 def test_decode_header_value_replaces_lone_surrogates() -> None:
     assert decode_header_value("broken\udcff header") == "broken? header"
+
+
+def test_decode_header_value_recovers_halfwidth_kana_mislabeled_as_plain_iso_2022_jp() -> None:
+    # ESC ( I half-width kana is rejected by the strict "iso-2022-jp" codec.
+    payload = b"ABC\x1b(I\x31\x32\x33\x1b(B"
+    header = f"=?ISO-2022-JP?B?{base64.b64encode(payload).decode('ascii')}?="
+
+    assert decode_header_value(header) == "ABCｱｲｳ"
 
 
 def test_parse_content_disposition_filename_supports_rfc2231_segments() -> None:

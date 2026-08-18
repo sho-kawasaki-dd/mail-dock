@@ -911,13 +911,13 @@ JavaScriptの無効化だけでは外部画像によるトラッキングを防�
 **文字コードのフォールバック順序**
 
 1. パートが宣言する charset（別名を正規化: `x-sjis` / `shift-jis` → `cp932`、`iso-2022-jp-ms` → `iso2022_jp_ext` 等）
-2. `iso-2022-jp` → **`cp932`**（`shift_jis` ではなく機種依存文字に対応するcp932）→ `euc_jp` → `utf-8`
+2. `iso-2022-jp` → `iso2022_jp_ext`（半角カナ・JIS X 0212等、`iso-2022-jp`のまま送られる拡張シーケンスを救済）→ **`cp932`**（`shift_jis` ではなく機種依存文字に対応するcp932）→ `euc_jp` → `utf-8`
 3. `charset-normalizer` による推定
 4. 最終手段として `errors="replace"` で強制デコードし、**警告ログに記録する（例外は投げない）**
 
 **ヘッダ・本文の抽出**
 
-* ヘッダは `email.header.decode_header` + `make_header`（RFC 2047）。
+* ヘッダは `email.header.decode_header` + `make_header`（RFC 2047）。宣言charsetが `iso-2022-jp` の単語がデコードに失敗した場合は `iso2022_jp_ext` で再試行してから、それでも失敗すれば原文へフォールバックする。
 * 添付ファイル名は **RFC 2231 の分割形式**（`filename*0*`, `filename*1*`）と、**Outlookが出す `filename=` へRFC2047を直接埋めた非標準形式**の両方に対応する（`get_filename()` は後者を処理しない）。
 * 本文は `text/plain` を優先し、無ければ `text/html` をタグ除去して使用する。`multipart/alternative` は plain 優先、`multipart/related` は本体を辿る。
 * `Content-ID` を持つインライン画像は**添付ファイル名リストから除外**する（検索ノイズになるため）。

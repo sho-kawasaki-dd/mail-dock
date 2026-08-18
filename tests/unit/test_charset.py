@@ -38,6 +38,17 @@ def test_decode_text_uses_cp932_after_invalid_declared_charset() -> None:
     assert encoding == "cp932"
 
 
+def test_decode_text_uses_iso2022_jp_ext_for_halfwidth_kana_mislabeled_as_plain() -> None:
+    # Real senders emit half-width kana (ESC ( I) while still declaring plain
+    # "iso-2022-jp", which the strict codec rejects with UnicodeDecodeError.
+    raw = b"ABC\x1b(I\x31\x32\x33\x1b(B"
+
+    text, encoding = decode_text(raw, "iso-2022-jp")
+
+    assert text == "ABCｱｲｳ"
+    assert encoding == "iso2022_jp_ext"
+
+
 def test_decode_text_uses_charset_normalizer_after_fixed_fallbacks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -59,6 +70,30 @@ def test_decode_text_uses_charset_normalizer_after_fixed_fallbacks(
 
     assert text == "日本語"
     assert encoding == "x-test"
+
+
+def test_decode_text_replaces_untranslatable_nec_ibm_extension_char() -> None:
+    # ku 89 / ten 85 ("yu") is an NEC-selected IBM extended kanji that no
+    # stdlib iso2022_jp* codec maps, verified against a real production email.
+    # A realistically long body keeps the replacement ratio under the limit.
+    body = "いつもお世話になっております。日本語のご案内メールです。" * 3
+    encoded = body.encode("iso2022_jp_ext")
+    raw = encoded.removesuffix(b"\x1b(B") + b"yu" + b"\x1b(B"
+
+    text, encoding = decode_text(raw, "iso-2022-jp")
+
+    assert text == body + "\ufffd"
+    assert encoding == "iso2022_jp_ext (replace)"
+
+
+def test_decode_text_still_falls_back_to_cp932_when_mostly_undecodable() -> None:
+    # A genuinely mislabeled cp932 body must not be shredded into mostly "�".
+    raw = "①㈱髙".encode("cp932")
+
+    text, encoding = decode_text(raw, "iso-2022-jp")
+
+    assert text == "①㈱髙"
+    assert encoding == "cp932"
 
 
 def test_decode_text_replaces_invalid_bytes_and_logs_warning(
