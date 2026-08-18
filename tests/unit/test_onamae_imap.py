@@ -7,7 +7,7 @@ from typing import ClassVar, cast
 
 import pytest
 
-from mail_dock.domain.errors import AuthenticationError
+from mail_dock.domain.errors import AuthenticationError, OperationCancelledError
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.infrastructure.fetchers.onamae_imap import OnamaeImapFetcher
 
@@ -23,7 +23,11 @@ class FakeSocket:
 class FakeImap:
     instances: ClassVar[list[FakeImap]] = []
     messages: ClassVar[dict[int, bytes]] = {}
+    flags: ClassVar[dict[int, tuple[str, ...]]] = {}
     search_uids: ClassVar[list[int]] = [1, 2, 3]
+    capability_response: ClassVar[bytes] = b"CAPABILITY IMAP4rev1 MOVE UIDPLUS SPECIAL-USE"
+    highest_modseq: ClassVar[int | None] = None
+    nomodseq: ClassVar[bool] = False
     commands: list[tuple[str, tuple[object, ...]]]
     login_result: ClassVar[tuple[str, builtins.list[bytes]]] = ("OK", [b"LOGIN completed"])
 
@@ -42,7 +46,11 @@ class FakeImap:
 
     def capability(self) -> tuple[str, builtins.list[bytes]]:
         self.commands.append(("CAPABILITY", ()))
-        return "OK", [b"CAPABILITY IMAP4rev1 MOVE UIDPLUS SPECIAL-USE"]
+        return "OK", [self.capability_response]
+
+    def enable(self, capability: str) -> tuple[str, builtins.list[bytes]]:
+        self.commands.append(("ENABLE", (capability,)))
+        return "OK", [capability.encode("ascii")]
 
     def logout(self) -> tuple[str, list[bytes]]:
         self.commands.append(("LOGOUT", ()))
@@ -57,6 +65,12 @@ class FakeImap:
         return "OK", [b"1"]
 
     def response(self, code: str) -> tuple[str, builtins.list[bytes]]:
+        if code == "HIGHESTMODSEQ":
+            if self.nomodseq:
+                return "NOMODSEQ", [b"[NOMODSEQ]"]
+            if self.highest_modseq is None:
+                return "", []
+            return "HIGHESTMODSEQ", [str(self.highest_modseq).encode("ascii")]
         return code, [str(self.uidvalidity).encode("ascii")]
 
     def uid(self, command: str, *args: str) -> tuple[str, builtins.list[object]]:
@@ -70,7 +84,16 @@ class FakeImap:
             uid_set = args[0]
             request = args[1]
             items: list[object] = []
-            for uid in (int(value) for value in uid_set.split(",")):
+            requested_uids = (
+                self.search_uids
+                if uid_set == "1:*"
+                else [int(value) for value in uid_set.split(",")]
+            )
+            for uid in requested_uids:
+                if request == "(UID FLAGS)":
+                    flags = " ".join(self.flags.get(uid, ()))
+                    items.append(f"* {uid} FETCH (UID {uid} FLAGS ({flags}))".encode("ascii"))
+                    continue
                 raw = self.messages.get(uid, f"message-{uid}".encode("ascii"))
                 if "HEADER.FIELDS" in request:
                     literal = f"Message-ID: <{uid}@example.test>\r\n\r\n".encode("ascii")
@@ -98,6 +121,10 @@ class FakeImap:
 def fake_imap(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     FakeImap.instances.clear()
     FakeImap.search_uids = [1, 2, 3]
+    FakeImap.flags = {}
+    FakeImap.capability_response = b"CAPABILITY IMAP4rev1 MOVE UIDPLUS SPECIAL-USE"
+    FakeImap.highest_modseq = None
+    FakeImap.nomodseq = False
     FakeImap.login_result = ("OK", [b"LOGIN completed"])
     monkeypatch.setattr(imaplib, "IMAP4_SSL", FakeImap)
     yield
@@ -164,6 +191,64 @@ def test_downloads_use_peek_and_select_returns_uidvalidity(fake_imap: None) -> N
         command for command in FakeImap.instances[0].commands if command[0] == "FETCH"
     ]
     assert all("PEEK" in str(command[1][1]) for command in fetch_commands)
+
+
+def test_iter_flags_uses_flags_only_and_500_uid_chunks(fake_imap: None) -> None:
+    FakeImap.search_uids = list(range(1, 502))
+    FakeImap.flags = {uid: (r"\Seen",) for uid in FakeImap.search_uids}
+    fetcher = OnamaeImapFetcher("imap.example.test", "user", "password")
+    fetcher.connect()
+
+    refs = list(fetcher.iter_flags("INBOX", FakeImap.search_uids))
+
+    assert len(refs) == 501
+    assert refs[0].uid == 1
+    assert refs[0].flags == (r"\Seen",)
+    fetch_commands = [
+        command for command in FakeImap.instances[0].commands if command[0] == "FETCH"
+    ]
+    assert len(fetch_commands) == 2
+    assert fetch_commands[0][1][1] == "(UID FLAGS)"
+    assert len(cast(str, fetch_commands[0][1][0]).split(",")) == 500
+
+
+def test_iter_flags_since_uses_condstore_and_reads_highest_modseq(fake_imap: None) -> None:
+    FakeImap.capability_response = b"CAPABILITY IMAP4rev1 CONDSTORE"
+    FakeImap.highest_modseq = 42
+    FakeImap.flags = {1: (r"\Flagged",)}
+    fetcher = OnamaeImapFetcher("imap.example.test", "user", "password")
+    fetcher.connect()
+
+    assert fetcher.select_folder("INBOX") == 123
+    refs = list(fetcher.iter_flags_since("INBOX", 41))
+
+    assert fetcher.get_highest_modseq() == 42
+    assert refs[0].flags == (r"\Flagged",)
+    assert ("ENABLE", ("CONDSTORE",)) in FakeImap.instances[0].commands
+    assert ("FETCH", ("1:*", "(UID FLAGS)", "(CHANGEDSINCE 41)")) in (
+        FakeImap.instances[0].commands
+    )
+
+
+def test_select_folder_reports_nomodseq_as_unavailable(fake_imap: None) -> None:
+    FakeImap.capability_response = b"CAPABILITY IMAP4rev1 CONDSTORE"
+    FakeImap.nomodseq = True
+    fetcher = OnamaeImapFetcher("imap.example.test", "user", "password")
+    fetcher.connect()
+
+    fetcher.select_folder("INBOX")
+
+    assert fetcher.get_highest_modseq() is None
+
+
+def test_iter_flags_honors_cancellation_before_fetch(fake_imap: None) -> None:
+    token = CancelToken()
+    token.cancel()
+    fetcher = OnamaeImapFetcher("imap.example.test", "user", "password")
+    fetcher.connect()
+
+    with pytest.raises(OperationCancelledError):
+        list(fetcher.iter_flags("INBOX", [1], cancel=token))
 
 
 def test_delete_uses_move_when_server_supports_it(fake_imap: None) -> None:

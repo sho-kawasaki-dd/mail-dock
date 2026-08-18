@@ -1,4 +1,4 @@
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from threading import Event
 
@@ -36,6 +36,27 @@ class MinimalFetcher(BaseMailFetcher):
         cancel: CancelToken | None = None,
     ) -> Iterator[RemoteMessageRef]:
         return iter(())
+
+    def iter_flags(
+        self,
+        raw_name: str,
+        uids: Iterable[int],
+        *,
+        cancel: CancelToken | None = None,
+    ) -> Iterator[RemoteMessageRef]:
+        return iter(())
+
+    def iter_flags_since(
+        self,
+        raw_name: str,
+        modseq: int,
+        *,
+        cancel: CancelToken | None = None,
+    ) -> Iterator[RemoteMessageRef]:
+        return iter(())
+
+    def get_highest_modseq(self) -> int | None:
+        return None
 
     def get_max_uid(self, raw_name: str) -> int:
         return 0

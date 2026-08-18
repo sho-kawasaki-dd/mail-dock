@@ -125,6 +125,37 @@ class FakeFetcher(BaseMailFetcher):
             token.raise_if_cancelled()
             yield self._messages[(raw_name, uid)].ref
 
+    def iter_flags(
+        self,
+        raw_name: str,
+        uids: Iterable[int],
+        *,
+        cancel: CancelToken | None = None,
+    ) -> Iterator[RemoteMessageRef]:
+        token = cancel or CancelToken()
+        for uid in uids:
+            token.raise_if_cancelled()
+            message = self._messages.get((raw_name, uid))
+            if message is not None:
+                yield RemoteMessageRef(uid=uid, flags=message.ref.flags)
+
+    def iter_flags_since(
+        self,
+        raw_name: str,
+        modseq: int,
+        *,
+        cancel: CancelToken | None = None,
+    ) -> Iterator[RemoteMessageRef]:
+        del modseq
+        yield from self.iter_flags(
+            raw_name,
+            (uid for folder, uid in self._messages if folder == raw_name),
+            cancel=cancel,
+        )
+
+    def get_highest_modseq(self) -> int | None:
+        return None
+
     def get_max_uid(self, raw_name: str) -> int:
         return max((uid for folder, uid in self._messages if folder == raw_name), default=0)
 

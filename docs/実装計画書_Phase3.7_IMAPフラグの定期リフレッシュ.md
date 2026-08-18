@@ -73,14 +73,14 @@
 
 ### **Group A: ドメイン層とIMAPフェッチャー**
 
-- [ ] `BaseMailFetcher` に `iter_flags(raw_name, uids, *, cancel=None) -> Iterator[RemoteMessageRef]` を追加する
-- [ ] `BaseMailFetcher` に `iter_flags_since(raw_name, modseq, *, cancel=None) -> Iterator[RemoteMessageRef]` を追加する
-- [ ] `BaseMailFetcher` に `get_highest_modseq() -> int | None` を追加する（非対応時は `None`）
-- [ ] `BaseMailFetcher` の追加抽象メソッドに合わせ、`tests/support/fake_fetcher.py` の `FakeFetcher` と `tests/unit/test_fetcher.py` の `MinimalFetcher` を含む全テストダブルを更新する
-- [ ] `OnamaeImapFetcher` で `CONDSTORE` を `capabilities` に反映する
-- [ ] `select_folder()` で `CONDSTORE` サポート時に `(CONDSTORE)` パラメータまたは有効化を行い、`HIGHESTMODSEQ` / `NOMODSEQ` 応答を解釈して現在値を保持するアクセサを実装する
-- [ ] `imap_common.py` の `parse_fetch_response` を、literal のない単一 `bytes` レスポンス（`FLAGS` / `CHANGEDSINCE` の FETCH 結果）もパースできるように拡張する
-- [ ] `iter_flags` / `iter_flags_since` を `onamae_imap.py` に実装し、`_FETCH_CHUNK_SIZE` を再利用してバッチ取得を行う
+- [x] `BaseMailFetcher` に `iter_flags(raw_name, uids, *, cancel=None) -> Iterator[RemoteMessageRef]` を追加する
+- [x] `BaseMailFetcher` に `iter_flags_since(raw_name, modseq, *, cancel=None) -> Iterator[RemoteMessageRef]` を追加する
+- [x] `BaseMailFetcher` に `get_highest_modseq() -> int | None` を追加する（非対応時は `None`）
+- [x] `BaseMailFetcher` の追加抽象メソッドに合わせ、`tests/support/fake_fetcher.py` の `FakeFetcher` と `tests/unit/test_fetcher.py` の `MinimalFetcher` を含む全テストダブルを更新する
+- [x] `OnamaeImapFetcher` で `CONDSTORE` を `capabilities` に反映する
+- [x] `select_folder()` で `CONDSTORE` サポート時に `(CONDSTORE)` パラメータまたは有効化を行い、`HIGHESTMODSEQ` / `NOMODSEQ` 応答を解釈して現在値を保持するアクセサを実装する
+- [x] `imap_common.py` の `parse_fetch_response` を、literal のない単一 `bytes` レスポンス（`FLAGS` / `CHANGEDSINCE` の FETCH 結果）もパースできるように拡張する
+- [x] `iter_flags` / `iter_flags_since` を `onamae_imap.py` に実装し、`_FETCH_CHUNK_SIZE` を再利用してバッチ取得を行う
 
 ### **Group B: DBスキーマとリポジトリ**
 

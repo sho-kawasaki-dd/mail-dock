@@ -10,7 +10,7 @@ from __future__ import annotations
 import imaplib
 import re
 import ssl
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import suppress
 from typing import cast
 
@@ -29,6 +29,8 @@ from mail_dock.infrastructure.fetchers.imap_common import (
 
 _FETCH_CHUNK_SIZE = 500
 _UIDVALIDITY_PATTERN = re.compile(r"\bUIDVALIDITY\s+(\d+)", re.IGNORECASE)
+_HIGHEST_MODSEQ_PATTERN = re.compile(r"\bHIGHESTMODSEQ\s+(\d+)", re.IGNORECASE)
+_NOMODSEQ_PATTERN = re.compile(r"\bNOMODSEQ\b", re.IGNORECASE)
 _TRASH_CANDIDATES = (
     "Trash",
     "ゴミ箱",
@@ -81,6 +83,7 @@ class OnamaeImapFetcher(BaseMailFetcher):
         self._ssl_context = ssl_context
         self._connection: imaplib.IMAP4_SSL | None = None
         self._capabilities: frozenset[str] = frozenset()
+        self._highest_modseq: int | None = None
 
     @property
     def capabilities(self) -> frozenset[str]:
@@ -116,6 +119,9 @@ class OnamaeImapFetcher(BaseMailFetcher):
                 capability_status, capability_data = connection.capability()
                 self._ensure_ok(capability_status, capability_data, "CAPABILITY")
                 self._capabilities = self._parse_capabilities(capability_data)
+                if "CONDSTORE" in self._capabilities:
+                    enable_status, enable_data = connection.enable("CONDSTORE")
+                    self._ensure_ok(enable_status, enable_data, "ENABLE CONDSTORE")
             self._connection = connection
         except BaseException:
             if connection is not None:
@@ -129,6 +135,7 @@ class OnamaeImapFetcher(BaseMailFetcher):
         connection = self._connection
         self._connection = None
         self._capabilities = frozenset()
+        self._highest_modseq = None
         if connection is None:
             return
         with wrap_imap_errors("IMAP logout"):
@@ -151,10 +158,15 @@ class OnamaeImapFetcher(BaseMailFetcher):
         if not raw_name:
             raise ValueError("raw_name must not be empty")
         connection = self._require_connection()
+        self._highest_modseq = None
         with wrap_imap_errors(f"SELECT {raw_name}"):
             status, data = connection.select(raw_name, readonly=True)
             self._ensure_ok(status, data, "SELECT")
             response_type, response_data = connection.response("UIDVALIDITY")
+            highest_type: object = ""
+            highest_data: object = []
+            if "CONDSTORE" in self._capabilities:
+                highest_type, highest_data = connection.response("HIGHESTMODSEQ")
         if str(response_type).upper() != "UIDVALIDITY":
             raise PermanentError("SELECT response has no UIDVALIDITY")
         uidvalidity = self._first_number(response_data)
@@ -162,7 +174,24 @@ class OnamaeImapFetcher(BaseMailFetcher):
             uidvalidity = self._first_number(data)
         if uidvalidity is None:
             raise PermanentError("SELECT response has no UIDVALIDITY")
+        if "CONDSTORE" in self._capabilities:
+            highest_type_text = self._response_text(highest_type).upper()
+            if (
+                highest_type_text == "NOMODSEQ"
+                or self._contains_nomodseq(data)
+                or self._contains_nomodseq(highest_data)
+            ):
+                self._highest_modseq = None
+            elif highest_type_text == "HIGHESTMODSEQ":
+                self._highest_modseq = self._first_modseq(highest_data)
+            else:
+                self._highest_modseq = self._first_modseq(data, allow_plain=False)
         return uidvalidity
+
+    def get_highest_modseq(self) -> int | None:
+        """Return the HIGHESTMODSEQ recorded by the last folder selection."""
+
+        return self._highest_modseq
 
     def iter_message_refs(
         self,
@@ -205,6 +234,60 @@ class OnamaeImapFetcher(BaseMailFetcher):
                     continue
                 yield parse_fetch_response((metadata, literal))
             token.raise_if_cancelled()
+
+    def iter_flags(
+        self,
+        raw_name: str,
+        uids: Iterable[int],
+        *,
+        cancel: CancelToken | None = None,
+    ) -> Iterator[RemoteMessageRef]:
+        """Yield FLAGS-only metadata for the supplied UIDs in chunks."""
+
+        requested_uids = list(uids)
+        if any(uid < 1 for uid in requested_uids):
+            raise ValueError("uids must contain only positive integers")
+        token = cancel if cancel is not None else CancelToken()
+        self.select_folder(raw_name)
+        for offset in range(0, len(requested_uids), _FETCH_CHUNK_SIZE):
+            token.raise_if_cancelled()
+            chunk = requested_uids[offset : offset + _FETCH_CHUNK_SIZE]
+            data = self._uid_command(
+                "FETCH",
+                ",".join(str(uid) for uid in chunk),
+                "(UID FLAGS)",
+            )
+            for item in data:
+                if not isinstance(item, (bytes, tuple, list)):
+                    continue
+                yield parse_fetch_response(item)
+            token.raise_if_cancelled()
+
+    def iter_flags_since(
+        self,
+        raw_name: str,
+        modseq: int,
+        *,
+        cancel: CancelToken | None = None,
+    ) -> Iterator[RemoteMessageRef]:
+        """Yield FLAGS-only metadata changed after the supplied MODSEQ."""
+
+        if modseq <= 0:
+            raise ValueError("modseq must be positive")
+        token = cancel if cancel is not None else CancelToken()
+        self.select_folder(raw_name)
+        token.raise_if_cancelled()
+        data = self._uid_command(
+            "FETCH",
+            "1:*",
+            "(UID FLAGS)",
+            f"(CHANGEDSINCE {modseq})",
+        )
+        for item in data:
+            if not isinstance(item, (bytes, tuple, list)):
+                continue
+            yield parse_fetch_response(item)
+        token.raise_if_cancelled()
 
     def get_max_uid(self, raw_name: str) -> int:
         """Return the largest UID without fetching message metadata."""
@@ -340,6 +423,40 @@ class OnamaeImapFetcher(BaseMailFetcher):
             if text.strip().isdigit():
                 return int(text.strip())
         return None
+
+    @staticmethod
+    def _first_modseq(data: object, *, allow_plain: bool = True) -> int | None:
+        items = OnamaeImapFetcher._response_items(data)
+        for item in items:
+            text = item.decode("ascii", errors="replace") if isinstance(item, bytes) else str(item)
+            match = _HIGHEST_MODSEQ_PATTERN.search(text)
+            if match is not None:
+                return int(match.group(1))
+        if allow_plain:
+            for item in items:
+                text = (
+                    item.decode("ascii", errors="replace")
+                    if isinstance(item, bytes)
+                    else str(item)
+                )
+                if text.strip().isdigit():
+                    return int(text.strip())
+        return None
+
+    @staticmethod
+    def _response_text(value: object) -> str:
+        if isinstance(value, bytes):
+            return value.decode("ascii", errors="replace")
+        return str(value)
+
+    @staticmethod
+    def _contains_nomodseq(data: object) -> bool:
+        return any(
+            _NOMODSEQ_PATTERN.search(
+                item.decode("ascii", errors="replace") if isinstance(item, bytes) else str(item)
+            )
+            for item in OnamaeImapFetcher._response_items(data)
+        )
 
     @staticmethod
     def _search_uids(data: object) -> list[int]:

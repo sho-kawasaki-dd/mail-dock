@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from threading import Event
@@ -103,6 +103,30 @@ class BaseMailFetcher(ABC):
         cancel: CancelToken | None = None,
     ) -> Iterator[RemoteMessageRef]:
         """Yield message metadata lazily in the requested UID order."""
+
+    @abstractmethod
+    def iter_flags(
+        self,
+        raw_name: str,
+        uids: Iterable[int],
+        *,
+        cancel: CancelToken | None = None,
+    ) -> Iterator[RemoteMessageRef]:
+        """Yield FLAGS-only metadata for the requested UIDs."""
+
+    @abstractmethod
+    def iter_flags_since(
+        self,
+        raw_name: str,
+        modseq: int,
+        *,
+        cancel: CancelToken | None = None,
+    ) -> Iterator[RemoteMessageRef]:
+        """Yield FLAGS changed since ``modseq`` using CONDSTORE."""
+
+    @abstractmethod
+    def get_highest_modseq(self) -> int | None:
+        """Return the selected folder's HIGHESTMODSEQ, if available."""
 
     @abstractmethod
     def get_max_uid(self, raw_name: str) -> int:

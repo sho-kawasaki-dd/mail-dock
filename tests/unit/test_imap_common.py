@@ -60,6 +60,14 @@ def test_fetch_response_parses_metadata_and_message_id() -> None:
     assert result.internal_date.isoformat() == "2026-07-30T03:34:56+00:00"
 
 
+def test_fetch_response_parses_single_bytes_without_literal() -> None:
+    result = parse_fetch_response(b"* 7 FETCH (UID 42 FLAGS (\\Seen \\Flagged))")
+
+    assert result.uid == 42
+    assert result.flags == (r"\Seen", r"\Flagged")
+    assert result.message_id is None
+
+
 def test_internaldate_is_utc() -> None:
     assert parse_internaldate("30-Jul-2026 12:34:56 +0900").tzinfo == UTC
 
