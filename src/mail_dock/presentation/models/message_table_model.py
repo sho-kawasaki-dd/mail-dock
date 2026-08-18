@@ -430,9 +430,17 @@ class MessageTableModel(QAbstractTableModel):
         if summary.failure_class == "oversize":
             return strings.STATUS_OVERSIZE
         if not _has_imap_flag(summary.imap_flags, "\\Seen"):
-            return strings.TOOLTIP_UNREAD
+            if summary.flags_seen_at is None:
+                return strings.TOOLTIP_UNREAD_UNKNOWN
+            return strings.TOOLTIP_UNREAD.format(
+                seen_at=format_local_datetime(summary.flags_seen_at)
+            )
         if _has_imap_flag(summary.imap_flags, "\\Flagged"):
-            return strings.STATUS_FLAGGED
+            if summary.flags_seen_at is None:
+                return strings.TOOLTIP_IMAP_FLAGS_UNKNOWN
+            return strings.TOOLTIP_IMAP_FLAGS.format(
+                seen_at=format_local_datetime(summary.flags_seen_at)
+            )
         if summary.local_state == "purged":
             return strings.STATUS_LOCAL_PURGED
         return None

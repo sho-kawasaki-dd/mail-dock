@@ -32,6 +32,7 @@ def _detail(
         imap_flags=None,
         moved_to_folder_display_name=None,
         failure_class=None,
+        flags_seen_at=None,
         recipient="recipient@example.com",
         cc="",
         message_id="<message@example.com>",

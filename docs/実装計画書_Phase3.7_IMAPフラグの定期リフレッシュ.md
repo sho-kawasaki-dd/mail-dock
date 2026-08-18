@@ -120,10 +120,10 @@
 
 ### **Group E: GUI表示**
 
-- [ ] `strings.py` の `TOOLTIP_UNREAD` / `TOOLTIP_IMAP_FLAGS` をフォーマット文字列に変更（例: `TOOLTIP_UNREAD = "未読 (確認日時: {seen_at})"`、`TOOLTIP_UNREAD_UNKNOWN = "未読 (同期時点のスナップショット)"`）
-- [ ] `MessageSummary` / `MessageDetail` に `flags_seen_at: datetime | None` を追加し、`SqliteSearchRepository` の一覧SQL・詳細SQL・行マッピングから供給する
-- [ ] `message_table_model.py` で `flags_seen_at` をローカル時刻表記に変換して未読・スターのツールチップを構築する
-- [ ] 詳細ビューのヘッダ領域に読み取り専用の未読・スターステータス表示を追加し、同じ確認日時ツールチップを設定する（操作ボタンは追加しない）
+- [x] `strings.py` の `TOOLTIP_UNREAD` / `TOOLTIP_IMAP_FLAGS` をフォーマット文字列に変更（例: `TOOLTIP_UNREAD = "未読 (確認日時: {seen_at})"`、`TOOLTIP_UNREAD_UNKNOWN = "未読 (同期時点のスナップショット)"`）
+- [x] `MessageSummary` / `MessageDetail` に `flags_seen_at: datetime | None` を追加し、`SqliteSearchRepository` の一覧SQL・詳細SQL・行マッピングから供給する
+- [x] `message_table_model.py` で `flags_seen_at` をローカル時刻表記に変換して未読・スターのツールチップを構築する
+- [x] 詳細ビューのヘッダ領域に読み取り専用の未読・スターステータス表示を追加し、同じ確認日時ツールチップを設定する（操作ボタンは追加しない）
 
 ### **Group F: テスト**
 

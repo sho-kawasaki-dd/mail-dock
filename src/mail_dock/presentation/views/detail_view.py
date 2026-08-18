@@ -169,6 +169,12 @@ class DetailView(QWidget):
 
         return self._state_label
 
+    @property
+    def status_label(self) -> QLabel:
+        """Return the read-only IMAP status label."""
+
+        return self._status_label
+
     def show_message(self, summary: MessageSummary | None) -> None:
         """Display ``summary`` and asynchronously load its verified EML."""
         self._cancel_request("detail/open", self._open_request_id)
@@ -251,6 +257,10 @@ class DetailView(QWidget):
             self._header_values[key] = value
             header_form.addRow(label, value)
 
+        self._status_label = QLabel(self)
+        self._status_label.setWordWrap(True)
+        header_form.addRow(strings.DETAIL_HEADER_STATUS, self._status_label)
+
         self._remote_images_label = QLabel(strings.DETAIL_REMOTE_IMAGES_BLOCKED, self)
         self._remote_images_button = QPushButton(strings.DETAIL_LOAD_REMOTE_IMAGES, self)
         self._remote_images_button.clicked.connect(self._allow_remote_images)
@@ -312,6 +322,8 @@ class DetailView(QWidget):
         self._subject_label.clear()
         for value in self._header_values.values():
             value.clear()
+        self._status_label.clear()
+        self._status_label.setToolTip("")
         self._thread_button.setVisible(False)
         self._thread_button.setEnabled(True)
         self._remote_images_banner.setVisible(False)
@@ -332,6 +344,30 @@ class DetailView(QWidget):
         )
         self._header_values["account"].setText(message.account_id)
         self._header_values["folder"].setText(message.folder_display_name)
+        statuses: list[str] = []
+        if not _has_imap_flag(message.imap_flags, "\\Seen"):
+            statuses.append(strings.STATUS_UNREAD)
+        if _has_imap_flag(message.imap_flags, "\\Flagged"):
+            statuses.append(strings.STATUS_FLAGGED)
+        self._status_label.setText(" / ".join(statuses))
+        if statuses:
+            if message.flags_seen_at is None:
+                tooltip = (
+                    strings.TOOLTIP_UNREAD_UNKNOWN
+                    if strings.STATUS_UNREAD in statuses
+                    else strings.TOOLTIP_IMAP_FLAGS_UNKNOWN
+                )
+            elif strings.STATUS_UNREAD in statuses:
+                tooltip = strings.TOOLTIP_UNREAD.format(
+                    seen_at=format_local_datetime(message.flags_seen_at)
+                )
+            else:
+                tooltip = strings.TOOLTIP_IMAP_FLAGS.format(
+                    seen_at=format_local_datetime(message.flags_seen_at)
+                )
+            self._status_label.setToolTip(tooltip)
+        else:
+            self._status_label.setToolTip("")
         if message.thread_key:
             self._thread_button.setText(strings.DETAIL_THREAD_SHOW.format(count=1))
             self._thread_button.setVisible(True)
@@ -471,3 +507,7 @@ def _format_size(size_bytes: int) -> str:
     if size_bytes < 1024 * 1024:
         return f"{size_bytes / 1024:.1f} KB"
     return f"{size_bytes / (1024 * 1024):.1f} MB"
+
+
+def _has_imap_flag(flags: str | None, expected: str) -> bool:
+    return expected in (flags or "").split()

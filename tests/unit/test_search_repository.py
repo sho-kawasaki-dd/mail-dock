@@ -66,6 +66,7 @@ def _add(
     thread_key: str | None = None,
     uidvalidity: int = 1,
     imap_flags: str | None = "\\Seen",
+    flags_seen_at: str | None = None,
 ) -> int:
     return int(
         repository.add_message(
@@ -92,6 +93,7 @@ def _add(
                 "relative_path": f"eml/{uid}.eml",
                 "file_hash": f"hash-{uid}",
                 "imap_flags": imap_flags,
+                "flags_seen_at": flags_seen_at,
             },
             {
                 "subject": subject,
@@ -203,7 +205,13 @@ def test_list_summary_includes_joined_status_fields_for_current_uidvalidity(
     moved_folder = messages.upsert_folder(
         {"account_id": "account-a", "raw_name": "Moved", "display_name": "移動先"}
     )
-    moved_id = _add(messages, folder_a, 1, imap_flags="\\Flagged")
+    moved_id = _add(
+        messages,
+        folder_a,
+        1,
+        imap_flags="\\Flagged",
+        flags_seen_at="2026-08-18T12:34:00Z",
+    )
     failed_id = _add(messages, folder_a, 2)
     messages.update_remote_state(moved_id, "moved", moved_folder)
     messages.record_failure("account-a", folder_a, 1, 2, "oversize", "too large")
@@ -212,6 +220,7 @@ def test_list_summary_includes_joined_status_fields_for_current_uidvalidity(
     items = {item.id: item for item in list_messages(search).items}
 
     assert items[moved_id].imap_flags == "\\Flagged"
+    assert items[moved_id].flags_seen_at == datetime(2026, 8, 18, 12, 34, tzinfo=UTC)
     assert items[moved_id].moved_to_folder_display_name == "移動先"
     assert items[moved_id].failure_class is None
     assert items[failed_id].failure_class == "oversize"
@@ -248,6 +257,7 @@ def test_read_operations_return_count_thread_and_detail(
     detail = get_message(search, message_id=first)
     assert detail is not None
     assert detail.recipient == "recipient@example.com"
+    assert detail.flags_seen_at is None
     assert detail.relative_path == "eml/1.eml"
     assert get_message(search, message_id=9999) is None
 

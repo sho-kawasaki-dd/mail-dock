@@ -51,7 +51,13 @@ class _FakeWorker(QObject):
         return None
 
 
-def _summary(*, message_id: int = 1, local_state: str = "active") -> MessageSummary:
+def _summary(
+    *,
+    message_id: int = 1,
+    local_state: str = "active",
+    imap_flags: str | None = "\\Seen",
+    flags_seen_at: datetime | None = None,
+) -> MessageSummary:
     return MessageSummary(
         id=message_id,
         account_id="account-1",
@@ -67,9 +73,10 @@ def _summary(*, message_id: int = 1, local_state: str = "active") -> MessageSumm
         remote_state="present",
         local_state=local_state,
         thread_key="thread-1",
-        imap_flags="\\Seen",
+        imap_flags=imap_flags,
         moved_to_folder_display_name=None,
         failure_class=None,
+        flags_seen_at=flags_seen_at,
     )
 
 
@@ -96,6 +103,31 @@ def test_purged_message_uses_fallback_without_opening_eml(qtbot: Any) -> None:
     assert worker.opened == []
     assert view.state_label.isVisible()
     assert view.state_label.text() == strings.DETAIL_PURGED
+
+
+def test_status_label_shows_flag_snapshot_time(qtbot: Any) -> None:
+    worker = _FakeWorker()
+    view = DetailView(cast(Any, worker), lambda html, **_kwargs: html)
+    qtbot.addWidget(view)
+    seen_at = datetime(2026, 1, 2, 3, 4, tzinfo=UTC)
+
+    view.show_message(_summary(imap_flags="\\Seen \\Flagged", flags_seen_at=seen_at))
+
+    assert view.status_label.text() == strings.STATUS_FLAGGED
+    assert view.status_label.toolTip() == strings.TOOLTIP_IMAP_FLAGS.format(
+        seen_at=seen_at.astimezone().strftime("%Y-%m-%d %H:%M")
+    )
+
+
+def test_status_label_uses_snapshot_fallback_without_seen_time(qtbot: Any) -> None:
+    worker = _FakeWorker()
+    view = DetailView(cast(Any, worker), lambda html, **_kwargs: html)
+    qtbot.addWidget(view)
+
+    view.show_message(_summary(imap_flags="\\Seen \\Flagged"))
+
+    assert view.status_label.text() == strings.STATUS_FLAGGED
+    assert view.status_label.toolTip() == strings.TOOLTIP_IMAP_FLAGS_UNKNOWN
 
 
 def test_rendered_attachments_exclude_inline_parts(qtbot: Any) -> None:

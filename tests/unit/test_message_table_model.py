@@ -97,6 +97,7 @@ def _summary(message_id: int = 1) -> MessageSummary:
         imap_flags="\\Seen",
         moved_to_folder_display_name=None,
         failure_class=None,
+        flags_seen_at=None,
     )
 
 
@@ -210,10 +211,10 @@ def test_status_roles_render_from_summary(qtbot: object) -> None:
     flagged = _model_with_summary(replace(_summary(), imap_flags="\\Seen \\Flagged"))
     index = flagged.index(0, 4)
     assert flagged.data(index, Qt.ItemDataRole.DecorationRole) is not None
-    assert flagged.data(index, Qt.ItemDataRole.ToolTipRole) == strings.STATUS_FLAGGED
+    assert flagged.data(index, Qt.ItemDataRole.ToolTipRole) == strings.TOOLTIP_IMAP_FLAGS_UNKNOWN
 
     unread = _model_with_summary(replace(_summary(), imap_flags="\\Flagged"))
-    assert unread.data(index, Qt.ItemDataRole.ToolTipRole) == strings.TOOLTIP_UNREAD
+    assert unread.data(index, Qt.ItemDataRole.ToolTipRole) == strings.TOOLTIP_UNREAD_UNKNOWN
 
     deleted = _model_with_summary(replace(_summary(), remote_state="deleted", local_state="purged"))
     foreground = deleted.data(index, Qt.ItemDataRole.ForegroundRole)
@@ -221,6 +222,20 @@ def test_status_roles_render_from_summary(qtbot: object) -> None:
     assert foreground.color().name() == "#808080"
     assert deleted.data(index, Qt.ItemDataRole.DisplayRole) == strings.STATUS_LOCAL_PURGED
     assert deleted.data(index, Qt.ItemDataRole.DecorationRole) is not None
+
+
+def test_status_tooltip_includes_local_snapshot_time(qtbot: object) -> None:
+    del qtbot
+    seen_at = datetime(2026, 1, 2, 3, 4, tzinfo=UTC)
+    model = _model_with_summary(
+        replace(_summary(), imap_flags="\\Seen \\Flagged", flags_seen_at=seen_at)
+    )
+
+    assert model.data(model.index(0, 4), Qt.ItemDataRole.ToolTipRole) == (
+        strings.TOOLTIP_IMAP_FLAGS.format(
+            seen_at=seen_at.astimezone().strftime("%Y-%m-%d %H:%M")
+        )
+    )
 
 
 def test_status_display_and_tooltips_cover_moved_and_oversize(qtbot: object) -> None:

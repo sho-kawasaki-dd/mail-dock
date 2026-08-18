@@ -103,6 +103,7 @@ def _summary(
         imap_flags="\\Seen",
         moved_to_folder_display_name=None,
         failure_class=None,
+        flags_seen_at=None,
     )
 
 

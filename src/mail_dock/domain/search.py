@@ -90,6 +90,7 @@ class MessageSummary:
     imap_flags: str | None
     moved_to_folder_display_name: str | None
     failure_class: str | None
+    flags_seen_at: datetime | None
 
 
 @dataclass(frozen=True)
