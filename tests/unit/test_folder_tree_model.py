@@ -51,6 +51,7 @@ def test_builds_mail_account_root_and_uses_folder_display_names(qtbot: object) -
 
     assert model.data(root) == strings.TREE_ROOT_MAIL_ACCOUNTS
     assert model.data(all_accounts) == strings.FILTER_ALL_ACCOUNTS
+    assert model.data(account) == "仕事"
     assert model.data(folder) == "受信箱"
     assert model.rowCount(account) == 2
     assert model.message_filter(all_accounts) == MessageFilter()
@@ -73,6 +74,23 @@ def test_sync_target_is_visible_without_making_the_model_editable(qtbot: object)
     )
     assert model.flags(target) == Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
     assert model.data(target, model.SyncTargetRole) is True
+
+
+def test_parent_resolves_every_level_back_to_its_visible_row(qtbot: object) -> None:
+    """QTreeView repaints each row via model.index(row, column, parent())."""
+
+    del qtbot
+    model = _model()
+    root = model.index(0, 0)
+
+    for row in range(model.rowCount(root)):
+        child = model.index(row, 0, root)
+        assert model.parent(child) == root
+        assert model.index(child.row(), 0, model.parent(child)) == child
+        for folder_row in range(model.rowCount(child)):
+            folder = model.index(folder_row, 0, child)
+            assert model.parent(folder) == child
+            assert model.index(folder.row(), 0, model.parent(folder)) == folder
 
 
 def test_accepts_multiple_extensible_roots_and_resets(qtbot: object) -> None:

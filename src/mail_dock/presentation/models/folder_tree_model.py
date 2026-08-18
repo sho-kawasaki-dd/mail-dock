@@ -49,6 +49,7 @@ class FolderTreeNode:
 @dataclass
 class _TreeItem:
     value: FolderTreeNode
+    row: int = 0
     parent: _TreeItem | None = None
     children: list[_TreeItem] = field(default_factory=list)
 
@@ -149,7 +150,7 @@ class FolderTreeModel(QAbstractItemModel):
         """Replace all archive roots and reset the model."""
 
         self.beginResetModel()
-        self._roots = [_materialize(root) for root in roots]
+        self._roots = [_materialize(root, row) for row, root in enumerate(roots)]
         self.endResetModel()
 
     def roots(self) -> tuple[FolderTreeNode, ...]:
@@ -179,14 +180,11 @@ class FolderTreeModel(QAbstractItemModel):
         item = self._item(index)
         if item is None or item.parent is None:
             return QModelIndex()
+        # Root nodes are visible rows, so their children must not report the
+        # invisible root as their parent: QTreeView re-resolves every painted
+        # row through model.index(row, column, parent()).
         parent_item = item.parent
-        if parent_item.parent is None:
-            return QModelIndex()
-        return self.createIndex(
-            parent_item.parent.children.index(parent_item),
-            0,
-            parent_item,
-        )
+        return self.createIndex(parent_item.row, 0, parent_item)
 
     def rowCount(  # noqa: N802
         self,
@@ -305,9 +303,11 @@ class FolderTreeModel(QAbstractItemModel):
         return None
 
 
-def _materialize(value: FolderTreeNode, parent: _TreeItem | None = None) -> _TreeItem:
-    item = _TreeItem(value=value, parent=parent)
-    item.children = [_materialize(child, item) for child in value.children]
+def _materialize(value: FolderTreeNode, row: int, parent: _TreeItem | None = None) -> _TreeItem:
+    item = _TreeItem(value=value, row=row, parent=parent)
+    item.children = [
+        _materialize(child, child_row, item) for child_row, child in enumerate(value.children)
+    ]
     return item
 
 
