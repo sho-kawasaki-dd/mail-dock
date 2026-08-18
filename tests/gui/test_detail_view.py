@@ -182,7 +182,9 @@ def test_remote_images_banner_hidden_without_remote_image_references(qtbot: Any)
     view.show()
     _open(worker, view, _summary(), "<p>本文のみ、画像なし</p>")
 
-    assert not view.remote_images_button.parentWidget().isVisible()
+    parent = view.remote_images_button.parentWidget()
+    assert parent is not None
+    assert not parent.isVisible()
 
 
 def test_remote_images_banner_shown_for_remote_image_reference(qtbot: Any) -> None:
@@ -192,7 +194,9 @@ def test_remote_images_banner_shown_for_remote_image_reference(qtbot: Any) -> No
     view.show()
     _open(worker, view, _summary(), '<img src="https://example.test/pixel.gif">')
 
-    assert view.remote_images_button.parentWidget().isVisible()
+    parent = view.remote_images_button.parentWidget()
+    assert parent is not None
+    assert parent.isVisible()
 
     view.remote_images_button.click()
-    assert not view.remote_images_button.parentWidget().isVisible()
+    assert not parent.isVisible()
