@@ -168,19 +168,19 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **A-1. `infrastructure/storage/manifest.py` — イベント種別の拡張**
 
-- [ ] `_MANIFEST_EVENTS` へ `checkpoint` / `account_snapshot` / `folder_snapshot` / `purge_intent` / `purged` / `remote_delete_intent` / `remote_delete_completed` / `remote_delete_uncertain` を追加する（`remote_delete` は単独では追加せず、意図・成功確認・不確定状態の3イベントへ分割する。レビュー修正案 3.1 / 3.2 / 3.4 / 3.8）
-- [ ] `_validate_event()` に各イベントの必須フィールド検証を追加する
-    - [ ] `checkpoint`: `account_id` / `timestamp` / 単調増加する `sequence` / 対象バッチを識別する `batch_id`。`sequence` の重複・逆行を検出し、マニフェストのファイルローテーション後も `batch_id` で対象バッチを追跡できること（レビュー修正案 3.1）
-    - [ ] `account_snapshot`: `account_id` / `provider_type` / `display_name` / 接続先の非秘密情報 / `timestamp`。**資格情報・パスワード・アクセストークンは記録しない**（レビュー修正案 3.2）
-    - [ ] `folder_snapshot`: `account_id` / `folder_raw_name` / `display_name` / `uidvalidity` / `delimiter` 等のフォルダ属性 / `timestamp`（レビュー修正案 3.2）
-    - [ ] `purge_intent` / `purged`: `account_id` / `source_item_key` / `relative_path` / `file_hash` / `timestamp` に加え、共有参照確認の結果・物理削除を実施するかどうかを記録する（レビュー修正案 3.3）
-    - [ ] `remote_delete_intent` / `remote_delete_completed` / `remote_delete_uncertain`: `account_id` / `folder_raw_name` / `uid` / `uidvalidity` / `mode`（`trash` または `expunge`）/ `timestamp`。`uncertain` は再接続後の照合で `completed` または取り消しへ確定させる（レビュー修正案 3.4 / 3.8）
-- [ ] `fetch` イベントへ `internal_date` を追加する（追加が必要なのはこの1点のみ。既存 `_FETCH_FIELDS` は `message_id` / `size_bytes` をすでに保持しており、`content_key` は `derive_content_key(message_id, eml_sha256)` で導出され、`message_contents`（件名・送信者・本文・添付名）は `parse_eml()` の出力から導出されるため、解析済みコンテンツはマニフェストへ複製しない。再構築（C-2）は `fetch` イベントの `relative_path` からEMLを読み直し、既存 `reparse.py` の解析経路で `message_contents` を作る。レビュー修正案 9.2）
-- [ ] `moved` イベントへ `moved_to_folder_raw_name`（移動先フォルダの自然キー）を追加する。**既存の `usecases/sync_mail.py` は移動検出イベントへ `"folder_id": folder_id` と `"moved_to_folder_id": moved_to` というDB固有サロゲートIDを直接書き込んでおり（`moved_to_folder_id` はマニフェストの正本にしないと決めたものそのもの）、Phase 4 で `targets` 一覧から `folder_id → raw_name` を解決して `moved_to_folder_raw_name` を追加し、`moved_to_folder_id` の直接記録を廃止する必要がある**（レビュー修正案 3.2 / 9.4）
-- [ ] `ManifestWriter.checkpoint(sequence, batch_id)` を実装する（append → `flush_and_sync()` まで1操作で行う）
-- [ ] 最後の `checkpoint` 以降のイベントだけを列挙する読み取りAPIを追加する（範囲限定検証の入力。既存 `read_events()` を再利用し、末尾修復の挙動を変えないこと）
-- [ ] 対応する完了イベントの無い `purge_intent` / `remote_delete_intent` を列挙する読み取りAPIを追加する（未完了intentの起動時回復用。レビュー修正案 3.3 / 3.4）
-- [ ] `purge_intent` / `purged` を「Phase 4 で実装する予約」と記した既存 docstring を、実装済みの記述へ更新する
+- [x] `_MANIFEST_EVENTS` へ `checkpoint` / `account_snapshot` / `folder_snapshot` / `purge_intent` / `purged` / `remote_delete_intent` / `remote_delete_completed` / `remote_delete_uncertain` を追加する（`remote_delete` は単独では追加せず、意図・成功確認・不確定状態の3イベントへ分割する。レビュー修正案 3.1 / 3.2 / 3.4 / 3.8）
+- [x] `_validate_event()` に各イベントの必須フィールド検証を追加する
+    - [x] `checkpoint`: `account_id` / `timestamp` / 単調増加する `sequence` / 対象バッチを識別する `batch_id`。`sequence` の重複・逆行を検出し、マニフェストのファイルローテーション後も `batch_id` で対象バッチを追跡できること（レビュー修正案 3.1）
+    - [x] `account_snapshot`: `account_id` / `provider_type` / `display_name` / 接続先の非秘密情報 / `timestamp`。**資格情報・パスワード・アクセストークンは記録しない**（レビュー修正案 3.2）
+    - [x] `folder_snapshot`: `account_id` / `folder_raw_name` / `display_name` / `uidvalidity` / `delimiter` 等のフォルダ属性 / `timestamp`（レビュー修正案 3.2）
+    - [x] `purge_intent` / `purged`: `account_id` / `source_item_key` / `relative_path` / `file_hash` / `timestamp` に加え、共有参照確認の結果・物理削除を実施するかどうかを記録する（レビュー修正案 3.3）
+    - [x] `remote_delete_intent` / `remote_delete_completed` / `remote_delete_uncertain`: `account_id` / `folder_raw_name` / `uid` / `uidvalidity` / `mode`（`trash` または `expunge`）/ `timestamp`。`uncertain` は再接続後の照合で `completed` または取り消しへ確定させる（レビュー修正案 3.4 / 3.8）
+- [x] `fetch` イベントへ `internal_date` を追加する（追加が必要なのはこの1点のみ。既存 `_FETCH_FIELDS` は `message_id` / `size_bytes` をすでに保持しており、`content_key` は `derive_content_key(message_id, eml_sha256)` で導出され、`message_contents`（件名・送信者・本文・添付名）は `parse_eml()` の出力から導出されるため、解析済みコンテンツはマニフェストへ複製しない。再構築（C-2）は `fetch` イベントの `relative_path` からEMLを読み直し、既存 `reparse.py` の解析経路で `message_contents` を作る。レビュー修正案 9.2）
+- [x] `moved` イベントへ `moved_to_folder_raw_name`（移動先フォルダの自然キー）を追加する。**既存の `usecases/sync_mail.py` は移動検出イベントへ `"folder_id": folder_id` と `"moved_to_folder_id": moved_to` というDB固有サロゲートIDを直接書き込んでおり（`moved_to_folder_id` はマニフェストの正本にしないと決めたものそのもの）、Phase 4 で `targets` 一覧から `folder_id → raw_name` を解決して `moved_to_folder_raw_name` を追加し、`moved_to_folder_id` の直接記録を廃止する必要がある**（レビュー修正案 3.2 / 9.4）
+- [x] `ManifestWriter.checkpoint(sequence, batch_id)` を実装する（append → `flush_and_sync()` まで1操作で行う）
+- [x] 最後の `checkpoint` 以降のイベントだけを列挙する読み取りAPIを追加する（範囲限定検証の入力。既存 `read_events()` を再利用し、末尾修復の挙動を変えないこと）
+- [x] 対応する完了イベントの無い `purge_intent` / `remote_delete_intent` を列挙する読み取りAPIを追加する（未完了intentの起動時回復用。レビュー修正案 3.3 / 3.4）
+- [x] `purge_intent` / `purged` を「Phase 4 で実装する予約」と記した既存 docstring を、実装済みの記述へ更新する
 
 #### **A-2. `domain/ports.py` — マニフェストポートの拡張**
 

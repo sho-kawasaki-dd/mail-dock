@@ -197,6 +197,7 @@ def _fetch_event(
         "relative_path": stored.relative_path,
         "file_hash": stored.file_hash,
         "size_bytes": stored.size_bytes,
+        "internal_date": _date_iso(ref.internal_date),
         "timestamp": _now_iso(),
         "deduplicated": stored.deduplicated,
     }
@@ -351,6 +352,7 @@ def sync_account(
     token = cancel or CancelToken()
     stats = _MutableStats(started_at=time.monotonic())
     targets = [dict(folder) for folder in repo.list_sync_targets(account_id)]
+    folder_raw_names = {folder["id"]: str(folder["raw_name"]) for folder in targets}
     known_messages: dict[tuple[Any, int, int], _LocalMessage] = {}
     batch_number = 0
 
@@ -663,12 +665,8 @@ def sync_account(
         uidvalidity = _get_int(folder, "uidvalidity")
         now = datetime.now(UTC)
         seen_at = to_utc_iso8601(now)
-        since = to_utc_iso8601(
-            now - timedelta(days=options.flag_refresh_window_days)
-        )
-        items = repo.list_flag_refresh_items(
-            account_id, folder_id, uidvalidity, since
-        )
+        since = to_utc_iso8601(now - timedelta(days=options.flag_refresh_window_days))
+        items = repo.list_flag_refresh_items(account_id, folder_id, uidvalidity, since)
         local_flags: dict[int, str | None] = {}
         expired_uids: set[int] = set()
         minimum_interval = timedelta(seconds=options.flag_refresh_min_interval_seconds)
@@ -695,22 +693,15 @@ def sync_account(
         if saved_modseq is not None and current_modseq is not None:
             saved_modseq_is_ahead = saved_modseq > current_modseq
         if not expired_uids:
-            needs_modseq_reset = (
-                raw_saved_modseq is not None
-                and (
-                    not use_condstore
-                    or saved_modseq is None
-                    or saved_modseq_is_ahead
-                )
+            needs_modseq_reset = raw_saved_modseq is not None and (
+                not use_condstore or saved_modseq is None or saved_modseq_is_ahead
             )
             if needs_modseq_reset:
                 repo.begin_batch()
                 repo.set_highest_modseq(folder_id, None)
                 repo.commit_batch()
             return
-        baseline = use_condstore and (
-            saved_modseq is None or saved_modseq_is_ahead
-        )
+        baseline = use_condstore and (saved_modseq is None or saved_modseq_is_ahead)
 
         pending_changes: list[tuple[int, str | None]] = []
         pending_touches: list[int] = []
@@ -973,7 +964,7 @@ def sync_account(
             )
             continue
         missing_uids = repo.local_uids(account_id, folder_id, uidvalidity) - remote_uids
-        state_events: list[tuple[Any, Mapping[str, JSONValue]]] = []
+        state_events: list[tuple[Any, Any, Mapping[str, JSONValue]]] = []
         for uid in sorted(missing_uids):
             local = known_messages.get((folder_id, uidvalidity, uid)) or _get_local_message(
                 repo, account_id, folder_id, uidvalidity, uid
@@ -996,47 +987,49 @@ def sync_account(
             if len(candidates) == 1:
                 state = "moved"
                 moved_to = candidates[0].get("folder_id")
+                moved_to_raw_name = folder_raw_names.get(moved_to)
+                if moved_to_raw_name is None:
+                    continue
                 event_name = "moved"
             elif len(candidates) == 0 and isinstance(file_hash, str):
                 state = "deleted"
                 moved_to = None
+                moved_to_raw_name = None
                 event_name = "delete_detected"
             else:
                 state = "unknown"
                 moved_to = None
+                moved_to_raw_name = None
                 event_name = "remote_state_unknown"
             del state
-            state_events.append(
-                (
-                    local.message_id,
-                    {
-                        "event": event_name,
-                        "account_id": account_id,
-                        "folder_id": folder_id,
-                        "folder_raw_name": folder_raw_name,
-                        "uid": uid,
-                        "uidvalidity": uidvalidity,
-                        "message_id": cast(JSONValue, local.record.get("message_id")),
-                        "content_key": cast(JSONValue, content_key),
-                        "file_hash": cast(JSONValue, file_hash),
-                        "moved_to_folder_id": cast(JSONValue, moved_to),
-                        "timestamp": _now_iso(),
-                    },
-                )
-            )
+            event: dict[str, JSONValue] = {
+                "event": event_name,
+                "account_id": account_id,
+                "folder_raw_name": folder_raw_name,
+                "uid": uid,
+                "uidvalidity": uidvalidity,
+                "source_item_key": _source_item_key(uidvalidity, uid),
+                "message_id": cast(JSONValue, local.record.get("message_id")),
+                "content_key": cast(JSONValue, content_key),
+                "file_hash": cast(JSONValue, file_hash),
+                "timestamp": _now_iso(),
+            }
+            if moved_to_raw_name is not None:
+                event["moved_to_folder_raw_name"] = moved_to_raw_name
+            state_events.append((local.message_id, moved_to, event))
         if state_events:
-            for _, event in state_events:
-                manifest.append(event)
+            for _, _, state_event in state_events:
+                manifest.append(state_event)
             manifest.flush_and_sync()
             repo.begin_batch()
-            for message_id, event in state_events:
-                event_name = str(event["event"])
+            for message_id, moved_to, state_event in state_events:
+                event_name = str(state_event["event"])
                 state = {
                     "delete_detected": "deleted",
                     "remote_state_unknown": "unknown",
                     "moved": "moved",
                 }[event_name]
-                repo.update_remote_state(message_id, state, event.get("moved_to_folder_id"))
+                repo.update_remote_state(message_id, state, moved_to)
             repo.commit_batch()
 
     return SyncResult(
