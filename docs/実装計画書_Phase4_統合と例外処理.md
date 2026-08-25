@@ -6,6 +6,8 @@
 
 本書と開発計画書に矛盾がある場合は、**開発計画書を正**とする。
 
+本書は [Phase4 レビュー修正案](./実装計画書_Phase4_レビュー修正案.md) の指摘をすべて反映済みである。両者に矛盾がある場合はレビュー修正案の判断を優先する。
+
 ---
 
 ## **1. 目的**
@@ -43,18 +45,18 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 | D-4 | 再インデックスの範囲 | **IMAP永続マニフェスト＋EMLからのDB完全再構築を実装する**。accounts / folders / messages / message_contents / FTS / purge墓標 / 監査イベントを復元する。PST永続マニフェストは Phase 4.5 のため、読み取り口だけ用意して未対応形式は明示的にスキップする |
 | D-5 | 検証の実行スレッド | **3本目のワーカー `VerifyWorker`（読み取り中心）を追加する**。フル検証は100GB分のSHA-256再計算で数十分かかり、`SyncWorker` を占有すると同期・purge・削除がすべて止まるため。ただし**「書き込みは単一ライターに集約」という不変条件は崩さない**。検証結果を反映するDB書き込み（孤児の取り込み・未取得への差し戻し・再構築）は `SyncWorker` 側へ回すか、`SyncWorker` の停止を確認したうえで排他実行する |
 | D-6 | 切断からの復帰 | **Phase 3.6 の切替基盤（旧セッション解放 → 新 `StorageSession` 開始 → `MainWindow` 差し替え）を再利用**し、同一プロセス内で `RECONNECTING` → `VERIFYING` → `ATTACHED` まで戻す。プロセス再起動を強制しない。数時間規模の初回同期中に瞬断が起きても、差し直しで復帰できることを優先する |
-| D-7 | 範囲限定検証のチェックポイント | **永続マニフェストへ `checkpoint` イベントを追記し、最後の `checkpoint` 以降のEMLだけを再ハッシュする**。`app_state` テーブルに置く案は採らない。DBは「いつでも再構築可能な派生キャッシュ」であり、DBが壊れた・巻き戻った状況で検証範囲を決める根拠をDBに置くと循環するため |
+| D-7 | 範囲限定検証のチェックポイント | **永続マニフェストへ `checkpoint` イベントを追記し、最後の `checkpoint` 以降のEMLだけを再ハッシュする**。`app_state` テーブルに置く案は採らない。DBは「いつでも再構築可能な派生キャッシュ」であり、DBが壊れた・巻き戻った状況で検証範囲を決める根拠をDBに置くと循環するため。`checkpoint` は「このマニフェスト位置まで対応するDB変更がコミット済みである」ことを示す**完了マーカー**であり、DBコミットが**成功した後**に追記する。DBコミット前に書くと、コミットに失敗した項目まで検証済み範囲に含まれてしまうため（レビュー修正案 3.1） |
 | D-8 | 読み取り専用の縮退モード | **提供しない**（開発計画書 5.7 の既定方針を維持）。`DETACHED` 中は「再接続を試す／終了」のモーダルのみを提示する。DBが読めない以上、中途半端に閲覧できる状態を作ると「保存されているつもりで保存されていない」誤解を生むため |
 | D-9 | `FOREIGN` の扱い | `MISSING` より危険なものとして扱い、検出時は**即座に全書き込みを禁止**する。復帰判定は常に `.maildock_root` のUUID照合で行い、パスの存在を同定根拠にしない（開発計画書 2.4-10） |
 | D-10 | 瞬断と抜去の区別 | I/Oエラー検知後、`config.reprobe_attempts`（既定3）回・**500ms間隔**でリプローブし、UUIDが一致して復帰した場合は「接続は生きているがハンドルだけが死んでいる」扱いとして、全接続を張り直しバッチ境界から再開する。3回失敗した場合のみ `DETACHED` へ遷移する |
-| D-11 | サーバー削除の既定動作 | **ゴミ箱フォルダへ MOVE**を既定とし、`STORE +FLAGS \Deleted` + `EXPUNGE` は明示オプション（`config.remote_delete_mode`）とする。1回の操作で削除できる上限は `config.delete_batch_limit`（既定1,000通） |
+| D-11 | サーバー削除の既定動作 | **ゴミ箱フォルダへ MOVE**（`config.remote_delete_mode = "trash"`）を既定とし、`STORE +FLAGS \Deleted` + `EXPUNGE`（`"expunge"`）は明示オプションとする。`config.remote_delete_mode` の設定値は `trash` / `expunge` の2値へ統一し、既存設定に残る `permanent` は読み込み時に `expunge` へ移行する（保存時は新しい値のみ書き出す）。UID EXPUNGE（対象UIDのみを永久削除できる操作。`UIDPLUS` 拡張）に対応しないサーバーでは `expunge` を拒否し、フォルダ全体 `EXPUNGE` へフォールバックしない。**既存の `OnamaeImapFetcher.delete_remote_message()` は `UIDPLUS` 非対応時にフォルダ全体 `expunge()` へフォールバックする実装になっており、この経路は Phase 4 で廃止する**（レビュー修正案 3.4 / 3.8）。1回の操作で削除できる上限は `config.delete_batch_limit`（既定1,000通） |
 | D-12 | サーバー削除の事前条件 | **コードで強制し、満たさないメールは対象から自動除外する**（UIで警告するだけにしない）。①ローカルEMLが実在 ②その場で再計算した SHA-256 が `messages.file_hash` と一致 ③`message_contents` が存在（パース成功済み）。加えて `ATTACHED` 以外はユースケース入口で無条件に拒否する |
 | D-13 | purge の共有EML対応 | 同一内容のEMLは物理ファイルを共有し得るため、**同じ `relative_path` を参照する非purgedレコードが残っていないことを確認し、最後の参照が消える場合だけ実ファイルを削除する**。`messages` 行は墓標として残す |
 | D-14 | purge の実行契機 | `config.purge_mode` の3値（`manual` / `grace` / `immediate` ＝ 開発計画書4.4のA/B/C）をすべて実装する。**既定は `manual`**。`immediate` を選んだ場合は設定画面に「確認なしでファイルが削除されます」を常時表示する |
 | D-15 | トレイ常駐時の閉じる挙動 | **閉じる → トレイへ最小化**とし、終了はトレイメニューまたはファイルメニューからのみとする。開発計画書 5.8 の「最小化中も同期を継続する」と整合させるため |
 | D-16 | 実機テスト | **フルスケール実機同期（5万通/100GB）とVHDXの `detach vdisk` による実デバイス切断試験は本フェーズでは実施せず、手動検証手順として本書に記載するに留める**。代替として**フォールト注入による自動テスト**を必須とし、CIで常時実行する |
 | D-17 | `synchronous` の決定 | D-16 により実測ができないため、**既定 `NORMAL` を維持し、最終決定は本フェーズのスコープ外**とする（開発計画書 3.6 / 5.11）。「コミット時のみ `FULL`」への切り替え口だけを設計上残し、実測後に設定1箇所の変更で切り替えられるようにする |
-| D-18 | CSVエクスポート | **実装しない**。開発計画書 4.9 でも優先度「任意」であり、mbox と添付一括抽出で運用上の要求は満たせるため |
+| D-18 | CSVエクスポート | **検索結果の汎用CSVエクスポートは実装しない**。開発計画書 4.9 でも優先度「任意」であり、mbox と添付一括抽出で運用上の要求は満たせるため。ただし**サーバー削除ドライランの監査用CSV（F-29）は対象内**であり、両者はスコープが異なるため混同しない（レビュー修正案 3.8） |
 | D-19 | 依存関係 | **追加しない**。mbox は標準ライブラリ `mailbox`、`WM_DEVICECHANGE` 監視は `ctypes` と PySide6 の `QAbstractNativeEventFilter`、DBバックアップは `sqlite3.Connection.backup()` で実装する |
 | D-20 | 状態機械の置き場所 | **遷移ロジックはQt非依存の純粋クラスとして `domain/storage_state.py` に置く**。QTimer・`WM_DEVICECHANGE`・Signal配線は `presentation` 側に置き、遷移表そのものを通常CIの単体テストで固定する（Phase 3 D-28 と同じ方針） |
 | D-21 | 非Windows環境 | `WM_DEVICECHANGE` 監視は Windows 専用のため、**非Windowsでは no-op 実装**とし、ハートビートとI/O例外分類の2系統だけで動作させる。`import` は常に成功すること（CIのLinuxジョブが落ちないため） |
@@ -84,13 +86,13 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 | # | 要件 | 根拠 |
 | :--- | :---- | :---- |
-| F-11 | 永続マニフェストに `checkpoint` イベントを追記でき、同期のバッチコミット境界で記録されること | D-7 |
+| F-11 | 永続マニフェストに `checkpoint` イベントを追記でき、DBコミット成功後に同期のバッチコミット境界で記録されること（コミット完了マーカー） | D-7 |
 | F-12 | クイック検証（`relative_path` の存在確認とサイズ照合）が起動時に自動実行されること | 4.8 |
 | F-13 | 範囲限定検証が、最後の `checkpoint` 以降のEMLのみSHA-256を再計算し、不一致レコードを未取得へ戻して当該EMLを `tmp/` へ隔離すること | 4.8 / 5.7.1-4 |
 | F-14 | フル検証が全EMLのSHA-256を再計算し、進捗表示とキャンセルに対応すること。UIをブロックしないこと | 4.8 / 5.4 |
-| F-15 | 孤児スキャンが `eml/` 配下のDB未登録ファイルを検出し、取り込めること | 4.8 |
+| F-15 | 孤児スキャンが `eml/` 配下のDB未登録ファイルを検出し、マニフェストの `fetch` イベントで出所（`source_item_key` / パス / ハッシュ）を確定できる孤児だけを再登録し、対応イベントの無い孤児は隔離すること（UID・フォルダを推測して自動登録しない） | 4.8 / レビュー修正案 3.6 |
 | F-16 | マニフェスト検証が、全マニフェストのCRC32・スキーマを検証し、**末尾の不完全レコードのみ**を安全に切り離すこと。末尾以外の破損は `ManifestCorruptError` として報告すること | 4.8 / 2.4-7 |
-| F-17 | 再インデックスが `metadata.db` を破棄し、EML群と永続マニフェストから accounts / folders / messages / message_contents / FTS / purge墓標 / 監査イベントを再構築できること | 4.8 / 1.3-1 / D-4 |
+| F-17 | 再インデックスが `metadata.db` を破棄し、EML群と永続マニフェストから accounts / folders / messages / message_contents / FTS / purge墓標 / 監査イベントを再構築できること。`messages.id` / `folders.id` などのDB固有サロゲートIDに依存せず、自然キーとスナップショットイベントから再構築できること | 4.8 / 1.3-1 / D-4 / レビュー修正案 3.2 |
 | F-18 | 再解析（パース失敗メールのみ本文・添付名を抽出し直す）がGUIから実行できること | 4.7 / 5.6 |
 | F-19 | `verify` サブコマンドが `--mode quick\|range\|full\|orphans\|manifest` を受け付け、`reindex` サブコマンドが追加されること。削除系サブコマンドが存在しないこと | D-3 |
 
@@ -112,11 +114,11 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 | :--- | :---- | :---- |
 | F-27 | 削除対象が3つの事前条件（EML実在・SHA-256一致・`message_contents` 存在）をコードレベルで検証され、満たさないメールが自動除外されること | 4.3 / D-12 |
 | F-28 | ストレージ状態が `ATTACHED` 以外のとき、削除ユースケースの入口で無条件に拒否されること | 4.3 / 5.7.1-3 |
-| F-29 | ドライランで対象一覧（件名・日付・サイズ・合計容量）を表示でき、CSVへ保存できること | 4.3 |
+| F-29 | ドライランで対象一覧（件名・日付・サイズ・合計容量）を表示でき、CSVへ保存できること。このCSVは削除ドライラン専用の監査用CSVであり、検索結果の汎用CSVエクスポート（D-18で対象外）とはスコープが異なる | 4.3 / D-18 |
 | F-30 | 確認ダイアログが件数と合計サイズを表示し、**件数の手入力**を要求すること | 4.3 / D-23 |
-| F-31 | 既定動作がゴミ箱フォルダへの MOVE であり、`EXPUNGE` が明示オプションであること。1回の操作の上限が `config.delete_batch_limit` であること | 4.3 / D-11 |
+| F-31 | 既定動作が `trash`（ゴミ箱フォルダへの MOVE）であり、`expunge` が明示オプションであること。UID EXPUNGEに対応しないサーバーでは `expunge` が拒否されること。1回の操作の上限が `config.delete_batch_limit` であること | 4.3 / D-11 |
 | F-32 | ゴミ箱フォルダが「SPECIAL-USE の `\Trash` → 一般的な候補名の自動探索 → 設定による手動指定」の順で決定され、特定できない間は削除機能が無効化されること | 4.3 |
-| F-33 | 削除が永続マニフェストへ `remote_delete` として記録され、`audit_log` にも日時・アカウント・Message-ID・件名・サイズ・モードが残ること。`remote_state='deleted'` へ更新され一覧でグレーアウトすること | 4.3 |
+| F-33 | 削除が永続マニフェストへ `remote_delete_intent` / `remote_delete_completed` / `remote_delete_uncertain` として記録され、`audit_log` にも日時・アカウント・Message-ID・件名・サイズ・モードが残ること。状態確定後に `remote_state='deleted'` へ更新され一覧でグレーアウトすること | 4.3 / レビュー修正案 3.4 |
 
 #### **エクスポート（開発計画書 4.9）**
 
@@ -166,25 +168,31 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **A-1. `infrastructure/storage/manifest.py` — イベント種別の拡張**
 
-- [ ] `_MANIFEST_EVENTS` へ `checkpoint` / `purge_intent` / `purged` / `remote_delete` を追加する
+- [ ] `_MANIFEST_EVENTS` へ `checkpoint` / `account_snapshot` / `folder_snapshot` / `purge_intent` / `purged` / `remote_delete_intent` / `remote_delete_completed` / `remote_delete_uncertain` を追加する（`remote_delete` は単独では追加せず、意図・成功確認・不確定状態の3イベントへ分割する。レビュー修正案 3.1 / 3.2 / 3.4 / 3.8）
 - [ ] `_validate_event()` に各イベントの必須フィールド検証を追加する
-    - [ ] `checkpoint`: `account_id` / `timestamp` / `sequence`（そのアカウントで単調増加する整数）
-    - [ ] `purge_intent` / `purged`: `account_id` / `source_item_key` / `relative_path` / `file_hash` / `timestamp`
-    - [ ] `remote_delete`: `account_id` / `folder_raw_name` / `uid` / `uidvalidity` / `mode`（`trash` または `expunge`）/ `timestamp`
-- [ ] `ManifestWriter.checkpoint(sequence)` を実装する（append → `flush_and_sync()` まで1操作で行う）
+    - [ ] `checkpoint`: `account_id` / `timestamp` / 単調増加する `sequence` / 対象バッチを識別する `batch_id`。`sequence` の重複・逆行を検出し、マニフェストのファイルローテーション後も `batch_id` で対象バッチを追跡できること（レビュー修正案 3.1）
+    - [ ] `account_snapshot`: `account_id` / `provider_type` / `display_name` / 接続先の非秘密情報 / `timestamp`。**資格情報・パスワード・アクセストークンは記録しない**（レビュー修正案 3.2）
+    - [ ] `folder_snapshot`: `account_id` / `folder_raw_name` / `display_name` / `uidvalidity` / `delimiter` 等のフォルダ属性 / `timestamp`（レビュー修正案 3.2）
+    - [ ] `purge_intent` / `purged`: `account_id` / `source_item_key` / `relative_path` / `file_hash` / `timestamp` に加え、共有参照確認の結果・物理削除を実施するかどうかを記録する（レビュー修正案 3.3）
+    - [ ] `remote_delete_intent` / `remote_delete_completed` / `remote_delete_uncertain`: `account_id` / `folder_raw_name` / `uid` / `uidvalidity` / `mode`（`trash` または `expunge`）/ `timestamp`。`uncertain` は再接続後の照合で `completed` または取り消しへ確定させる（レビュー修正案 3.4 / 3.8）
+- [ ] `fetch` / `moved` / `delete_detected` イベントへ、DB完全再構築に必要な自然キー・スナップショット項目を追加する（`internal_date`・再構築用ヘッダー情報・`moved_to_folder_raw_name`・Message-ID・サイズ等。DB固有のサロゲートIDは記録しない。レビュー修正案 3.2）
+- [ ] `ManifestWriter.checkpoint(sequence, batch_id)` を実装する（append → `flush_and_sync()` まで1操作で行う）
 - [ ] 最後の `checkpoint` 以降のイベントだけを列挙する読み取りAPIを追加する（範囲限定検証の入力。既存 `read_events()` を再利用し、末尾修復の挙動を変えないこと）
+- [ ] 対応する完了イベントの無い `purge_intent` / `remote_delete_intent` を列挙する読み取りAPIを追加する（未完了intentの起動時回復用。レビュー修正案 3.3 / 3.4）
 - [ ] `purge_intent` / `purged` を「Phase 4 で実装する予約」と記した既存 docstring を、実装済みの記述へ更新する
 
 #### **A-2. `domain/ports.py` — マニフェストポートの拡張**
 
-- [ ] `BaseManifestWriter` に `checkpoint(sequence: int) -> None` を追加する
+- [ ] `BaseManifestWriter` に `checkpoint(sequence: int, batch_id: str) -> None` を追加する
+- [ ] `BaseManifestReader` を新設し、全イベント列挙・最後の `checkpoint` 取得・`checkpoint` 以降のイベント列挙・未完了 `purge_intent` / `remote_delete_intent` の列挙を提供する（レビュー修正案 3.5）
 - [ ] 既存のテストダブル（`tests/support/` 配下）をすべて更新する
 
 #### **A-3. `usecases/sync_mail.py` — checkpoint と WAL チェックポイントの記録**
 
-- [ ] バッチコミット境界（既存 `_BATCH_MESSAGE_LIMIT` / `_BATCH_BYTES_LIMIT`）で `ManifestWriter.checkpoint()` を追記する
+- [ ] バッチコミット境界（既存 `_BATCH_MESSAGE_LIMIT` / `_BATCH_BYTES_LIMIT`）でDBコミットを行う
 - [ ] **バッチコミット10回ごと（＝約1,000通ごと）に `PRAGMA wal_checkpoint(TRUNCATE)` を実行**する（N-6）
-- [ ] checkpoint の追記はDBコミットの**前**に fsync まで完了させる（不変条件2の順序を崩さない）
+- [ ] checkpoint は「このマニフェスト位置まで対応するDB変更がコミット済みである」ことを表す**完了マーカー**とし、`ManifestWriter.checkpoint()` の追記は**DBコミットが成功した後**に fsync まで完了させる（レビュー修正案 3.1。DBコミット前に checkpoint を書かない）
+- [ ] DBコミットに失敗した場合は checkpoint を追記しないこと、失敗した直前のバッチが次回の範囲限定検証で再検証対象になることをコードで保証する
 
 #### **A-4. `migrations/005_phase4.sql` — 運用クエリ用インデックス**
 
@@ -203,6 +211,7 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
     - [ ] `count_path_references(account_id, relative_path, exclude_message_id) -> int`（purged を除外して数える）
     - [ ] `delete_message_contents(message_id) -> None`
     - [ ] `get_app_state(key) -> str | None` / `set_app_state(key, value) -> None`
+    - [ ] 再構築（C-2）が必要とする最小限のメソッド: ID指定のメッセージ取得・保存パスを持つメッセージの列挙・`message_contents` 存在確認・検証結果を単一ライターへ渡すための状態更新・再構築用のアカウント/フォルダ/メッセージ投入（レビュー修正案 3.5。再構築処理そのものはinfrastructure側の再構築コーディネータが担当し、usecaseから直接SQLiteファイルを操作しない）
 - [ ] `SqliteMessageRepository` に実装する
 - [ ] `tests/support/in_memory_repository.py` に同メソッド群を追加する
 
@@ -213,8 +222,8 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 #### **B-1. `domain/storage_state.py` — 状態機械（*Qt非依存*）**
 
 - [ ] `StorageState(StrEnum)` を定義する: `ATTACHED` / `DEGRADED` / `DETACHED` / `DETACHED_BY_USER` / `RECONNECTING` / `VERIFYING`
-- [ ] `StorageEvent(StrEnum)` を定義する: `IO_ERROR` / `REPROBE_OK` / `REPROBE_FAILED` / `DEVICE_REMOVED` / `DEVICE_ARRIVED` / `USER_DETACH` / `RECONNECT_REQUESTED` / `IDENTITY_OK` / `IDENTITY_FOREIGN` / `VERIFY_OK` / `VERIFY_FAILED`
-- [ ] `StorageStateMachine` を実装し、開発計画書 5.7.1-3 の遷移図をそのまま表現する
+- [ ] `StorageEvent(StrEnum)` を定義する: `PROBE_OK` / `PROBE_MISSING` / `PROBE_FOREIGN` / `IO_ERROR` / `REPROBE_OK` / `REPROBE_FAILED` / `DEVICE_REMOVED` / `DEVICE_ARRIVED` / `USER_DETACH` / `RECONNECT_REQUESTED` / `IDENTITY_OK` / `IDENTITY_FOREIGN` / `VERIFY_OK` / `VERIFY_FAILED`（`PROBE_*` は定期ハートビート監視の結果、`REPROBE_*` は瞬断からの再試行結果として明確に区別する。レビュー修正案 3.7）
+- [ ] `StorageStateMachine` を実装し、開発計画書 5.7.1-3 の遷移図に加え、次の遷移を明示する: `ATTACHED + PROBE_MISSING -> DEGRADED` / `ATTACHED + PROBE_FOREIGN -> DETACHED`（`FOREIGN` はリプローブを待たず即座に遷移する。レビュー修正案 3.7）
 - [ ] `is_write_allowed()` / `is_remote_delete_allowed()` を公開し、**`ATTACHED` 以外では両方とも偽**を返すこと（`DEGRADED` は瞬断判定中であり、書き込みを許可しない）
 - [ ] 外部依存ゼロを維持し、PySide6 / `sqlite3` / ファイルI/O を持ち込まない
 
@@ -232,9 +241,9 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 #### **B-3. `presentation/storage_monitor.py` — ハートビートと縮退制御**
 
 - [ ] `StorageMonitor(QObject)` を実装する
-- [ ] `config.heartbeat_interval_sec`（既定5秒）の `QTimer` で `storage_root.probe(root, root_uuid)` を実行し、`OK` / `MISSING` / `FOREIGN` を状態機械へ渡す
-- [ ] `OK` のときだけ `StorageLock.touch_heartbeat()` を呼ぶ
-- [ ] `FOREIGN` 検出時は即座に全書き込みを禁止し、警告を表示する（D-9）
+- [ ] `config.heartbeat_interval_sec`（既定5秒）の `QTimer` で `storage_root.probe(root, root_uuid)` を実行し、`PROBE_OK` / `PROBE_MISSING` / `PROBE_FOREIGN` を状態機械へ渡す（レビュー修正案 3.7。定期ハートビートの結果であり、瞬断リプローブの `REPROBE_*` とは別イベントとして扱う）
+- [ ] `PROBE_OK` のときだけ `StorageLock.touch_heartbeat()` を呼ぶ
+- [ ] `PROBE_FOREIGN` 検出時は即座に全書き込みを禁止し、警告を表示する（D-9）
 - [ ] `QueryWorker` / `SyncWorker` / `VerifyWorker` の `storage_detached` Signal を集約し、`IO_ERROR` として状態機械へ渡す
 - [ ] 瞬断判定: `IO_ERROR` 受信後、500ms 間隔で `config.reprobe_attempts` 回リプローブする。UUID一致で復帰したら全接続を張り直して `ATTACHED` へ戻す（F-3）
 - [ ] `storage_state_changed` Signal で `MainWindow` へ通知する
@@ -262,7 +271,7 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 - [ ] `StorageSession` 開始時に `app_state.clean_shutdown` を読み、`0` なら「前回異常終了」と判定して結果を保持する
 - [ ] 起動直後に `clean_shutdown = 0` を書き、正常終了時に `1` を書く
-- [ ] 前回異常終了時は、起動パスで **①マニフェスト末尾修復 → ②範囲限定検証** を自動実行する（グループC に依存）
+- [ ] 前回異常終了時は、起動パスで **①マニフェスト末尾修復 → ②範囲限定検証 → ③未完了 `purge_intent` / `remote_delete_intent` の回復** を自動実行する（グループC・D・E に依存。レビュー修正案 3.3 / 3.4）
 - [ ] 復帰フローを実装する（D-6）
     - [ ] `DBT_DEVICEARRIVAL` または「再接続を試す」で `RECONNECTING` へ入る
     - [ ] `.maildock_root` のUUID照合 → `.lock` 再取得 → `PRAGMA user_version` 確認 → `PRAGMA quick_check`
@@ -278,13 +287,16 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **C-1. `usecases/verify.py` — 検証ユースケース**
 
+- [ ] `domain/ports.py` へ `BaseIntegrityStorage`（`stat` / `iter_chunks` / `iter_eml_paths` / `quarantine`）と `BasePurgeStorage`（`delete` / 存在確認）を新設し、既存 `BaseEmlStorage` へ検証・削除責務を無制限に追加しない（レビュー修正案 3.5）
 - [ ] `quick_verify(repo, storage, *, cancel) -> QuickVerifyResult` を実装する（`relative_path` の存在確認とサイズ照合。F-12）
 - [ ] `range_verify(repo, storage, manifest_reader, *, cancel) -> RangeVerifyResult` を実装する（F-13）
     - [ ] 最後の `checkpoint` 以降のイベントに含まれるEMLのみSHA-256を再計算する
     - [ ] 不一致レコードは未取得へ戻し（`sync_failures` へ記録）、当該EMLを `tmp/` へ隔離する
 - [ ] `full_verify(repo, storage, *, cancel, on_progress) -> FullVerifyResult` を実装する（F-14）
-    - [ ] EMLはチャンク読みでハッシュ計算し、全体をメモリへ載せない（N-5）
+    - [ ] `BaseIntegrityStorage.iter_chunks()` によるチャンク読みでハッシュ計算し、EML全体をメモリへ載せない（N-5）
 - [ ] `orphan_scan(repo, storage, *, cancel, on_progress) -> OrphanScanResult` を実装する（F-15）
+    - [ ] マニフェストの `fetch` イベントと `source_item_key` / パス / ハッシュが一致する孤児だけを再登録対象とする
+    - [ ] マニフェストに対応イベントが無い孤児は、UID・UIDVALIDITY・フォルダを推測せず `tmp/orphans/` などへ隔離し、次回同期の重複候補として監査ログへ記録する（レビュー修正案 3.6）
 - [ ] `verify_manifest(root, *, cancel) -> ManifestVerifyResult` を実装する（F-16）
     - [ ] 既存 `manifest.repair_tail()` を利用し、**末尾の不完全レコードのみ**切り離す
     - [ ] 末尾以外の破損は `ManifestCorruptError` として報告し、自動修復しない
@@ -295,12 +307,14 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 - [ ] `reindex(repo, storage, manifest_reader, *, cancel, on_progress) -> ReindexResult` を実装する（F-17 / D-4）
 - [ ] 再構築対象: accounts / folders / messages / message_contents / FTS / purge墓標 / 監査イベント
+- [ ] `account_snapshot` / `folder_snapshot` イベントから accounts / folders を復元する（資格情報は含まれないため、再接続にはユーザーの再設定を要求する。レビュー修正案 3.2）
 - [ ] `fetch` イベントから messages を復元し、EMLを再解析して `message_contents` を作る（既存 `reparse.py` の解析経路を再利用する）
 - [ ] `purge_intent` / `purged` イベントから墓標レコード（`local_state='purged'`, `relative_path=NULL`）を復元する
-- [ ] `remote_delete` / `delete_detected` / `moved` イベントから `remote_state` を復元する
-- [ ] `folders.raw_name` / `display_name` / `uidvalidity` をマニフェストから復元し、`is_sync_target` は**既定で 0**（勝手に同期対象にしない）
+- [ ] `remote_delete_completed` / `delete_detected` / `moved` イベントから `remote_state` を復元する。`remote_delete_uncertain` のまま確定していない項目は再構築時も `uncertain` として扱う
+- [ ] `folders.raw_name` / `display_name` / `uidvalidity` をマニフェストから復元し、`is_sync_target` は**既定で0**（勝手に同期対象にしない）
+- [ ] `messages.id` / `folders.id` などのDB固有サロゲートIDをマニフェストの正本にせず、`account_id` / `folder_raw_name` / `source_item_key` などの自然キーから新しいIDを解決する（レビュー修正案 3.2）
 - [ ] PST永続マニフェスト（`manifests/pst/`）は Phase 4.5 のため、読み取り口だけ用意し未対応形式は明示的にスキップして警告ログを残す
-- [ ] 再構築は新しいDBファイルへ書き、完了後に既存 `metadata.db` と入れ替える（途中失敗で既存DBを壊さない）
+- [ ] 新しいDBファイルの作成・マイグレーション適用・整合性検証・既存 `metadata.db` との原子的入れ替えは、usecaseから直接SQLiteファイルを操作せず、infrastructure側の**再構築コーディネータ**が担当する（途中失敗で既存DBを壊さない。レビュー修正案 3.5）
 
 #### **C-3. `presentation/threads/verify_worker.py` — 3本目のワーカー（D-5）**
 
@@ -308,6 +322,7 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 - [ ] `quick_verify` / `range_verify` / `full_verify` / `orphan_scan` / `verify_manifest` / `reindex` / `reparse` を受け付ける
 - [ ] 進捗を100ms間引きして Signal へ中継する（`SyncWorker` と同じ規約）
 - [ ] **DB書き込みを伴う後処理は `SyncWorker` へ委譲するか、`SyncWorker` の停止を確認したうえで排他実行する**。単一ライター規約を崩さないことをコメントとテストで固定する
+- [ ] `VerifyWorker` は `BasePurgeStorage.delete()` など物理削除を伴うポートを直接呼び出さず、検証結果を返すだけにする（レビュー修正案 3.5）
 - [ ] `StorageDetachedError` を `storage_detached` Signal で `StorageMonitor` へ通知する
 - [ ] スレッド終了時に、そのスレッドが開いたSQLite接続を必ず閉じる
 
@@ -336,15 +351,16 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
     - [ ] `local_state='trashed'`、`trashed_at` を記録する。**EMLは削除しない**
 - [ ] `restore_from_trash(repo, *, message_ids) -> TrashResult` を実装する（F-21）
 - [ ] `list_purge_candidates(repo, *, now, grace_days) -> Sequence[MessageRecord]` を実装する
-- [ ] `purge(repo, storage, manifest, *, message_ids, storage_state) -> PurgeResult` を実装する（F-22）
+- [ ] `purge(repo, storage, manifest, *, message_ids, storage_state) -> PurgeResult` を実装する（F-22）。各段階を**再実行しても結果が変わらない冪等な状態遷移**として実装する（レビュー修正案 3.3）
     - [ ] 1. `storage_state.is_write_allowed()` が偽なら入口で拒否する
     - [ ] 2. 対象件数と合計サイズをログへ記録する（F-26）
     - [ ] 3. マニフェストへ `purge_intent` を追記し **fsync** する
-    - [ ] 4. `count_path_references()` で同じ `relative_path` を参照する非purgedレコードが無いことを確認し、**最後の参照が消える場合だけ**EMLを削除する（F-23 / D-13）
+    - [ ] 4. `count_path_references()` で同じ `relative_path` を参照する非purgedレコードが無いことを確認し、**最後の参照が消える場合だけ**EMLを削除する（F-23 / D-13）。EMLが既に存在しない場合は、ハッシュとintentが一致する限り削除済みとして扱う（レビュー修正案 3.3）
     - [ ] 5. マニフェストへ `purged` を追記し **fsync** する
     - [ ] 6. `message_contents` を削除する（トリガーでFTSからも除去される。F-24）
     - [ ] 7. `local_state='purged'`, `relative_path=NULL` に更新する。**`messages` の行は残す**
     - [ ] 8. `audit_log` へ `operation='local_purge'` を記録する
+- [ ] `recover_incomplete_purges(repo, storage, manifest_reader, *, storage_state) -> None` を実装する。起動時または範囲限定検証前に、対応する `purged` が存在しない `purge_intent` を列挙し、共有参照を再確認したうえで未完了部分（4〜8）を再開する（レビュー修正案 3.3）
 - [ ] `sqlite3` / PySide6 / infrastructure の具象を import しないこと
 
 #### **D-2. purge 実行モード（F-25 / D-14）**
@@ -372,19 +388,24 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 - [ ] 見つからない場合、一般的な候補名（`Trash` / `ゴミ箱` / `Deleted Items` / `INBOX.Trash` 等）を自動探索する
 - [ ] それでも特定できない場合は `config.remote_trash_folder` による手動指定を要求し、**未指定の間は削除機能を無効化**する
 - [ ] 自動検出結果を設定画面に表示し、ユーザーが上書きできるようにする
-- [ ] 既存の `_find_trash_folder()` を上記の3段階へ拡張し、`BaseMailFetcher` の契約として整理する
-
+- [ ] 既存の `_find_trash_folder()` を上記の3段階へ拡張し、`BaseMailFetcher` の契約として整理する- [ ] フォルダのUID EXPUNGE対応可否（`UIDPLUS` 拡張等）を判定し、`BaseMailFetcher` の契約として公開する（レビュー修正案 3.4）
+- [ ] 既存の `OnamaeImapFetcher.delete_remote_message()` が `UIDPLUS` 非対応時にフォルダ全体 `expunge()` へフォールバックしている現行実装を廃止し、非対応サーバーでは `expunge` を拒否するよう修正する（レビュー修正案 3.4）
 #### **E-2. `usecases/delete_remote.py` — 削除ユースケース**
 
 - [ ] `dry_run(repo, storage, *, message_ids, storage_state) -> DeleteDryRunResult` を実装する（F-29）
     - [ ] 3つの事前条件を検証し、満たさないメールを**自動除外**して除外理由を返す（F-27 / D-12）
     - [ ] 対象一覧（件名・日付・サイズ）と合計容量を返す
-- [ ] `execute(fetcher, repo, storage, manifest, *, plan, mode, storage_state) -> DeleteResult` を実装する
+- [ ] `execute(fetcher, repo, storage, manifest, *, plan, mode, storage_state) -> DeleteResult` を実装する。exactly-once を前提とせず、意図・成功確認・不確定状態を別イベントとして記録する（レビュー修正案 3.4）
     - [ ] `storage_state.is_remote_delete_allowed()` が偽なら**入口で無条件拒否**する（F-28）
     - [ ] `dry_run` の結果を再検証してから実行する（TOCTOU対策。実行直前にもハッシュを再計算する）
     - [ ] `config.delete_batch_limit`（既定1,000）を超える要求を拒否する（F-31）
-    - [ ] 既定はゴミ箱へ MOVE、`expunge` は明示指定時のみ（D-11）
-    - [ ] マニフェストへ `remote_delete` を追記し fsync してから `audit_log` へ記録し、最後に `remote_state='deleted'` を更新する（F-33）
+    - [ ] 既定はゴミ箱へ MOVE（`mode="trash"`）、`mode="expunge"` は明示指定時のみ（D-11）
+    - [ ] `expunge` 指定時、サーバーが UID EXPUNGE（対象UIDのみを永久削除できる操作）に対応しない場合は実行を拒否し、通常のフォルダ全体 EXPUNGE へフォールバックしない（レビュー修正案 3.4）
+    - [ ] 1. マニフェストへ `remote_delete_intent` を追記し fsync してから IMAP MOVE/EXPUNGE を実行する
+    - [ ] 2. サーバー応答を確認し、成功が確認できた場合のみ `remote_delete_completed` を追記し fsync する
+    - [ ] 3. 応答不明・通信断の場合は `remote_delete_uncertain` を記録し、その場では `deleted` と表示しない
+    - [ ] 4. 状態確定後（再接続後の照合を含む）に `audit_log` へ記録し、`remote_state='deleted'` を更新する（F-33）
+- [ ] `reconcile_uncertain_deletes(fetcher, repo, manifest, *, storage_state) -> None` を実装する。再接続後に元フォルダ・UID・UIDVALIDITY・移動先を照合し、`remote_delete_uncertain` を `remote_delete_completed` または取り消しへ確定させる（レビュー修正案 3.4）
 - [ ] `sqlite3` / PySide6 / infrastructure の具象を import しないこと
 
 #### **E-3. GUI 配線**
@@ -487,6 +508,7 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
     - [ ] ④ DBコミット中
 - [ ] 各注入点で、**不変条件2で許容される状態（DB未登録のEML、またはマニフェスト済みでDB未登録の項目）にしかならない**ことを検証する
 - [ ] 「DBにあるが実体が無い」状態が**一度も発生しない**ことを検証する
+- [ ] DBコミット失敗時に checkpoint が追記されないこと、およびそのバッチが次回の範囲限定検証対象になることを検証する（レビュー修正案 3.1）
 - [ ] ③ の後に `verify_manifest()` を実行すると末尾の不完全レコードだけが切り離され、それ以前のレコードが失われないことを検証する
 - [ ] 各注入点からの復帰後、次回同期で欠落分が再取得されること（冪等性）を検証する
 
@@ -507,13 +529,13 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 #### **H-3. マニフェストと再構築のテスト**
 
 - [ ] `tests/unit/test_manifest.py`（既存を拡張）
-    - [ ] `checkpoint` / `purge_intent` / `purged` / `remote_delete` のスキーマ検証
+    - [ ] `checkpoint` / `account_snapshot` / `folder_snapshot` / `purge_intent` / `purged` / `remote_delete_intent` / `remote_delete_completed` / `remote_delete_uncertain` のスキーマ検証
     - [ ] 最後の `checkpoint` 以降のイベント列挙が正しいこと
     - [ ] 末尾以外のCRC32不一致が `ManifestCorruptError` になり、自動修復されないこと
 - [ ] `tests/integration/test_reindex.py`
     - [ ] 同期後に `metadata.db` を削除し、EML＋マニフェストだけから再構築した結果が**再構築前と一致**すること（messages / message_contents / FTS / folders）
     - [ ] purge済みメッセージの墓標レコードと `local_state='purged'` が復元されること
-    - [ ] `remote_delete` / `delete_detected` / `moved` から `remote_state` が復元されること
+    - [ ] `remote_delete_completed` / `delete_detected` / `moved` から `remote_state` が復元されること。未確定の `remote_delete_uncertain` は `uncertain` のまま復元されること
     - [ ] 再構築された `folders.is_sync_target` がすべて 0 であること
     - [ ] 再構築が途中で失敗しても既存 `metadata.db` が壊れないこと
     - [ ] `manifests/pst/` が存在しても警告ログを残してスキップされること
@@ -538,6 +560,8 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
     - [ ] 墓標レコードが残り、`message_contents` の削除でFTSからも消えること
     - [ ] `purge_mode` の3値それぞれの挙動
     - [ ] 書き込み不可状態（`ATTACHED` 以外）で purge が拒否されること
+    - [ ] `purge_intent` 追記後・EML削除後・`purged` 追記後・DB更新中のそれぞれで中断し、再起動後に `recover_incomplete_purges()` で墓標化が完了すること（レビュー修正案 3.3）
+    - [ ] purge を同じ対象へ複数回実行しても、EMLや監査ログが不正に二重処理されないこと（冪等性）
 - [ ] `tests/unit/test_delete_remote.py`
     - [ ] 3つの事前条件のいずれかが欠けた対象が**自動除外**され、除外理由が返ること
     - [ ] `ATTACHED` 以外で入口拒否されること
@@ -546,6 +570,9 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
     - [ ] ドライラン後にEMLが差し替えられた場合、実行直前の再検証で拒否されること
     - [ ] マニフェスト追記 → `audit_log` → `remote_state` 更新の順序が守られること
     - [ ] ゴミ箱フォルダ未特定時に削除が実行できないこと
+    - [ ] 応答前の通信断が `remote_delete_uncertain` として記録され、その場では `deleted` と表示されないこと
+    - [ ] 再接続後の照合で `remote_delete_uncertain` が `remote_delete_completed` または取り消しへ確定すること
+    - [ ] UID EXPUNGE非対応サーバーで `expunge` が拒否されること（レビュー修正案 3.4）
 - [ ] `tests/integration/test_remote_delete.py`（Docker/Dovecot）: SPECIAL-USE の `\Trash` 検出、MOVE、`EXPUNGE`
 
 #### **H-6. エクスポート・運用機能のテスト**
@@ -588,9 +615,9 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 | パス | 内容 | タスク |
 | :---- | :---- | :---- |
 | `src/mail_dock/domain/storage_state.py` | ストレージ状態機械（Qt非依存） | B-1 |
-| `src/mail_dock/domain/ports.py` | `BaseManifestWriter.checkpoint()` | A-2 |
+| `src/mail_dock/domain/ports.py` | `BaseManifestWriter.checkpoint()` / `BaseManifestReader` | A-2 |
 | `src/mail_dock/domain/repository.py` | 監査・ゴミ箱・`app_state` 用の最小メソッド追加 | A-5 |
-| `src/mail_dock/infrastructure/storage/manifest.py` | `checkpoint` / `purge_intent` / `purged` / `remote_delete` イベント | A-1 |
+| `src/mail_dock/infrastructure/storage/manifest.py` | `checkpoint` / `account_snapshot` / `folder_snapshot` / `purge_intent` / `purged` / `remote_delete_intent` / `remote_delete_completed` / `remote_delete_uncertain` イベント | A-1 |
 | `src/mail_dock/migrations/005_phase4.sql` | 監査・purge・共有EML参照用インデックス | A-4 |
 | `src/mail_dock/usecases/verify.py` | クイック／範囲限定／フル検証・孤児スキャン・マニフェスト検証 | C-1 |
 | `src/mail_dock/usecases/reindex.py` | EML＋マニフェストからのDB完全再構築 | C-2 |
@@ -639,10 +666,10 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 各項目の完了を確認したうえで、対応するタスクのチェックボックスを埋めること。
 
 - [ ] V-1. `uv sync` → `uv run ruff format --check .` → `uv run ruff check .` → `uv run mypy` がすべて成功する
-- [ ] V-2. **フォールト注入4点**（fsync前 / `os.replace` 直前 / マニフェスト追記の行途中 / DBコミット中）すべてで、発生する状態が「DB未登録のEML」または「マニフェスト済みでDB未登録の項目」だけであり、「DBにあるが実体が無い」状態が一度も発生しない
-- [ ] V-3. **`metadata.db` を削除し、EML＋永続マニフェストだけからDBを再構築**した結果が、再構築前と一致する（messages / message_contents / FTS / folders / purge墓標 / 監査イベント）。再構築が途中失敗しても既存DBが壊れない
-- [ ] V-4. purge が「`purge_intent` fsync → 共有参照ゼロ確認 → EML削除 → `purged` fsync → FTS除去 → 墓標化 → 監査記録」の順で実行され、他レコードが参照するEMLを削除しない
-- [ ] V-5. サーバー削除が3つの事前条件を満たさない対象を自動除外し、`ATTACHED` 以外では入口で拒否され、件数手入力を経ないと実行できない
+- [ ] V-2. **フォールト注入4点**（fsync前 / `os.replace` 直前 / マニフェスト追記の行途中 / DBコミット中）すべてで、発生する状態が「DB未登録のEML」または「マニフェスト済みでDB未登録の項目」だけであり、「DBにあるが実体が無い」状態が一度も発生しない。DBコミット失敗時に checkpoint が残らないことも合わせて検証する
+- [ ] V-3. **`metadata.db` を削除し、EML＋永続マニフェストだけからDBを再構築**した結果が、再構築前と**意味的に一致**する（accounts/foldersの自然キー・表示名・UIDVALIDITY、messagesの自然キー・EMLパス・ハッシュ・状態・日時・サイズ、message_contentsとFTSの検索結果、purge墓標とremote_state、audit_logが一致する。`is_sync_target` は再構築後すべて0とする運用設定として比較対象から除外する。レビュー修正案 3.2）。再構築が途中失敗しても既存DBが壊れない
+- [ ] V-4. purge が「`purge_intent` fsync → 共有参照ゼロ確認 → EML削除 → `purged` fsync → FTS除去 → 墓標化 → 監査記録」の順序で実行され、他レコードが参照するEMLを削除しない。各段階での途中停止後も、再起動・再実行で墓標化が完了する（冪等性。レビュー修正案 3.3）
+- [ ] V-5. サーバー削除が3つの事前条件を満たさない対象を自動除外し、`ATTACHED` 以外では入口で拒否され、件数手入力を経ないと実行できない。応答前の通信断は `uncertain` として保持され、再接続後の照合を経てから `deleted` へ確定する。UID EXPUNGEが保証できないサーバーでは `expunge` を実行しない（レビュー修正案 3.4）
 - [ ] V-6. 状態機械が開発計画書 5.7.1-3 の遷移表どおりに動き、`ATTACHED` 以外で `is_write_allowed()` と `is_remote_delete_allowed()` が偽になる（Qt非依存の単体テスト）
 - [ ] V-7. `FOREIGN`（別デバイスが同じドライブレターを取得）検出時に即座に全書き込みが禁止される
 - [ ] V-8. スタール `.lock`（ロック実体は取得できるが `heartbeat_at` が古い）で起動でき、範囲限定検証が自動実行される
