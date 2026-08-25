@@ -232,9 +232,7 @@ def test_status_tooltip_includes_local_snapshot_time(qtbot: object) -> None:
     )
 
     assert model.data(model.index(0, 4), Qt.ItemDataRole.ToolTipRole) == (
-        strings.TOOLTIP_IMAP_FLAGS.format(
-            seen_at=seen_at.astimezone().strftime("%Y-%m-%d %H:%M")
-        )
+        strings.TOOLTIP_IMAP_FLAGS.format(seen_at=seen_at.astimezone().strftime("%Y-%m-%d %H:%M"))
     )
 
 

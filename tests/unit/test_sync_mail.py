@@ -28,9 +28,7 @@ from tests.support.in_memory_repository import InMemoryMessageRepository
         ("flag_refresh_min_interval_seconds", 0),
     ],
 )
-def test_sync_options_reject_invalid_flag_refresh_settings(
-    field_name: str, value: object
-) -> None:
+def test_sync_options_reject_invalid_flag_refresh_settings(field_name: str, value: object) -> None:
     with pytest.raises((TypeError, ValueError)):
         SyncOptions(**dict[str, Any]({field_name: value}))
 
@@ -715,9 +713,7 @@ def test_flag_refresh_does_not_touch_missing_non_condstore_response() -> None:
     fetcher = MissingFlagFetcher(
         folders=[RemoteFolder("INBOX", "Inbox", uidvalidity=41)],
         messages={
-            "INBOX": [
-                RemoteMessageRef(uid=1, internal_date=datetime(2026, 7, 30, tzinfo=UTC))
-            ]
+            "INBOX": [RemoteMessageRef(uid=1, internal_date=datetime(2026, 7, 30, tzinfo=UTC))]
         },
         eml_bytes={("INBOX", 1): _eml(1)},
     )
@@ -806,9 +802,7 @@ def test_flag_refresh_fetch_error_isolated_from_account_sync() -> None:
     fetcher = FlagFailureFetcher(
         folders=[RemoteFolder("INBOX", "Inbox", uidvalidity=41)],
         messages={
-            "INBOX": [
-                RemoteMessageRef(uid=1, internal_date=datetime(2026, 7, 30, tzinfo=UTC))
-            ]
+            "INBOX": [RemoteMessageRef(uid=1, internal_date=datetime(2026, 7, 30, tzinfo=UTC))]
         },
         eml_bytes={("INBOX", 1): _eml(1)},
     )
@@ -844,12 +838,8 @@ def test_flag_refresh_limits_window_and_fetches_only_expired_uids() -> None:
     )
     repo, folder_id, storage, manifest = _complete_initial_sync(fetcher)
     _seed_flag_refresh_message(repo, folder_id, uid=2)
-    fetcher.add_message(
-        "INBOX", 1, _eml(1), ref=RemoteMessageRef(uid=1, flags=(r"\Flagged",))
-    )
-    fetcher.add_message(
-        "INBOX", 2, _eml(2), ref=RemoteMessageRef(uid=2, flags=(r"\Flagged",))
-    )
+    fetcher.add_message("INBOX", 1, _eml(1), ref=RemoteMessageRef(uid=1, flags=(r"\Flagged",)))
+    fetcher.add_message("INBOX", 2, _eml(2), ref=RemoteMessageRef(uid=2, flags=(r"\Flagged",)))
 
     sync_account(
         fetcher,
@@ -915,9 +905,7 @@ def test_condstore_updates_fresh_delta_and_touches_expired_missing_delta() -> No
     _seed_flag_refresh_message(repo, folder_id, uid=1)
     fetcher.delta_uids = {2}
     fetcher.highest_modseq = 11
-    fetcher.add_message(
-        "INBOX", 2, _eml(2), ref=RemoteMessageRef(uid=2, flags=(r"\Flagged",))
-    )
+    fetcher.add_message("INBOX", 2, _eml(2), ref=RemoteMessageRef(uid=2, flags=(r"\Flagged",)))
 
     sync_account(
         fetcher,
@@ -954,9 +942,7 @@ def test_condstore_nomodseq_uses_ttl_fallback_and_clears_saved_modseq() -> None:
     )
     _seed_flag_refresh_message(repo, folder_id)
     fetcher.highest_modseq = None
-    fetcher.add_message(
-        "INBOX", 1, _eml(1), ref=RemoteMessageRef(uid=1, flags=(r"\Flagged",))
-    )
+    fetcher.add_message("INBOX", 1, _eml(1), ref=RemoteMessageRef(uid=1, flags=(r"\Flagged",)))
 
     sync_account(
         fetcher,
@@ -991,9 +977,7 @@ def test_condstore_modseq_backtracking_rebuilds_baseline() -> None:
     )
     _seed_flag_refresh_message(repo, folder_id)
     fetcher.highest_modseq = 9
-    fetcher.add_message(
-        "INBOX", 1, _eml(1), ref=RemoteMessageRef(uid=1, flags=(r"\Flagged",))
-    )
+    fetcher.add_message("INBOX", 1, _eml(1), ref=RemoteMessageRef(uid=1, flags=(r"\Flagged",)))
 
     sync_account(
         fetcher,
@@ -1059,9 +1043,7 @@ def test_flag_refresh_authentication_error_aborts_account_sync() -> None:
     fetcher = FlagAuthenticationFailureFetcher(
         folders=[RemoteFolder("INBOX", "Inbox", uidvalidity=41)],
         messages={
-            "INBOX": [
-                RemoteMessageRef(uid=1, internal_date=datetime(2026, 7, 30, tzinfo=UTC))
-            ]
+            "INBOX": [RemoteMessageRef(uid=1, internal_date=datetime(2026, 7, 30, tzinfo=UTC))]
         },
         eml_bytes={("INBOX", 1): _eml(1)},
     )

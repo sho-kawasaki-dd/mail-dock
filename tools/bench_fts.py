@@ -1154,10 +1154,7 @@ def _build_extrapolation(reports: Sequence[dict[str, Any]]) -> dict[str, Any]:
     target = 50_000
 
     def size_points(key: str) -> list[tuple[int, float]]:
-        return [
-            (int(report["count"]), float(report["sizes"][key]))
-            for report in reports
-        ]
+        return [(int(report["count"]), float(report["sizes"][key])) for report in reports]
 
     extrapolated_sizes = {
         key: _linear_extrapolation(size_points(key), target)
