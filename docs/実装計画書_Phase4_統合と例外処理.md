@@ -175,7 +175,8 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
     - [ ] `folder_snapshot`: `account_id` / `folder_raw_name` / `display_name` / `uidvalidity` / `delimiter` 等のフォルダ属性 / `timestamp`（レビュー修正案 3.2）
     - [ ] `purge_intent` / `purged`: `account_id` / `source_item_key` / `relative_path` / `file_hash` / `timestamp` に加え、共有参照確認の結果・物理削除を実施するかどうかを記録する（レビュー修正案 3.3）
     - [ ] `remote_delete_intent` / `remote_delete_completed` / `remote_delete_uncertain`: `account_id` / `folder_raw_name` / `uid` / `uidvalidity` / `mode`（`trash` または `expunge`）/ `timestamp`。`uncertain` は再接続後の照合で `completed` または取り消しへ確定させる（レビュー修正案 3.4 / 3.8）
-- [ ] `fetch` / `moved` / `delete_detected` イベントへ、DB完全再構築に必要な自然キー・スナップショット項目を追加する（`internal_date`・再構築用ヘッダー情報・`moved_to_folder_raw_name`・Message-ID・サイズ等。DB固有のサロゲートIDは記録しない。レビュー修正案 3.2）
+- [ ] `fetch` イベントへ `internal_date` を追加する（追加が必要なのはこの1点のみ。既存 `_FETCH_FIELDS` は `message_id` / `size_bytes` をすでに保持しており、`content_key` は `derive_content_key(message_id, eml_sha256)` で導出され、`message_contents`（件名・送信者・本文・添付名）は `parse_eml()` の出力から導出されるため、解析済みコンテンツはマニフェストへ複製しない。再構築（C-2）は `fetch` イベントの `relative_path` からEMLを読み直し、既存 `reparse.py` の解析経路で `message_contents` を作る。レビュー修正案 9.2）
+- [ ] `moved` イベントへ `moved_to_folder_raw_name`（移動先フォルダの自然キー）を追加する。**既存の `usecases/sync_mail.py` は移動検出イベントへ `"folder_id": folder_id` と `"moved_to_folder_id": moved_to` というDB固有サロゲートIDを直接書き込んでおり（`moved_to_folder_id` はマニフェストの正本にしないと決めたものそのもの）、Phase 4 で `targets` 一覧から `folder_id → raw_name` を解決して `moved_to_folder_raw_name` を追加し、`moved_to_folder_id` の直接記録を廃止する必要がある**（レビュー修正案 3.2 / 9.4）
 - [ ] `ManifestWriter.checkpoint(sequence, batch_id)` を実装する（append → `flush_and_sync()` まで1操作で行う）
 - [ ] 最後の `checkpoint` 以降のイベントだけを列挙する読み取りAPIを追加する（範囲限定検証の入力。既存 `read_events()` を再利用し、末尾修復の挙動を変えないこと）
 - [ ] 対応する完了イベントの無い `purge_intent` / `remote_delete_intent` を列挙する読み取りAPIを追加する（未完了intentの起動時回復用。レビュー修正案 3.3 / 3.4）
@@ -214,6 +215,14 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
     - [ ] 再構築（C-2）が必要とする最小限のメソッド: ID指定のメッセージ取得・保存パスを持つメッセージの列挙・`message_contents` 存在確認・検証結果を単一ライターへ渡すための状態更新・再構築用のアカウント/フォルダ/メッセージ投入（レビュー修正案 3.5。再構築処理そのものはinfrastructure側の再構築コーディネータが担当し、usecaseから直接SQLiteファイルを操作しない）
 - [ ] `SqliteMessageRepository` に実装する
 - [ ] `tests/support/in_memory_repository.py` に同メソッド群を追加する
+
+#### **A-6. アカウント/フォルダ snapshot の書き込みとバックフィル（レビュー修正案 9.1）**
+
+- [ ] アカウント登録・設定変更の既存ユースケース入口へ、`account_snapshot` の追記を追加する
+- [ ] フォルダ属性が変化した際（`is_sync_target` 切替え等）に `folder_snapshot` を追記する
+- [ ] 直前の snapshot と非秘密フィールドが完全一致する場合は追記を省略し、マニフェストの肥大化を防ぐ
+- [ ] Phase 4 導入時の起動パスへ、既存アカウント・既存フォルダについて `account_snapshot` / `folder_snapshot` が一度も存在しない場合に現在の状態で遡及して一回だけ書く**バックフィル**を実装する（B-5の起動パスから呼ぶ。これが無いとPhase 3以前作成の既存アカウントは `reindex` で復元不能になる）
+- [ ] `sqlite3` / PySide6 / infrastructure の具象を import しないこと
 
 ---
 
@@ -272,6 +281,7 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 - [ ] `StorageSession` 開始時に `app_state.clean_shutdown` を読み、`0` なら「前回異常終了」と判定して結果を保持する
 - [ ] 起動直後に `clean_shutdown = 0` を書き、正常終了時に `1` を書く
 - [ ] 前回異常終了時は、起動パスで **①マニフェスト末尾修復 → ②範囲限定検証 → ③未完了 `purge_intent` / `remote_delete_intent` の回復** を自動実行する（グループC・D・E に依存。レビュー修正案 3.3 / 3.4）
+- [ ] 起動パスの最初に、A-6のアカウント/フォルダ snapshot バックフィルを実行する（レビュー修正案 9.1）
 - [ ] 復帰フローを実装する（D-6）
     - [ ] `DBT_DEVICEARRIVAL` または「再接続を試す」で `RECONNECTING` へ入る
     - [ ] `.maildock_root` のUUID照合 → `.lock` 再取得 → `PRAGMA user_version` 確認 → `PRAGMA quick_check`
@@ -573,7 +583,9 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
     - [ ] 応答前の通信断が `remote_delete_uncertain` として記録され、その場では `deleted` と表示されないこと
     - [ ] 再接続後の照合で `remote_delete_uncertain` が `remote_delete_completed` または取り消しへ確定すること
     - [ ] UID EXPUNGE非対応サーバーで `expunge` が拒否されること（レビュー修正案 3.4）
+    - [ ] 上記の不確定状態・UID EXPUNGE拒否の分岐はFakeフェッチャー（応答読み取り時の例外注入・`list_existing_uids()`のスクリプト）による決定的な単体テストとして検証し、ソケット切断の実際の再現は狙わない（レビュー修正案 9.3）
 - [ ] `tests/integration/test_remote_delete.py`（Docker/Dovecot）: SPECIAL-USE の `\Trash` 検出、MOVE、`EXPUNGE`
+    - [ ] `remote_delete_uncertain` をテストが直接投入し、別の生 IMAP 接続でサーバー側を先に削除済み/未削除の両方に作り分けてから `reconcile_uncertain_deletes()` を実行し、実サーバーの状態と正しく照合できることを検証する（既存 `test_delete_detection.py` と同じ手法。レビュー修正案 9.3）
 
 #### **H-6. エクスポート・運用機能のテスト**
 

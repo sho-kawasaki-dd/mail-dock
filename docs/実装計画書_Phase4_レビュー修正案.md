@@ -117,9 +117,9 @@ DBコミット後にcheckpointを書けば、checkpoint書き込み前に切断�
 
 `fetch`イベント:
 
-- `internal_date`
-- 再構築に必要なメッセージヘッダー情報
+- `internal_date`（追加が必要なのはこの1点のみ。9.2参照）
 - `folder_raw_name`を自然キーとして維持
+- `message_id` / `size_bytes` は既存フィールドで充足済みであり、件名・送信者・本文・添付名などの解析済みコンテンツはマニフェストへ複製しない（EMLの再解析で導出する）
 
 `moved`イベント:
 
@@ -555,6 +555,10 @@ Phase 4では、次を確認・拡張する。
 - [x] D-18/F-29: 汎用CSVと削除ドライランCSVのスコープを分離した
 - [x] H-1/H-5: 破壊操作の途中停止テストを追加した
 - [x] V-2/V-3/V-4: 新しい復旧条件と意味的一致条件を反映した
+- [x] 9.1: account_snapshot/folder_snapshotの書き込みタイミングとバックフィルを追加した
+- [x] 9.2: fetchイベントの追加フィールドを`internal_date`のみへ絞り込んだ
+- [x] 9.3: remote_delete_uncertainのテスト方針（単体/結合の分離）を追加した
+- [x] 9.4: 既存コードとの不整合3件（`permanent`表記、EXPUNGEフォールバック、`moved_to_folder_id`直書き）を記録した
 
 ## 8. 設計上の最終判断
 
@@ -568,3 +572,70 @@ Phase 4の中核は、機能数を増やすことではなく、切断や途中�
 4. VerifyWorker、単一ライター、ストレージ状態機械の責務境界が確定している
 
 この順序を守ることで、V-2、V-3、V-4を実装後に形式的に確認するのではなく、設計段階から満たせる構造にできる。
+
+## 9. 追記（2026-08-25）: 未決事項の確定と既存コードとの不整合
+
+### 9.1 account_snapshot / folder_snapshotの書き込みタイミング
+
+#### 推奨する決定
+
+書き込みタイミングは次の3契機とする。
+
+- アカウント登録時に1回書く
+- アカウント設定・フォルダ属性が変更された都度書く
+- **Phase 4 導入時、既存アカウント・既存フォルダについてまだ`account_snapshot`/`folder_snapshot`が一度も存在しない場合、現在の状態で1回だけ遡及して書く（バックフィル）**
+
+直前のイベントと非秘密フィールドが完全一致する場合は書き込みを省略し、マニフェストの肥大化を防ぐ。
+
+#### この案を選ぶ理由
+
+「設定変更の都度」だけでは、Phase 3までに作成された既存アカウントに`account_snapshot`が一件も存在せず、`reindex`が復元不能になる。導入時バックフィルを行わない限り、既存ユーザーにとって不変条件1（EML＋マニフェストからの完全再構築）が実質的に成立しない。
+
+#### 計画書への反映
+
+- B-5（クリーンシャットダウンフラグと復帰）またはPhase 4起動シーケンスへ、既存アカウント・フォルダの`account_snapshot`/`folder_snapshot`バックフィル手順を追加する
+- アカウント作成・設定変更のユースケース入口（既存の実装箇所）へ、snapshotイベント追記を追加する
+- 直前のsnapshotと非秘密フィールドが一致する場合は追記をスキップする重複排除ロジックを追加する
+
+### 9.2 fetchイベントに追加するフィールドの絞り込み
+
+#### 推奨する決定
+
+`fetch`イベントへ追加するのは**`internal_date`のみ**とする。件名・送信者・本文・添付名などの解析済みコンテンツはマニフェストへ複製しない。
+
+#### この案を選ぶ理由
+
+既存の`_FETCH_FIELDS`（`infrastructure/storage/manifest.py`）は`message_id`と`size_bytes`をすでに保持しており、`content_key`は`derive_content_key(message_id, eml_sha256)`（`infrastructure/parsing/eml_parser.py`）でMessage-IDとEMLのSHA-256（＝既存の`file_hash`）から導出される。`message_contents`（`subject_norm`/`sender_norm`/`body_text`/`attachment_names`）も`parse_eml()`の出力から導出される（`usecases/reparse.py`）。つまりEMLバイト列と既存の`fetch`フィールドだけで再解析による完全な再構築が可能であり、`internal_date`（IMAP側のメタデータでEMLの`Date`ヘッダとは別物。保存パス決定にも使う）だけが真に不足している。
+
+解析結果をマニフェストへ二重に持たせると、`parse_eml()`のロジックが将来変わった際にマニフェストと再解析結果が食い違う経路を新設することになり、不変条件1（EMLとマニフェストが正本）に反する。
+
+#### 計画書への反映
+
+- 3.2の「`fetch`イベント」の追加フィールドを「`internal_date`のみ」へ修正する（`message_id`・自然キーは既存フィールドで充足済み）
+- 再構築（C-2）は`fetch`イベントの`relative_path`からEMLを読み直し、既存`reparse.py`の解析経路で`message_contents`を作ることを明記する
+
+### 9.3 remote_delete_uncertainの再照合テスト方針
+
+#### 推奨する決定
+
+「不確定状態が発生するタイミングの検出ロジック」と「再接続後にサーバー状態と照合するロジック」を分離し、前者はFake/フォールト注入による単体テスト、後者のみ実Dovecotによる結合テストとする。
+
+- 単体テスト（`tests/unit/test_delete_remote.py`）: Fakeフェッチャーへ「コマンド送信は成功、応答読み取り時に例外」等のフックを持たせ、`remote_delete_intent`のみで止まる場合と`remote_delete_uncertain`まで進む場合を区別する。H-1向けの`tests/support/fault_injection.py`のNコール目注入の仕組みを流用する。`reconcile_uncertain_deletes()`自体もFakeの`list_existing_uids()`をスクリプトして純粋にロジックを検証する。
+- 結合テスト（`tests/integration/test_remote_delete.py`、Docker/Dovecot）: ソケット切断の再現は狙わず、既存`tests/integration/test_delete_detection.py`と同じ手法で、テストコードが直接IMAPコマンドを打ってサーバー状態を先に変えてから`remote_delete_uncertain`をテストが直接投入し、`reconcile_uncertain_deletes()`が実サーバーの状態（削除済み／未削除）と正しく照合できることを検証する。
+
+#### この案を選ぶ理由
+
+生きたTCPソケットに対して「コマンド送信後・応答受信前」を狙って正確に切断するテストは非決定的でflakyになりやすい。不確定状態の分岐ロジック自体はFakeで決定的に検証し、サーバーとの整合性照合だけを実サーバーで検証する方が、既存のテスト資産（`imap_integration.py`、`dovecot_uidvalidity.py`）の使い方とも一貫する。
+
+#### 計画書への反映
+
+- H-5へ、上記の単体/結合の役割分担を明記する
+- `tests/integration/test_remote_delete.py`の項目に「`remote_delete_uncertain`をテストが直接投入し、サーバー側の実状態と照合する」ケースを追加する
+
+### 9.4 既存コードとの不整合（発見事項）
+
+実装着手前に必ず解消すること。
+
+1. **`config.py`の`REMOTE_DELETE_MODES = frozenset({"trash", "permanent"})`** は旧称`permanent`を使用中であり、3.8で決定した`trash`/`expunge`への統一・移行処理がまだ実装されていない。
+2. **`infrastructure/fetchers/onamae_imap.py`の`OnamaeImapFetcher.delete_remote_message()`** は、`UIDPLUS`非対応時に**フォルダ全体`connection.expunge()`**へフォールバックする実装になっている。これは3.4で決定した「UID EXPUNGE非対応ならexpungeを拒否し、フォルダ全体EXPUNGEへフォールバックしない」に反する既存動作であり、Phase 4で確実に修正する。
+3. **`usecases/sync_mail.py`の移動検出イベント（"moved"）** は、マニフェストへ`"folder_id": folder_id`と`"moved_to_folder_id": moved_to`という**DB固有のサロゲートID**を直接書き込んでいる（3.2で「マニフェストの正本にしない」と決定した`moved_to_folder_id`そのもの）。`folder_raw_name`（移動元）は既に書かれているが、移動先の`moved_to_folder_raw_name`（自然キー）が欠けている。Phase 4のA-1で、`targets`一覧から`folder_id → raw_name`を解決し、`moved_to_folder_raw_name`を追加してから`moved_to_folder_id`の直接記録をやめる修正が必要。
