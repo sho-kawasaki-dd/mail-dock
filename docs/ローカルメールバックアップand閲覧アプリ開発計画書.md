@@ -575,7 +575,7 @@ conn.execute("PRAGMA cache_size=-64000")  # 64MB
 * `PRAGMA user_version` を採用し、`migrations/001_init.sql` から順次適用する。
 * **マイグレーション実行前に `metadata.db.bak.{version}` へ自動バックアップ**を取る。
 * `source_item_key` とプロバイダー別一意インデックスは `001_init.sql` から導入する。Phase 1の `002_sync_cursor.sql` で二カーソルとUIDVALIDITY別失敗管理を追加し、`003_pst_import.sql`（Phase 4.5）で `pst_imports` / `pst_import_items` を追加する。`remote_state='no_remote'` はCHECK制約を置かずアプリ側で検証する。
-* Phase 5（Gmail対応）では「1通が複数ラベルに属する」ため、`messages.folder_id` を `message_folders` 中間テーブルへ移行する想定。この移行計画を最初からマイグレーション履歴に織り込んでおく。
+* Phase 5.2（Gmail対応）では「1通が複数ラベルに属する」ため、`messages.folder_id` を `message_folders` 中間テーブルへ移行する想定。この移行計画を最初からマイグレーション履歴に織り込んでおく。
 
 **多重起動防止とスタールロックの検出**
 
@@ -1444,7 +1444,7 @@ mail-dock本体は **GPL-3.0-or-later** で公開する。同梱する `readpst`
 | **Phase 3: GUI基礎構築 (PySide6)** | 2週間 | **QtWebEngine を採用する（確定）。`QTextBrowser` 版の比較試作は行わない**。`QTextBrowser` ではリクエストインターセプタ・カスタムスキーム・CSPを含む5層防御を満たせないため、3ペインレイアウト、遅延ロード対応の一覧モデル、QThreadによる非同期同期、HTML表示の5層サンドボックス、添付保存を実装する。QtWebEngineの起動時間・メモリ・配布サイズはPhase 3で実測し、Phase 4のパッケージング判断へ渡す |
 | **Phase 4: 統合 & 例外処理** | 1〜2週間 | サーバー削除の安全装置一式、ゴミ箱・purge、整合性チェック・再インデックス、mboxエクスポート、ドライブ非接続・移動の例外処理、**稼働中の物理切断対策一式（5.7.1）と VHDX detach による切断シナリオテスト**、**フルスケール（5万通/100GB）での実機同期テスト**（ここで `synchronous` の最終決定を行う） |
 | **Phase 4.5: PSTアーカイブ** | 1〜2週間 | **冒頭で readpst の実PST PoC（ブロッカー判定）**。その後マイグレーション002、PST永続マニフェスト、項目状態管理、Stage A/Bと世代交代、ウィザード、機能ガード、実PST検証、readpst同梱とGPL表記 |
-| **Phase 5: （将来拡張）Gmail/OAuth2** | 随時 | `GmailOAuthFetcher` 実装、OAuth2ブラウザ認証フロー、`message_folders` 中間テーブルへのマイグレーション（ラベル対応） |
+| **Phase 5: （拡張）汎用IMAP対応 / Gmail・OAuth2** | 随時 | **Phase 5.1（汎用IMAPサーバー対応）**: ID/パスワード認証を使う任意のIMAPサーバー（お名前.com以外）への対応。`GenericImapFetcher`（`OnamaeImapFetcher`から一般化）、STARTTLS・`LOGINDISABLED`時のSASL PLAINフォールバック・カスタムCA証明書指定への対応。詳細は [実装計画書_Phase5.1_汎用IMAPサーバー対応.md](./実装計画書_Phase5.1_汎用IMAPサーバー対応.md) を参照。**Phase 5.2（Gmail/OAuth2）**: `GmailOAuthFetcher` 実装、OAuth2ブラウザ認証フロー、`message_folders` 中間テーブルへのマイグレーション（ラベル対応） |
 
 **Phase 4.5 の内訳と依存関係**
 
