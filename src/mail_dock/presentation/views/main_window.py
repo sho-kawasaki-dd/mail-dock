@@ -9,7 +9,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, cast
 
-from PySide6.QtCore import QItemSelectionModel, QModelIndex, QSettings, Qt, QUrl, Signal
+from PySide6.QtCore import QItemSelectionModel, QModelIndex, QPoint, QSettings, Qt, QUrl, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QDialog,
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QProgressBar,
     QPushButton,
     QSplitter,
@@ -57,9 +58,14 @@ from mail_dock.presentation.views.dialogs.confirmation_dialog import (
     confirm_overwrite,
     confirm_save_executable,
 )
+from mail_dock.presentation.views.dialogs.delete_remote_dialog import (
+    DeleteConfirmationDialog,
+    DeleteDryRunDialog,
+)
 from mail_dock.presentation.views.dialogs.integrity_dialog import IntegrityDialog
 from mail_dock.presentation.views.dialogs.settings_dialog import SettingsDialog
 from mail_dock.presentation.views.message_list import MessageListSearchBar, MessageListView
+from mail_dock.usecases.delete_remote import DeleteDryRunResult, DeleteResult
 from mail_dock.usecases.reindex import ReindexResult
 from mail_dock.usecases.sync_folders import FolderRefreshResult
 from mail_dock.usecases.sync_mail import SyncOptions, SyncProgress, SyncResult
@@ -72,6 +78,9 @@ class _StorageWriteGate:
 
     def is_write_allowed(self) -> bool:
         return self.state is StorageState.ATTACHED
+
+    def is_remote_delete_allowed(self) -> bool:
+        return self.is_write_allowed()
 
 
 class MainWindow(QMainWindow):
@@ -241,6 +250,8 @@ class MainWindow(QMainWindow):
         self.refresh_folders_action = QAction(strings.MAIN_TOOLBAR_REFRESH_FOLDERS, self)
         self.settings_action = QAction(strings.MAIN_TOOLBAR_SETTINGS, self)
         self.export_eml_action = QAction(strings.MAIN_MENU_EXPORT_EML, self)
+        self.delete_remote_action = QAction(strings.MAIN_MENU_DELETE_REMOTE, self)
+        self.delete_remote_action.setEnabled(False)
         self.restore_trash_action = QAction(strings.MAIN_MENU_RESTORE_TRASH, self)
         self.purge_trash_action = QAction(strings.MAIN_MENU_PURGE_TRASH, self)
         self.restore_trash_action.setEnabled(False)
@@ -264,12 +275,14 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         toolbar.addAction(self.settings_action)
         toolbar.addSeparator()
+        toolbar.addAction(self.delete_remote_action)
         toolbar.addAction(self.restore_trash_action)
         toolbar.addAction(self.purge_trash_action)
         self.addToolBar(toolbar)
 
         file_menu = self.menuBar().addMenu(strings.MAIN_MENU_FILE)
         file_menu.addAction(self.export_eml_action)
+        file_menu.addAction(self.delete_remote_action)
         file_menu.addAction(self.restore_trash_action)
         file_menu.addAction(self.purge_trash_action)
         file_menu.addSeparator()
@@ -293,6 +306,7 @@ class MainWindow(QMainWindow):
         self.refresh_folders_action.triggered.connect(self._refresh_selected_account)
         self.settings_action.triggered.connect(self.settings_requested)
         self.export_eml_action.triggered.connect(self._export_current_message)
+        self.delete_remote_action.triggered.connect(self._start_remote_delete)
         self.restore_trash_action.triggered.connect(self._restore_selected_from_trash)
         self.purge_trash_action.triggered.connect(self._purge_selected_from_trash)
         self.thread_view_action.triggered.connect(self.detail_view.request_thread)
@@ -305,6 +319,9 @@ class MainWindow(QMainWindow):
         self.storage_switch_action.triggered.connect(self._request_storage_switch)
         self.storage_setup_action.triggered.connect(self._request_storage_setup)
         self.storage_detach_action.triggered.connect(self._request_storage_detach)
+        self.message_list_view.customContextMenuRequested.connect(
+            self._show_message_list_context_menu
+        )
 
     def _build_status_bar(self) -> None:
         status = QStatusBar(self)
@@ -535,7 +552,10 @@ class MainWindow(QMainWindow):
         self.message_list_viewmodel.request_busy_changed.connect(self._set_query_busy)
         self.message_list_viewmodel.message_selected.connect(self._show_selected_message)
         self.message_list_viewmodel.selection_changed.connect(
-            lambda _message_id: self._update_trash_actions()
+            lambda _message_id: self._update_message_actions()
+        )
+        self.message_list_view.selectionModel().selectionChanged.connect(
+            lambda _selected, _deselected: self._update_message_actions()
         )
         self.message_table_model.rowsInserted.connect(self._update_message_count)
         self.message_table_model.modelReset.connect(self._update_message_count)
@@ -552,6 +572,8 @@ class MainWindow(QMainWindow):
         self.sync_worker.file_result.connect(self._show_file_result)
         self.sync_worker.trash_result.connect(self._show_trash_result)
         self.sync_worker.purge_result.connect(self._show_purge_result)
+        self.sync_worker.delete_dry_run_result.connect(self._show_delete_dry_run_result)
+        self.sync_worker.remote_delete_result.connect(self._show_remote_delete_result)
         self.verify_worker.verify_result.connect(self._refresh_after_integrity_result)
 
         self._cancel_button.clicked.connect(self._cancel_current_operation)
@@ -559,6 +581,7 @@ class MainWindow(QMainWindow):
         load_folder_tree = getattr(self.sync_worker, "load_folder_tree", None)
         if callable(load_folder_tree):
             load_folder_tree()
+        self._update_message_actions()
 
     def _update_message_count(self, *_args: object) -> None:
         self._count_label.setText(
@@ -596,7 +619,26 @@ class MainWindow(QMainWindow):
         selected_filter = self.folder_tree_model.filter_for_index(current)
         if selected_filter is not None:
             self.message_list_viewmodel.set_filters(selected_filter)
+        self._update_message_actions()
+
+    def _selected_message_ids(self) -> tuple[int, ...]:
+        selection_model = self.message_list_view.selectionModel()
+        if selection_model is None:
+            return ()
+        items = self.message_table_model.items
+        ids = {
+            items[index.row()].id
+            for index in selection_model.selectedRows()
+            if 0 <= index.row() < len(items)
+        }
+        if ids:
+            return tuple(sorted(ids))
+        selected_id = self.message_list_viewmodel.selected_message_id
+        return (selected_id,) if selected_id is not None else ()
+
+    def _update_message_actions(self) -> None:
         self._update_trash_actions()
+        self._update_remote_delete_action()
 
     def _update_trash_actions(self) -> None:
         selected_id = self.message_list_viewmodel.selected_message_id
@@ -613,6 +655,68 @@ class MainWindow(QMainWindow):
         )
         self.restore_trash_action.setEnabled(enabled)
         self.purge_trash_action.setEnabled(enabled)
+
+    def _remote_delete_mode(self) -> str:
+        configured = getattr(getattr(self.context, "settings", None), "remote_delete_mode", "trash")
+        return "expunge" if configured in {"expunge", "permanent"} else "trash"
+
+    def _remote_trash_folder_is_known(self) -> bool:
+        settings = getattr(self.context, "settings", None)
+        configured = getattr(settings, "remote_trash_folder", None)
+        detected = getattr(self.context, "remote_trash_folder", None)
+        return any(
+            isinstance(value, str) and bool(value.strip()) for value in (configured, detected)
+        )
+
+    def _update_remote_delete_action(self) -> None:
+        selected = bool(self._selected_message_ids())
+        if self._storage_write_gate.state is not StorageState.ATTACHED:
+            enabled = False
+            reason = strings.REMOTE_DELETE_DISABLED_STORAGE
+        elif self._file_token is not None:
+            enabled = False
+            reason = strings.REMOTE_DELETE_DISABLED_BUSY
+        elif not selected:
+            enabled = False
+            reason = strings.REMOTE_DELETE_DISABLED_NO_SELECTION
+        elif self._remote_delete_mode() == "trash" and not self._remote_trash_folder_is_known():
+            enabled = False
+            reason = strings.REMOTE_DELETE_DISABLED_NO_TRASH
+        else:
+            enabled = True
+            reason = ""
+        self.delete_remote_action.setEnabled(enabled)
+        self.delete_remote_action.setToolTip(reason)
+
+    def _show_message_list_context_menu(self, position: object) -> None:
+        if not isinstance(position, QPoint):
+            return
+        index = self.message_list_view.indexAt(position)
+        selection_model = self.message_list_view.selectionModel()
+        if (
+            index.isValid()
+            and selection_model is not None
+            and not selection_model.isSelected(index)
+        ):
+            selection_model.setCurrentIndex(
+                index,
+                QItemSelectionModel.SelectionFlag.ClearAndSelect
+                | QItemSelectionModel.SelectionFlag.Rows,
+            )
+        menu = QMenu(self.message_list_view)
+        menu.addAction(self.delete_remote_action)
+        menu.exec(self.message_list_view.viewport().mapToGlobal(position))
+
+    def _start_remote_delete(self) -> None:
+        message_ids = self._selected_message_ids()
+        if not message_ids or not self.delete_remote_action.isEnabled():
+            return
+        self._file_token = self.sync_worker.dry_run_remote_delete(
+            message_ids,
+            self._storage_write_gate,
+        )
+        self._status_label.setText(strings.STATUS_REMOTE_DELETE_DRY_RUN)
+        self._update_remote_delete_action()
 
     def _restore_selected_from_trash(self) -> None:
         selected_id = self.message_list_viewmodel.selected_message_id
@@ -809,9 +913,15 @@ class MainWindow(QMainWindow):
             self._pending_attachment_request = None
             self._pending_attachment_plan = None
             self._status_label.setText(notification.message)
-        elif notification.operation in {"restore_from_trash", "purge"}:
+        elif notification.operation in {
+            "restore_from_trash",
+            "purge",
+            "remote_delete_dry_run",
+            "remote_delete",
+        }:
             self._file_token = None
             self._status_label.setText(notification.message)
+            self._update_message_actions()
 
     def _build_verify_worker(self) -> VerifyWorker:
         manifest_reader_factory = getattr(self.context, "create_manifest_reader_all", None)
@@ -904,6 +1014,52 @@ class MainWindow(QMainWindow):
         self._status_label.setText(
             strings.STATUS_TRASH_PURGED if result.purged_ids else strings.STATUS_READY
         )
+
+    def _show_delete_dry_run_result(self, result: object) -> None:
+        if not isinstance(result, DeleteDryRunResult):
+            return
+        self._file_token = None
+        self._update_remote_delete_action()
+        if not result.candidates:
+            self._status_label.setText(strings.STATUS_REMOTE_DELETE_NO_CANDIDATES)
+            if result.exclusions:
+                DeleteDryRunDialog(result, self).exec()
+            return
+        self._status_label.setText(
+            strings.STATUS_REMOTE_DELETE_READY.format(
+                count=result.candidate_count,
+                size=result.total_size_bytes,
+            )
+        )
+        if DeleteDryRunDialog(result, self).exec() != QDialog.DialogCode.Accepted:
+            return
+        if DeleteConfirmationDialog(result, self).exec() != QDialog.DialogCode.Accepted:
+            return
+        settings = getattr(self.context, "settings", None)
+        batch_limit = getattr(settings, "delete_batch_limit", 1000)
+        self._file_token = self.sync_worker.execute_remote_delete(
+            result,
+            self._storage_write_gate,
+            mode=self._remote_delete_mode(),
+            delete_batch_limit=batch_limit,
+        )
+        self._status_label.setText(strings.STATUS_LOADING)
+        self._update_remote_delete_action()
+
+    def _show_remote_delete_result(self, result: object) -> None:
+        if not isinstance(result, DeleteResult):
+            return
+        self._file_token = None
+        self.message_list_viewmodel.select_message(None)
+        self.message_table_model.reload()
+        self._status_label.setText(
+            strings.STATUS_REMOTE_DELETE_RESULT.format(
+                completed=result.completed_count,
+                uncertain=result.uncertain_count,
+                skipped=result.skipped_count,
+            )
+        )
+        self._update_message_actions()
 
     def _handle_attachment_plan(self, plan: AttachmentSavePlan) -> None:
         request = self._pending_attachment_request

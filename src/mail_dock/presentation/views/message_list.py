@@ -256,6 +256,7 @@ class MessageListView(QTableView):
         self._thread_worker = worker or cast(_ThreadQueryWorker, model.worker)
         self._thread_request_id: int | None = None
         self._configure_table()
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.setModel(model)
         self.selectionModel().currentRowChanged.connect(self._selection_changed)
         self._thread_worker.result.connect(self._thread_result_received)
@@ -298,7 +299,7 @@ class MessageListView(QTableView):
 
     def _configure_table(self) -> None:
         self.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
-        self.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        self.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
         self.setSortingEnabled(False)
         self.setWordWrap(False)
         self.setTextElideMode(Qt.TextElideMode.ElideRight)

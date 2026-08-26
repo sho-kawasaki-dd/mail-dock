@@ -28,6 +28,12 @@ from mail_dock.domain.ports import (
 from mail_dock.domain.repository import BaseMessageRepository, MessageRecord
 from mail_dock.presentation.errors import user_message
 from mail_dock.presentation.threads.worker import OperationGate, Worker, _Task, operation_gate
+from mail_dock.usecases.delete_remote import (
+    DeleteDryRunResult,
+    DeleteResult,
+    dry_run,
+    execute,
+)
 from mail_dock.usecases.export_message import export_eml
 from mail_dock.usecases.save_attachment import (
     commit_attachment_save,
@@ -50,6 +56,8 @@ SyncOperation = Literal[
     "export_eml",
     "restore_from_trash",
     "purge",
+    "remote_delete_dry_run",
+    "remote_delete",
 ]
 RepositoryFactory = Callable[[], BaseMessageRepository]
 FetcherFactory = Callable[[MessageRecord], BaseMailFetcher]
@@ -96,6 +104,8 @@ class _SyncTaskResult:
         | Path
         | TrashResult
         | PurgeResult
+        | DeleteDryRunResult
+        | DeleteResult
     )
 
 
@@ -114,6 +124,8 @@ class SyncWorker(Worker):
     file_result = Signal(object)
     trash_result = Signal(object)
     purge_result = Signal(object)
+    delete_dry_run_result = Signal(object)
+    remote_delete_result = Signal(object)
 
     def __init__(
         self,
@@ -389,6 +401,83 @@ class SyncWorker(Worker):
 
         return self._submit_operation("purge", operation)
 
+    def dry_run_remote_delete(
+        self,
+        message_ids: tuple[int, ...],
+        storage_state: object,
+    ) -> CancelToken:
+        """Build a remote-delete plan without contacting the IMAP server."""
+
+        def operation(_token: CancelToken) -> _SyncTaskResult:
+            return _SyncTaskResult(
+                "remote_delete_dry_run",
+                dry_run(
+                    self._repository_factory(),
+                    self._storage_factory(),
+                    message_ids=message_ids,
+                    storage_state=cast(Any, storage_state),
+                ),
+            )
+
+        return self._submit_operation("remote_delete_dry_run", operation)
+
+    def execute_remote_delete(
+        self,
+        plan: DeleteDryRunResult,
+        storage_state: object,
+        *,
+        mode: str = "trash",
+        delete_batch_limit: int = 1000,
+    ) -> CancelToken:
+        """Execute a reviewed plan grouped by account on the write worker."""
+
+        def operation(_token: CancelToken) -> _SyncTaskResult:
+            repository = self._repository_factory()
+            candidates_by_account: dict[str, list[Any]] = {}
+            for candidate in plan.candidates:
+                candidates_by_account.setdefault(candidate.account_id, []).append(candidate)
+
+            completed_ids: list[Any] = []
+            uncertain_ids: list[Any] = []
+            skipped_ids: list[Any] = []
+            errors: list[tuple[Any, str]] = []
+            total_size_bytes = 0
+            for account_id, candidates in candidates_by_account.items():
+                account = _find_account(repository, account_id)
+                fetcher = self._fetcher_factory(account)
+                manifest = self._manifest_factory(account_id)
+                try:
+                    with fetcher:
+                        result = execute(
+                            fetcher,
+                            repository,
+                            self._storage_factory(),
+                            manifest,
+                            plan=tuple(candidates),
+                            mode=mode,
+                            storage_state=cast(Any, storage_state),
+                            delete_batch_limit=delete_batch_limit,
+                        )
+                finally:
+                    _close_manifest(manifest)
+                completed_ids.extend(result.completed_ids)
+                uncertain_ids.extend(result.uncertain_ids)
+                skipped_ids.extend(result.skipped_ids)
+                errors.extend(result.errors)
+                total_size_bytes += result.total_size_bytes
+            return _SyncTaskResult(
+                "remote_delete",
+                DeleteResult(
+                    completed_ids=tuple(completed_ids),
+                    uncertain_ids=tuple(uncertain_ids),
+                    skipped_ids=tuple(skipped_ids),
+                    errors=tuple(errors),
+                    total_size_bytes=total_size_bytes,
+                ),
+            )
+
+        return self._submit_operation("remote_delete", operation)
+
     def _message_renderer(self) -> BaseMessageRenderer:
         if self._renderer_factory is None:
             raise RuntimeError("file operations require a message renderer factory")
@@ -443,6 +532,10 @@ class SyncWorker(Worker):
             self.trash_result.emit(value.value)
         elif value.operation == "purge":
             self.purge_result.emit(value.value)
+        elif value.operation == "remote_delete_dry_run":
+            self.delete_dry_run_result.emit(value.value)
+        elif value.operation == "remote_delete":
+            self.remote_delete_result.emit(value.value)
         elif isinstance(value.value, _FolderRefreshTaskResult):
             self.folders_refreshed.emit(value.value.result)
             self.folder_tree_updated.emit(value.value.snapshot)

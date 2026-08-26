@@ -1,18 +1,27 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from PySide6.QtCore import QItemSelectionModel
 from PySide6.QtWidgets import QSplitter
 
 from mail_dock import config
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.ports import BaseEmlStorage, BaseManifestWriter
 from mail_dock.domain.repository import BaseMessageRepository
-from mail_dock.domain.search import BaseSearchRepository, MessageFilter, SearchPage
+from mail_dock.domain.search import (
+    BaseSearchRepository,
+    MessageFilter,
+    MessageSummary,
+    SearchPage,
+)
+from mail_dock.domain.storage_state import StorageState
 from mail_dock.presentation import strings
 from mail_dock.presentation.views.main_window import MainWindow
+from mail_dock.usecases.delete_remote import DeleteResult
 
 pytestmark = pytest.mark.gui
 
@@ -79,6 +88,7 @@ class _Context:
             storage_profiles={self.root_uuid: profile} if self.root_uuid else {},
         )
         self.connection_manager = None
+        self.remote_trash_folder: str | None = None
         self.encryption_declaration = (
             profile.get("encryption", "unknown") if profile is not None else "unknown"
         )
@@ -133,6 +143,29 @@ class _CredentialStore:
         return None
 
 
+def _summary(message_id: int = 1) -> MessageSummary:
+    return MessageSummary(
+        id=message_id,
+        account_id="account-1",
+        folder_id=10,
+        folder_raw_name="INBOX",
+        folder_display_name="受信箱",
+        subject=f"件名 {message_id}",
+        sender="sender@example.com",
+        date_sent=datetime(2026, 1, 2, tzinfo=UTC),
+        internal_date=None,
+        size_bytes=128,
+        has_attachment=False,
+        remote_state="present",
+        local_state="active",
+        thread_key=f"thread-{message_id}",
+        imap_flags="\\Seen",
+        moved_to_folder_display_name=None,
+        failure_class=None,
+        flags_seen_at=None,
+    )
+
+
 def test_main_window_builds_three_panes_and_prevents_sync_reentry(qtbot: Any) -> None:
     context = _Context()
     window = MainWindow(cast(Any, context))
@@ -178,6 +211,75 @@ def test_status_bar_displays_encryption_and_capability_state(qtbot: Any) -> None
     assert "unknown" in window._encryption_status_label.text()
     assert "DEGRADED" in window._storage_status_label.text()
     assert window.encryption_help_action.text() == "保管先の暗号化について"
+    window.stop_workers()
+
+
+def test_remote_delete_requires_attached_storage_trash_and_selection(qtbot: Any) -> None:
+    context = _Context(profile={"encryption": "unknown", "capability_level": "ok"})
+    context.remote_trash_folder = "Trash"
+    window = MainWindow(cast(Any, context))
+    qtbot.addWidget(window)
+    window.message_table_model.show_thread((_summary(1), _summary(2)))
+
+    assert window.message_list_view.selectionMode().name == "ExtendedSelection"
+    assert not window.delete_remote_action.isEnabled()
+    assert window.delete_remote_action.toolTip() == strings.REMOTE_DELETE_DISABLED_NO_SELECTION
+
+    selection_model = window.message_list_view.selectionModel()
+    assert selection_model is not None
+    selection_model.select(
+        window.message_table_model.index(0, 0),
+        QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
+    )
+    selection_model.select(
+        window.message_table_model.index(1, 0),
+        QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
+    )
+    window._update_message_actions()
+    assert window.delete_remote_action.isEnabled()
+
+    window._storage_write_gate.state = StorageState.DETACHED
+    window._update_message_actions()
+    assert not window.delete_remote_action.isEnabled()
+    assert window.delete_remote_action.toolTip() == strings.REMOTE_DELETE_DISABLED_STORAGE
+    window.stop_workers()
+
+
+def test_remote_delete_is_disabled_until_trash_folder_is_known(qtbot: Any) -> None:
+    context = _Context(profile={"encryption": "unknown", "capability_level": "ok"})
+    window = MainWindow(cast(Any, context))
+    qtbot.addWidget(window)
+    window.message_table_model.show_thread((_summary(),))
+    selection_model = window.message_list_view.selectionModel()
+    assert selection_model is not None
+    selection_model.select(
+        window.message_table_model.index(0, 0),
+        QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
+    )
+    window._update_message_actions()
+
+    assert not window.delete_remote_action.isEnabled()
+    assert window.delete_remote_action.toolTip() == strings.REMOTE_DELETE_DISABLED_NO_TRASH
+    window.stop_workers()
+
+
+def test_remote_delete_result_reloads_message_list(
+    qtbot: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = MainWindow(cast(Any, _Context()))
+    qtbot.addWidget(window)
+    reloads: list[bool] = []
+    monkeypatch.setattr(window.message_table_model, "reload", lambda: reloads.append(True))
+
+    window._show_remote_delete_result(DeleteResult(completed_ids=(1,)))
+
+    assert reloads == [True]
+    assert window._status_label.text() == strings.STATUS_REMOTE_DELETE_RESULT.format(
+        completed=1,
+        uncertain=0,
+        skipped=0,
+    )
     window.stop_workers()
 
 

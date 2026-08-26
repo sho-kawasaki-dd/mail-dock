@@ -86,6 +86,7 @@ def test_main_window_is_built_only_after_verification_finishes(
         (),
         {},
     )()
+    context.settings = session.settings
 
     def build_main_window() -> _Window:
         assert QThread.currentThread() is application.thread()
