@@ -357,21 +357,21 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **D-1. `usecases/trash.py` — ゴミ箱と purge**
 
-- [ ] `move_to_trash(repo, *, message_ids, now) -> TrashResult` を実装する（F-20）
-    - [ ] `local_state='trashed'`、`trashed_at` を記録する。**EMLは削除しない**
-- [ ] `restore_from_trash(repo, *, message_ids) -> TrashResult` を実装する（F-21）
-- [ ] `list_purge_candidates(repo, *, now, grace_days) -> Sequence[MessageRecord]` を実装する
-- [ ] `purge(repo, storage, manifest, *, message_ids, storage_state) -> PurgeResult` を実装する（F-22）。各段階を**再実行しても結果が変わらない冪等な状態遷移**として実装する（レビュー修正案 3.3）
-    - [ ] 1. `storage_state.is_write_allowed()` が偽なら入口で拒否する
-    - [ ] 2. 対象件数と合計サイズをログへ記録する（F-26）
-    - [ ] 3. マニフェストへ `purge_intent` を追記し **fsync** する
-    - [ ] 4. `count_path_references()` で同じ `relative_path` を参照する非purgedレコードが無いことを確認し、**最後の参照が消える場合だけ**EMLを削除する（F-23 / D-13）。EMLが既に存在しない場合は、ハッシュとintentが一致する限り削除済みとして扱う（レビュー修正案 3.3）
-    - [ ] 5. マニフェストへ `purged` を追記し **fsync** する
-    - [ ] 6. `message_contents` を削除する（トリガーでFTSからも除去される。F-24）
-    - [ ] 7. `local_state='purged'`, `relative_path=NULL` に更新する。**`messages` の行は残す**
-    - [ ] 8. `audit_log` へ `operation='local_purge'` を記録する
-- [ ] `recover_incomplete_purges(repo, storage, manifest_reader, *, storage_state) -> None` を実装する。起動時または範囲限定検証前に、対応する `purged` が存在しない `purge_intent` を列挙し、共有参照を再確認したうえで未完了部分（4〜8）を再開する（レビュー修正案 3.3）
-- [ ] `sqlite3` / PySide6 / infrastructure の具象を import しないこと
+- [x] `move_to_trash(repo, *, message_ids, now) -> TrashResult` を実装する（F-20）
+    - [x] `local_state='trashed'`、`trashed_at` を記録する。**EMLは削除しない**
+- [x] `restore_from_trash(repo, *, message_ids) -> TrashResult` を実装する（F-21）
+- [x] `list_purge_candidates(repo, *, now, grace_days) -> Sequence[MessageRecord]` を実装する
+- [x] `purge(repo, storage, manifest, *, message_ids, storage_state) -> PurgeResult` を実装する（F-22）。各段階を**再実行しても結果が変わらない冪等な状態遷移**として実装する（レビュー修正案 3.3）
+    - [x] 1. `storage_state.is_write_allowed()` が偽なら入口で拒否する
+    - [x] 2. 対象件数と合計サイズをログへ記録する（F-26）
+    - [x] 3. マニフェストへ `purge_intent` を追記し **fsync** する
+    - [x] 4. `count_path_references()` で同じ `relative_path` を参照する非purgedレコードが無いことを確認し、**最後の参照が消える場合だけ**EMLを削除する（F-23 / D-13）。EMLが既に存在しない場合は、ハッシュとintentが一致する限り削除済みとして扱う（レビュー修正案 3.3）
+    - [x] 5. マニフェストへ `purged` を追記し **fsync** する
+    - [x] 6. `message_contents` を削除する（トリガーでFTSからも除去される。F-24）
+    - [x] 7. `local_state='purged'`, `relative_path=NULL` に更新する。**`messages` の行は残す**
+    - [x] 8. `audit_log` へ `operation='local_purge'` を記録する
+- [x] `recover_incomplete_purges(repo, storage, manifest_reader, *, storage_state) -> None` を実装する。起動時または範囲限定検証前に、対応する `purged` が存在しない `purge_intent` を列挙し、共有参照を再確認したうえで未完了部分（4〜8）を再開する（レビュー修正案 3.3）
+- [x] `sqlite3` / PySide6 / infrastructure の具象を import しないこと
 
 #### **D-2. purge 実行モード（F-25 / D-14）**
 
