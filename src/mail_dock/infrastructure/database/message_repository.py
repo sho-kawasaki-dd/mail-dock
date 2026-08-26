@@ -68,6 +68,15 @@ _MESSAGE_COLUMNS = (
     "thread_key",
     "last_seen_at",
 )
+_AUDIT_COLUMNS = (
+    "occurred_at",
+    "operation",
+    "account_id",
+    "message_id",
+    "subject",
+    "size_bytes",
+    "detail",
+)
 
 
 class SqliteMessageRepository(BaseMessageRepository):
@@ -476,6 +485,125 @@ class SqliteMessageRepository(BaseMessageRepository):
             self._conn().execute(
                 "UPDATE messages SET remote_state = ?, moved_to_folder_id = ? WHERE id = ?",
                 (state, moved_to_folder_id, message_id),
+            )
+
+    def get_message(self, message_id: Any) -> MessageRecord | None:
+        with self._db_io("get message"):
+            cursor = self._conn().execute("SELECT * FROM messages WHERE id = ?", (message_id,))
+            row = cursor.fetchone()
+            return None if row is None else self._row(cursor, cast(tuple[Any, ...], row))
+
+    def list_stored_messages(self, account_id: str | None = None) -> Sequence[MessageRecord]:
+        query = "SELECT * FROM messages WHERE relative_path IS NOT NULL"
+        parameters: list[Any] = []
+        if account_id is not None:
+            query += " AND account_id = ?"
+            parameters.append(account_id)
+        query += " ORDER BY id"
+        with self._db_io("list stored messages"):
+            return self._rows(self._conn().execute(query, tuple(parameters)))
+
+    def has_message_contents(self, message_id: Any) -> bool:
+        with self._db_io("check message contents"):
+            row = (
+                self._conn()
+                .execute(
+                    "SELECT EXISTS(SELECT 1 FROM message_contents WHERE message_id = ?)",
+                    (message_id,),
+                )
+                .fetchone()
+            )
+        return bool(row and row[0])
+
+    def update_message_storage(
+        self, message_id: Any, relative_path: str | None, file_hash: str | None
+    ) -> None:
+        with self._db_io("update message storage"):
+            self._conn().execute(
+                "UPDATE messages SET relative_path = ?, file_hash = ? WHERE id = ?",
+                (relative_path, file_hash, message_id),
+            )
+
+    def record_audit(self, entry: MessageRecord) -> None:
+        values = {column: entry.get(column) for column in _AUDIT_COLUMNS}
+        if entry.get("operation") is None:
+            raise DatabaseError("Audit operation is required")
+        with self._db_io("record audit log"):
+            columns = ", ".join(column for column in _AUDIT_COLUMNS if values[column] is not None)
+            parameters = tuple(
+                values[column] for column in _AUDIT_COLUMNS if values[column] is not None
+            )
+            self._conn().execute(
+                f"INSERT INTO audit_log ({columns}) VALUES ({', '.join('?' for _ in parameters)})",
+                parameters,
+            )
+
+    def list_audit_log(self, limit: int, offset: int) -> Sequence[MessageRecord]:
+        if limit < 0 or offset < 0:
+            raise ValueError("limit and offset must be non-negative")
+        with self._db_io("list audit log"):
+            return self._rows(
+                self._conn().execute(
+                    "SELECT * FROM audit_log ORDER BY occurred_at DESC, id DESC LIMIT ? OFFSET ?",
+                    (limit, offset),
+                )
+            )
+
+    def set_local_state(self, message_id: Any, state: str, trashed_at: str | None = None) -> None:
+        with self._db_io("set local message state"):
+            self._conn().execute(
+                "UPDATE messages SET local_state = ?, trashed_at = ? WHERE id = ?",
+                (state, trashed_at, message_id),
+            )
+
+    def list_trashed(
+        self, account_id: str | None = None, older_than: str | None = None
+    ) -> Sequence[MessageRecord]:
+        query = "SELECT * FROM messages WHERE local_state = 'trashed'"
+        parameters: list[Any] = []
+        if account_id is not None:
+            query += " AND account_id = ?"
+            parameters.append(account_id)
+        if older_than is not None:
+            query += " AND trashed_at < ?"
+            parameters.append(older_than)
+        query += " ORDER BY trashed_at, id"
+        with self._db_io("list trashed messages"):
+            return self._rows(self._conn().execute(query, tuple(parameters)))
+
+    def count_path_references(
+        self, account_id: str, relative_path: str, exclude_message_id: Any
+    ) -> int:
+        with self._db_io("count message path references"):
+            row = (
+                self._conn()
+                .execute(
+                    "SELECT COUNT(*) FROM messages "
+                    "WHERE account_id = ? AND relative_path = ? AND id != ? "
+                    "AND local_state != 'purged'",
+                    (account_id, relative_path, exclude_message_id),
+                )
+                .fetchone()
+            )
+        return int(row[0]) if row else 0
+
+    def delete_message_contents(self, message_id: Any) -> None:
+        with self._db_io("delete message contents"):
+            self._conn().execute("DELETE FROM message_contents WHERE message_id = ?", (message_id,))
+
+    def get_app_state(self, key: str) -> str | None:
+        with self._db_io("get application state"):
+            row = (
+                self._conn().execute("SELECT value FROM app_state WHERE key = ?", (key,)).fetchone()
+            )
+        return None if row is None else cast(str | None, row[0])
+
+    def set_app_state(self, key: str, value: str) -> None:
+        with self._db_io("set application state"):
+            self._conn().execute(
+                "INSERT INTO app_state (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
             )
 
     def record_failure(

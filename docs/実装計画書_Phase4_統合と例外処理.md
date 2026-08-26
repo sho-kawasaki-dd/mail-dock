@@ -204,17 +204,17 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **A-5. リポジトリの監査・状態更新メソッド追加**
 
-- [ ] `BaseMessageRepository` に以下を追加する（**目的を超えたメソッドを足さない**という制約を守り、Phase 4 のユースケースが必要とする最小限に限定する）
-    - [ ] `record_audit(entry) -> None`
-    - [ ] `list_audit_log(limit, offset) -> Sequence[MessageRecord]`
-    - [ ] `set_local_state(message_id, state, trashed_at=None) -> None`
-    - [ ] `list_trashed(account_id=None, older_than=None) -> Sequence[MessageRecord]`
-    - [ ] `count_path_references(account_id, relative_path, exclude_message_id) -> int`（purged を除外して数える）
-    - [ ] `delete_message_contents(message_id) -> None`
-    - [ ] `get_app_state(key) -> str | None` / `set_app_state(key, value) -> None`
-    - [ ] 再構築（C-2）が必要とする最小限のメソッド: ID指定のメッセージ取得・保存パスを持つメッセージの列挙・`message_contents` 存在確認・検証結果を単一ライターへ渡すための状態更新・再構築用のアカウント/フォルダ/メッセージ投入（レビュー修正案 3.5。再構築処理そのものはinfrastructure側の再構築コーディネータが担当し、usecaseから直接SQLiteファイルを操作しない）
-- [ ] `SqliteMessageRepository` に実装する
-- [ ] `tests/support/in_memory_repository.py` に同メソッド群を追加する
+- [x] `BaseMessageRepository` に以下を追加する（**目的を超えたメソッドを足さない**という制約を守り、Phase 4 のユースケースが必要とする最小限に限定する）
+    - [x] `record_audit(entry) -> None`
+    - [x] `list_audit_log(limit, offset) -> Sequence[MessageRecord]`
+    - [x] `set_local_state(message_id, state, trashed_at=None) -> None`
+    - [x] `list_trashed(account_id=None, older_than=None) -> Sequence[MessageRecord]`
+    - [x] `count_path_references(account_id, relative_path, exclude_message_id) -> int`（purged を除外して数える）
+    - [x] `delete_message_contents(message_id) -> None`
+    - [x] `get_app_state(key) -> str | None` / `set_app_state(key, value) -> None`
+    - [x] 再構築（C-2）が必要とする最小限のメソッド: ID指定のメッセージ取得・保存パスを持つメッセージの列挙・`message_contents` 存在確認・検証結果を単一ライターへ渡すための状態更新・再構築用のアカウント/フォルダ/メッセージ投入（レビュー修正案 3.5。再構築処理そのものはinfrastructure側の再構築コーディネータが担当し、usecaseから直接SQLiteファイルを操作しない）
+- [x] `SqliteMessageRepository` に実装する
+- [x] `tests/support/in_memory_repository.py` に同メソッド群を追加する
 
 #### **A-6. アカウント/フォルダ snapshot の書き込みとバックフィル（レビュー修正案 9.1）**
 

@@ -110,6 +110,50 @@ class BaseMessageRepository(ABC):
     ) -> None: ...
 
     @abstractmethod
+    def get_message(self, message_id: Any) -> MessageRecord | None: ...
+
+    @abstractmethod
+    def list_stored_messages(self, account_id: str | None = None) -> Sequence[MessageRecord]: ...
+
+    @abstractmethod
+    def has_message_contents(self, message_id: Any) -> bool: ...
+
+    @abstractmethod
+    def update_message_storage(
+        self, message_id: Any, relative_path: str | None, file_hash: str | None
+    ) -> None: ...
+
+    @abstractmethod
+    def record_audit(self, entry: MessageRecord) -> None: ...
+
+    @abstractmethod
+    def list_audit_log(self, limit: int, offset: int) -> Sequence[MessageRecord]: ...
+
+    @abstractmethod
+    def set_local_state(
+        self, message_id: Any, state: str, trashed_at: str | None = None
+    ) -> None: ...
+
+    @abstractmethod
+    def list_trashed(
+        self, account_id: str | None = None, older_than: str | None = None
+    ) -> Sequence[MessageRecord]: ...
+
+    @abstractmethod
+    def count_path_references(
+        self, account_id: str, relative_path: str, exclude_message_id: Any
+    ) -> int: ...
+
+    @abstractmethod
+    def delete_message_contents(self, message_id: Any) -> None: ...
+
+    @abstractmethod
+    def get_app_state(self, key: str) -> str | None: ...
+
+    @abstractmethod
+    def set_app_state(self, key: str, value: str) -> None: ...
+
+    @abstractmethod
     def record_failure(
         self,
         account_id: str,

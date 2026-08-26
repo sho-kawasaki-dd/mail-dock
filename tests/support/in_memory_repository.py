@@ -19,6 +19,8 @@ class InMemoryMessageRepository(BaseMessageRepository):
         self.messages: dict[int, dict[str, Any]] = {}
         self.contents: dict[int, dict[str, str | None]] = {}
         self.failures: dict[tuple[str, int, int, int], dict[str, Any]] = {}
+        self.audit_log: list[dict[str, Any]] = []
+        self.app_state: dict[str, str] = {}
         self.cursors: dict[int, dict[str, Any]] = {}
         self.stored_eml: dict[tuple[str, str], StoredEml] = {}
         self.batch_open = False
@@ -272,6 +274,100 @@ class InMemoryMessageRepository(BaseMessageRepository):
         item = self.messages[int(message_id)]
         item["remote_state"] = state
         item["moved_to_folder_id"] = moved_to_folder_id
+
+    def get_message(self, message_id: Any) -> MessageRecord | None:
+        item = self.messages.get(int(message_id))
+        return None if item is None else self._copy(item)
+
+    def list_stored_messages(self, account_id: str | None = None) -> Sequence[MessageRecord]:
+        return [
+            self._copy(item)
+            for item in self.messages.values()
+            if item.get("relative_path") is not None
+            and (account_id is None or item.get("account_id") == account_id)
+        ]
+
+    def has_message_contents(self, message_id: Any) -> bool:
+        return int(message_id) in self.contents
+
+    def update_message_storage(
+        self, message_id: Any, relative_path: str | None, file_hash: str | None
+    ) -> None:
+        item = self.messages[int(message_id)]
+        previous_hash = item.get("file_hash")
+        if isinstance(previous_hash, str):
+            self.stored_eml.pop((str(item["account_id"]), previous_hash), None)
+        item["relative_path"] = relative_path
+        item["file_hash"] = file_hash
+        if isinstance(relative_path, str) and isinstance(file_hash, str):
+            self.stored_eml[(str(item["account_id"]), file_hash)] = StoredEml(
+                relative_path=relative_path,
+                file_hash=file_hash,
+                size_bytes=int(item.get("size_bytes", 0)),
+            )
+
+    def record_audit(self, entry: MessageRecord) -> None:
+        if entry.get("operation") is None:
+            raise ValueError("Audit operation is required")
+        self.audit_log.append(self._copy(entry))
+
+    def list_audit_log(self, limit: int, offset: int) -> Sequence[MessageRecord]:
+        if limit < 0 or offset < 0:
+            raise ValueError("limit and offset must be non-negative")
+        records = sorted(
+            enumerate(self.audit_log),
+            key=lambda indexed: (str(indexed[1].get("occurred_at", "")), indexed[0]),
+            reverse=True,
+        )
+        return [self._copy(item) for _, item in records[offset : offset + limit]]
+
+    def set_local_state(self, message_id: Any, state: str, trashed_at: str | None = None) -> None:
+        item = self.messages[int(message_id)]
+        item["local_state"] = state
+        item["trashed_at"] = trashed_at
+
+    def list_trashed(
+        self, account_id: str | None = None, older_than: str | None = None
+    ) -> Sequence[MessageRecord]:
+        items = [
+            item
+            for item in self.messages.values()
+            if item.get("local_state") == "trashed"
+            and (account_id is None or item.get("account_id") == account_id)
+            and (older_than is None or str(item.get("trashed_at", "")) < older_than)
+        ]
+        return [
+            self._copy(item)
+            for item in sorted(
+                items,
+                key=lambda item: (
+                    item.get("trashed_at") is None,
+                    str(item.get("trashed_at", "")),
+                    item["id"],
+                ),
+            )
+        ]
+
+    def count_path_references(
+        self, account_id: str, relative_path: str, exclude_message_id: Any
+    ) -> int:
+        return sum(
+            1
+            for message_id, item in self.messages.items()
+            if message_id != int(exclude_message_id)
+            and item.get("account_id") == account_id
+            and item.get("relative_path") == relative_path
+            and item.get("local_state") != "purged"
+        )
+
+    def delete_message_contents(self, message_id: Any) -> None:
+        self.contents.pop(int(message_id), None)
+
+    def get_app_state(self, key: str) -> str | None:
+        return self.app_state.get(key)
+
+    def set_app_state(self, key: str, value: str) -> None:
+        self.app_state[key] = value
 
     def record_failure(
         self,
