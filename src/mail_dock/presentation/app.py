@@ -315,6 +315,7 @@ class _GuiRuntime:
         self.settings = session.settings
         context.storage_root_switch_handler = self.switch_root
         context.storage_setup_handler = self.start_setup
+        context.storage_detach_handler = self.safe_detach
         context.window_created_handler = self._window_created
 
     def start(self, root: Path) -> AppContext:
@@ -387,6 +388,37 @@ class _GuiRuntime:
         self.context = None
         self.session = None
         self.verification_thread = None
+
+    def safe_detach(self) -> None:
+        """Release the active root in the order required for safe removal."""
+
+        session = self.session
+        window = self.window
+        if session is None or window is None:
+            return
+        try:
+            stop_workers = getattr(window, "stop_workers", None)
+            if callable(stop_workers):
+                stop_workers()
+            if self.storage_monitor is not None:
+                self.storage_monitor.stop()
+            checkpoint = getattr(session, "checkpoint_for_detach", None)
+            if callable(checkpoint):
+                checkpoint()
+            detail_view = getattr(window, "detail_view", None)
+            close_detail = getattr(detail_view, "close", None)
+            if callable(close_detail):
+                close_detail()
+            session.__exit__(None, None, None)
+        except BaseException as error:
+            LOGGER.exception("Safe storage detach failed")
+            _show_error(error)
+            return
+
+        if self.storage_monitor is not None:
+            self.storage_monitor.mark_detached_by_user()
+        self.session = None
+        self.context = None
 
     def switch_root(self, root: Path) -> None:
         result = probe(root, None)

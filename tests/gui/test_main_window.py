@@ -190,6 +190,8 @@ def test_storage_menu_and_status_bar_display_active_root(qtbot: Any) -> None:
     assert window.storage_info_action.text() == strings.MAIN_MENU_STORAGE_INFO
     assert window.storage_switch_action.text() == strings.MAIN_MENU_STORAGE_SWITCH
     assert window.storage_setup_action.text() == strings.MAIN_MENU_STORAGE_SETUP
+    assert window.storage_detach_action.text() == strings.MAIN_MENU_STORAGE_DETACH
+    assert not window.storage_detach_action.isEnabled()
     assert str(context.storage_root) in window._storage_root_label.text()
     assert window._storage_root_label.toolTip() == str(context.storage_root)
     window.stop_workers()

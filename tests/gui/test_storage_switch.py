@@ -91,6 +91,16 @@ def test_switch_releases_old_session_before_starting_new_one(
         "initialize_root",
         lambda _root: SimpleNamespace(root_uuid="new-root"),
     )
+
+    def start_session(
+        settings: config.AppConfig,
+        root: Path,
+    ) -> tuple[_ReplacementSession, _WindowContext]:
+        session = _ReplacementSession(settings, root)
+        session.__enter__()
+        return session, _WindowContext(root, events)
+
+    monkeypatch.setattr(app, "_start_session", start_session)
     shown: list[str] = []
     cast(Any, runtime).verify_and_show = lambda: shown.append("shown")
 
@@ -156,6 +166,13 @@ def test_switch_persists_new_root_identity_and_profile(
         "initialize_root",
         lambda _root: SimpleNamespace(root_uuid="new-root"),
     )
+
+    def start_session(settings: config.AppConfig, root: Path) -> tuple[_ProfileSession, _Context]:
+        session = _ProfileSession(settings, root)
+        session.__enter__()
+        return session, _Context(session, settings)
+
+    monkeypatch.setattr(app, "_start_session", start_session)
     cast(Any, runtime).verify_and_show = lambda: None
 
     runtime._replace_with_root(new_root)

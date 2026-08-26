@@ -76,6 +76,22 @@ class _CredentialStore:
         self.passwords.pop(account_id, None)
 
 
+class _ManifestWriter:
+    def append(self, _event: object) -> None:
+        return None
+
+    def flush_and_sync(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+
+class _ManifestReader:
+    def read_all_events(self) -> tuple[object, ...]:
+        return ()
+
+
 class _AccountEditContext:
     def __init__(self, repository: _AccountRepository, credential_store: _CredentialStore) -> None:
         self.connection_manager = None
@@ -84,6 +100,12 @@ class _AccountEditContext:
 
     def create_message_repository(self) -> _AccountRepository:
         return self._repository
+
+    def create_manifest_writer(self, _account_id: str) -> _ManifestWriter:
+        return _ManifestWriter()
+
+    def create_manifest_reader(self, _account_id: str) -> _ManifestReader:
+        return _ManifestReader()
 
 
 def _editable_account() -> dict[str, object]:

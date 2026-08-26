@@ -74,11 +74,13 @@ class MainWindow(QMainWindow):
         *,
         on_storage_root_switch: Callable[[Path], None] | None = None,
         on_storage_setup: Callable[[Path | None], None] | None = None,
+        on_storage_detach: Callable[[], None] | None = None,
     ) -> None:
         super().__init__()
         self.context = context
         self._on_storage_root_switch = on_storage_root_switch
         self._on_storage_setup = on_storage_setup
+        self._on_storage_detach = on_storage_detach
         self.setObjectName("mainWindow")
         self.setWindowTitle(strings.MAIN_WINDOW_TITLE)
         self._workers_stopped = False
@@ -223,6 +225,8 @@ class MainWindow(QMainWindow):
         self.storage_info_action = QAction(strings.MAIN_MENU_STORAGE_INFO, self)
         self.storage_switch_action = QAction(strings.MAIN_MENU_STORAGE_SWITCH, self)
         self.storage_setup_action = QAction(strings.MAIN_MENU_STORAGE_SETUP, self)
+        self.storage_detach_action = QAction(strings.MAIN_MENU_STORAGE_DETACH, self)
+        self.storage_detach_action.setEnabled(self._on_storage_detach is not None)
 
         toolbar = QToolBar(strings.APP_NAME, self)
         toolbar.setObjectName("mainToolBar")
@@ -244,6 +248,8 @@ class MainWindow(QMainWindow):
         storage_menu.addAction(self.storage_info_action)
         storage_menu.addAction(self.storage_switch_action)
         storage_menu.addAction(self.storage_setup_action)
+        storage_menu.addSeparator()
+        storage_menu.addAction(self.storage_detach_action)
         help_menu = self.menuBar().addMenu(strings.MAIN_MENU_HELP)
         help_menu.addAction(self.open_log_folder_action)
         self.encryption_help_action = QAction(strings.MAIN_MENU_HELP_ENCRYPTION, self)
@@ -261,6 +267,7 @@ class MainWindow(QMainWindow):
         self.storage_info_action.triggered.connect(self._show_storage_root)
         self.storage_switch_action.triggered.connect(self._request_storage_switch)
         self.storage_setup_action.triggered.connect(self._request_storage_setup)
+        self.storage_detach_action.triggered.connect(self._request_storage_detach)
 
     def _build_status_bar(self) -> None:
         status = QStatusBar(self)
@@ -360,6 +367,10 @@ class MainWindow(QMainWindow):
         ):
             return
         self._on_storage_setup(None)
+
+    def _request_storage_detach(self) -> None:
+        if self._on_storage_detach is not None:
+            self._on_storage_detach()
 
     def set_storage_encryption(self, state: object) -> None:
         """Display the user-declared storage encryption state."""
@@ -800,18 +811,35 @@ class MainWindow(QMainWindow):
         self._storage_status_label.setText(strings.ERROR_STORAGE_DETACHED)
         self.sync_action.setEnabled(False)
         self.refresh_folders_action.setEnabled(False)
+        storage_detach_action = getattr(self, "storage_detach_action", None)
+        if storage_detach_action is not None:
+            storage_detach_action.setEnabled(False)
+
+    def _show_storage_detached_by_user(self) -> None:
+        self._storage_detached_banner.setText(strings.BANNER_STORAGE_DETACHED_BY_USER)
+        self._storage_detached_banner.setVisible(True)
+        self._storage_status_label.setText(strings.STATUS_STORAGE_DETACHED_BY_USER)
+        self.sync_action.setEnabled(False)
+        self.refresh_folders_action.setEnabled(False)
+        storage_detach_action = getattr(self, "storage_detach_action", None)
+        if storage_detach_action is not None:
+            storage_detach_action.setEnabled(False)
 
     def set_storage_state(self, state: object) -> None:
         """Reflect the monitor's lifecycle state in the main window."""
 
         if state in {StorageState.DETACHED, StorageState.DETACHED_BY_USER}:
-            self._show_storage_detached(state)
+            if state is StorageState.DETACHED_BY_USER:
+                self._show_storage_detached_by_user()
+            else:
+                self._show_storage_detached(state)
             return
         if state is StorageState.ATTACHED:
             self._storage_detached_banner.setVisible(False)
             self._storage_status_label.setText(strings.STATUS_STORAGE_CONNECTED)
             self.sync_action.setEnabled(self._sync_token is None)
             self.refresh_folders_action.setEnabled(self._folder_refresh_token is None)
+            self.storage_detach_action.setEnabled(self._on_storage_detach is not None)
 
     def _show_settings(self) -> None:
         dialog = SettingsDialog(self.context, self)

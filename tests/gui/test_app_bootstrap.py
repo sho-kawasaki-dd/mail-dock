@@ -113,6 +113,15 @@ class _FakeThread:
 _APPLICATION = _FakeApplication()
 
 
+def _start_fake_session(
+    settings: config.AppConfig,
+    root: Path,
+) -> tuple[_FakeSession, _FakeContext]:
+    session = _FakeSession(settings, root)
+    session.__enter__()
+    return session, _FakeContext(session, settings)
+
+
 def test_run_gui_starts_session_only_after_root_confirmation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -120,26 +129,42 @@ def test_run_gui_starts_session_only_after_root_confirmation(
     _FakeContext.instances.clear()
     _FakeWizard.events.clear()
     window = _FakeWindow()
+    errors: list[BaseException] = []
 
     monkeypatch.setattr(app, "QApplication", _FakeApplication)
     monkeypatch.setattr(app, "register_schemes", lambda: None)
+    monkeypatch.setattr(app, "_show_error", errors.append)
     monkeypatch.setattr(app, "_available_root", lambda _settings, _requested: None)
     monkeypatch.setattr(app, "StorageSession", _FakeSession)
     monkeypatch.setattr(app, "AppContext", _FakeContext)
     monkeypatch.setattr(app, "SetupWizard", _FakeWizard)
     monkeypatch.setattr(
         app,
+        "_probe_setup_root",
+        lambda settings, _root, _encryption: (settings, {}),
+    )
+    monkeypatch.setattr(
+        app,
+        "_commit_setup_root",
+        lambda settings, _root, _result: settings,
+    )
+
+    monkeypatch.setattr(app, "_start_session", _start_fake_session)
+    monkeypatch.setattr(
+        app,
         "_start_verification",
         lambda _application, _session, _context: (_FakeThread(), {"error": None, "window": window}),
     )
 
-    assert app.run_gui(config.AppConfig()) == 0
+    result = app.run_gui(config.AppConfig())
+    assert result == 0, errors
     assert _FakeWizard.events == ["wizard", "confirm"]
     assert len(_FakeSession.instances) == 1
     assert _FakeSession.instances[0].enter_calls == 1
     assert _FakeSession.instances[0].exit_calls == 1
     assert _FakeContext.instances[0].save_calls == 1
     assert window.stop_calls == 1
+    assert errors == []
 
 
 def test_setup_root_probe_does_not_initialize_or_persist_root(
@@ -206,10 +231,35 @@ def test_run_gui_releases_a_partially_started_session_once(
     monkeypatch.setattr(app, "_available_root", lambda _settings, _requested: None)
     monkeypatch.setattr(app, "StorageSession", _FakeSession)
     monkeypatch.setattr(app, "SetupWizard", _FakeWizard)
+    monkeypatch.setattr(
+        app,
+        "_probe_setup_root",
+        lambda settings, _root, _encryption: (settings, {}),
+    )
+    monkeypatch.setattr(
+        app,
+        "_commit_setup_root",
+        lambda settings, _root, _result: settings,
+    )
+
+    def start_partial_session(
+        settings: config.AppConfig,
+        root: Path,
+    ) -> tuple[_FakeSession, _FakeContext]:
+        session = _FakeSession(settings, root)
+        try:
+            session.__enter__()
+        except BaseException as error:
+            session.__exit__(type(error), error, error.__traceback__)
+            raise
+        return session, _FakeContext(session, settings)
+
+    monkeypatch.setattr(app, "_start_session", start_partial_session)
     monkeypatch.setattr(app, "_show_error", errors.append)
 
     try:
-        assert app.run_gui(config.AppConfig()) == 1
+        result = app.run_gui(config.AppConfig())
+        assert result == 1, errors
     finally:
         _FakeSession.fail_enter = False
 
@@ -233,6 +283,7 @@ def test_run_gui_acknowledges_unsupported_existing_root_once_and_recreates_sessi
     monkeypatch.setattr(app, "_available_root", lambda _settings, _requested: Path("/attached"))
     monkeypatch.setattr(app, "StorageSession", _FakeSession)
     monkeypatch.setattr(app, "AppContext", _FakeContext)
+    monkeypatch.setattr(app, "_start_session", _start_fake_session)
 
     def acknowledge(error: StorageUnsupportedError) -> bool:
         acknowledged.append(error)

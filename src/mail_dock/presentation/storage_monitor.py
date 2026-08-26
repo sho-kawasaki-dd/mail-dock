@@ -164,6 +164,12 @@ class StorageMonitor(QObject):
         if self.state is not StorageState.DETACHED:
             self._transition(StorageEvent.DEVICE_REMOVED)
 
+    def mark_detached_by_user(self) -> None:
+        """Publish the final state after the user-initiated release completed."""
+
+        if self.state in {StorageState.ATTACHED, StorageState.DEGRADED}:
+            self._transition(StorageEvent.USER_DETACH)
+
     def _schedule_reprobe(self) -> None:
         if self.reprobe_timer.isActive():
             return

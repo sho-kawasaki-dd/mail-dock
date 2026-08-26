@@ -50,6 +50,11 @@ WIZARD_ENCRYPTION_UNENCRYPTED_DESCRIPTION = (
 WIZARD_ENCRYPTION_UNKNOWN_DESCRIPTION = (
     "暗号化状態がわからない保管先です。暗号化の有無を確認できないまま使用します。"
 )
+WIZARD_STORAGE_REMOVAL_GUIDANCE = (
+    "安全に取り外すには、OS側のドライブポリシーを「クイック取り外し」に設定してください。"
+    "USBハブ経由やバスパワーでの運用は避け、Vault/VeraCryptを使用する場合は"
+    "自動ロック・自動アンマウントを無効にしてください。"
+)
 WIZARD_ENCRYPTION_UNENCRYPTED_CONFIRM_REQUIRED = (
     "暗号化されていない保管先で続行するには、確認チェックボックスを選択してください。"
 )
@@ -92,6 +97,7 @@ MAIN_MENU_STORAGE = "ストレージ"
 MAIN_MENU_STORAGE_INFO = "現在のストレージルートを表示"
 MAIN_MENU_STORAGE_SWITCH = "ストレージルートを切り替え..."
 MAIN_MENU_STORAGE_SETUP = "新規ストレージセットアップウィザード..."
+MAIN_MENU_STORAGE_DETACH = "ストレージを安全に取り外す"
 MAIN_TOOLBAR_SYNC = "同期"
 MAIN_TOOLBAR_REFRESH_FOLDERS = "フォルダを再取得"
 MAIN_TOOLBAR_SEARCH = "検索"
@@ -112,6 +118,7 @@ STATUS_READY = "準備完了"
 STATUS_STORAGE_CONNECTED = "ストレージ接続済み"
 STATUS_STORAGE_ROOT = "ルート: {path}"
 BANNER_STORAGE_DETACHED = "ストレージが切断されているため、メールを閲覧できません。"
+BANNER_STORAGE_DETACHED_BY_USER = "ストレージを取り外して構いません。"
 STATUS_NO_ACCOUNT_SELECTED = "同期するアカウントを選択してください"
 STATUS_SYNC_PROGRESS = "{folder}: {transferred} / {total} bytes ({count} 件, 残り {eta})"
 STATUS_SYNC_ETA_SECONDS = "{seconds:.0f} 秒"
@@ -173,6 +180,7 @@ ERROR_STARTUP_FAILED = "mail-dock の起動に失敗しました。ログを確�
 ERROR_STORAGE_LOCKED = "他のインスタンスがストレージを使用中です。"
 ERROR_FOREIGN_ROOT = "選択されたストレージルートは別のアーカイブです。"
 ERROR_STORAGE_DETACHED = "ストレージが切断されました。接続を確認してください。"
+STATUS_STORAGE_DETACHED_BY_USER = "安全に取り外せます"
 ERROR_AUTHENTICATION = "認証に失敗しました。ユーザー名またはパスワードを確認してください。"
 ERROR_CONNECTION = "サーバーに接続できません。"
 ERROR_INSUFFICIENT_SPACE = "ストレージの空き容量が不足しています。"

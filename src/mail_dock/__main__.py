@@ -36,7 +36,11 @@ from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.ports import BaseCredentialStore
 from mail_dock.domain.repository import MessageRecord
 from mail_dock.domain.search import MessageFilter, MessageSummary, PageCursor, SearchPage
-from mail_dock.infrastructure.database.connection import ConnectionManager, connect
+from mail_dock.infrastructure.database.connection import (
+    ConnectionManager,
+    checkpoint_truncate,
+    connect,
+)
 from mail_dock.infrastructure.database.fts_maintenance import integrity_check
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
 from mail_dock.infrastructure.database.migrator import migrate
@@ -434,6 +438,20 @@ class StorageSession:
                 self._save_settings()
         finally:
             self._cleanup()
+
+    def checkpoint_for_detach(self) -> None:
+        """Flush the WAL and close this thread's connection before root release."""
+
+        if self.readonly:
+            return
+        manager = self.connection_manager
+        connection = manager.get_connection()
+        try:
+            checkpoint_truncate(connection)
+        finally:
+            manager.request_close_all()
+            manager.close_current_thread()
+        manager.assert_all_closed()
 
     @staticmethod
     def _encryption_from_profile(profile: dict[str, config.JSONValue] | None) -> str:

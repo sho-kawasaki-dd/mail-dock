@@ -18,9 +18,32 @@ pytestmark = pytest.mark.gui
 class _Repository:
     def __init__(self) -> None:
         self.targets: list[tuple[str, str, bool]] = []
+        self.folders = (
+            {"raw_name": "INBOX", "display_name": "受信箱", "is_sync_target": 0},
+            {"raw_name": "Archive", "display_name": "アーカイブ", "is_sync_target": 0},
+        )
+
+    def list_folders(self, _account_id: str) -> tuple[dict[str, object], ...]:
+        return self.folders
 
     def set_sync_target(self, account_id: str, raw_name: str, enabled: bool) -> None:
         self.targets.append((account_id, raw_name, enabled))
+
+
+class _ManifestWriter:
+    def append(self, _event: object) -> None:
+        return None
+
+    def flush_and_sync(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+
+class _ManifestReader:
+    def read_all_events(self) -> tuple[object, ...]:
+        return ()
 
 
 class _Context:
@@ -29,6 +52,12 @@ class _Context:
 
     def create_message_repository(self) -> _Repository:
         return self.repository
+
+    def create_manifest_writer(self, _account_id: str) -> _ManifestWriter:
+        return _ManifestWriter()
+
+    def create_manifest_reader(self, _account_id: str) -> _ManifestReader:
+        return _ManifestReader()
 
 
 def test_wizard_has_three_pages_and_confirms_a_temporary_root(
