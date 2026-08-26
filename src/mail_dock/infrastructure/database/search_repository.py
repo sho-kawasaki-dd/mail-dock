@@ -178,6 +178,7 @@ class SqliteSearchRepository(BaseSearchRepository):
             moved_to_folder_display_name=(str(row[15]) if row[15] is not None else None),
             failure_class=str(row[16]) if row[16] is not None else None,
             flags_seen_at=cls._datetime(row[17]),
+            trashed_at=cls._datetime(row[18]),
         )
 
     def _page(
@@ -207,7 +208,8 @@ class SqliteSearchRepository(BaseSearchRepository):
             "SELECT m.id, m.account_id, m.folder_id, f.raw_name, f.display_name, "
             "m.subject, m.sender, m.date_sent, m.internal_date, m.size_bytes, "
             "m.has_attachment, m.remote_state, m.local_state, m.thread_key, "
-            "m.imap_flags, moved_to_f.display_name, sf.error_class, m.flags_seen_at "
+            "m.imap_flags, moved_to_f.display_name, sf.error_class, m.flags_seen_at, "
+            "m.trashed_at "
             "FROM messages AS m JOIN folders AS f ON f.id = m.folder_id "
             "LEFT JOIN folders AS moved_to_f ON moved_to_f.id = m.moved_to_folder_id "
             "LEFT JOIN sync_failures AS sf ON sf.account_id = m.account_id "
@@ -321,7 +323,7 @@ class SqliteSearchRepository(BaseSearchRepository):
                     "m.subject, m.sender, m.date_sent, m.internal_date, m.size_bytes, "
                     "m.has_attachment, m.remote_state, m.local_state, m.thread_key, "
                     "m.imap_flags, moved_to_f.display_name, sf.error_class, "
-                    "m.flags_seen_at, "
+                    "m.flags_seen_at, m.trashed_at, "
                     "m.recipient, m.cc, m.message_id, m.in_reply_to, m.references_ids, "
                     "m.relative_path, m.file_hash "
                     "FROM messages AS m JOIN folders AS f ON f.id = m.folder_id "
@@ -338,13 +340,13 @@ class SqliteSearchRepository(BaseSearchRepository):
         summary = self._summary(row)
         return MessageDetail(
             **summary.__dict__,
-            recipient=str(row[18] or ""),
-            cc=str(row[19] or ""),
-            message_id=str(row[20]) if row[20] is not None else None,
-            in_reply_to=str(row[21]) if row[21] is not None else None,
-            references_ids=str(row[22]) if row[22] is not None else None,
-            relative_path=str(row[23]) if row[23] is not None else None,
-            file_hash=str(row[24]) if row[24] is not None else None,
+            recipient=str(row[19] or ""),
+            cc=str(row[20] or ""),
+            message_id=str(row[21]) if row[21] is not None else None,
+            in_reply_to=str(row[22]) if row[22] is not None else None,
+            references_ids=str(row[23]) if row[23] is not None else None,
+            relative_path=str(row[24]) if row[24] is not None else None,
+            file_hash=str(row[25]) if row[25] is not None else None,
         )
 
 

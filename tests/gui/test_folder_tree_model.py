@@ -52,13 +52,16 @@ def test_tree_hierarchy_and_selected_filters(qtbot: object) -> None:
     assert model.data(all_accounts) == strings.FILTER_ALL_ACCOUNTS
     assert model.data(account) == "仕事"
     assert model.data(folder) == "受信箱"
-    assert model.rowCount(root) == 3
+    trash = model.index(3, 0, root)
+    assert model.data(trash) == strings.TREE_LOCAL_TRASH
+    assert model.rowCount(root) == 4
     assert model.rowCount(account) == 2
     assert model.filter_for_index(all_accounts) == MessageFilter()
     assert model.filter_for_index(account) == MessageFilter(account_ids=("account-1",))
     assert model.filter_for_index(folder) == MessageFilter(
         account_ids=("account-1",), folder_ids=(10,)
     )
+    assert model.filter_for_index(trash) == MessageFilter(local_states=frozenset({"trashed"}))
 
 
 def test_folder_sync_target_is_metadata_not_an_editable_state(qtbot: object) -> None:

@@ -383,10 +383,10 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **D-3. ゴミ箱ビュー（GUI）**
 
-- [ ] 左ペインに「ゴミ箱」ノードを追加し、`MessageFilter.local_states` を `frozenset({"trashed"})` へ切り替える（既存フィールドをそのまま使い、モデルを再設計しない）
-- [ ] 一覧に残り日数を表示する（`trashed_at + trash_grace_days`）
-- [ ] 「元に戻す」「今すぐ完全削除」のアクションを配置する
-- [ ] `local_state='purged'` の墓標レコードが「実体なし」として表示され、本文プレビューがEMLを読まないこと（Phase 3 F-21 の挙動を維持）
+- [x] 左ペインに「ゴミ箱」ノードを追加し、`MessageFilter.local_states` を `frozenset({"trashed"})` へ切り替える（既存フィールドをそのまま使い、モデルを再設計しない）
+- [x] 一覧に残り日数を表示する（`trashed_at + trash_grace_days`）
+- [x] 「元に戻す」「今すぐ完全削除」のアクションを配置する
+- [x] `local_state='purged'` の墓標レコードが「実体なし」として表示され、本文プレビューがEMLを読まないこと（Phase 3 F-21 の挙動を維持）
 
 ---
 

@@ -312,7 +312,7 @@ class MessageListView(QTableView):
         horizontal_header = self.horizontalHeader()
         horizontal_header.setSectionsClickable(False)
         horizontal_header.setStretchLastSection(False)
-        for column, width in enumerate((140, 140, 140, 220, 360, 100)):
+        for column, width in enumerate((140, 140, 140, 220, 360, 100, 100)):
             horizontal_header.setSectionResizeMode(
                 column,
                 QHeaderView.ResizeMode.Interactive,

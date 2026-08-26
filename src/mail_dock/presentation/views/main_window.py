@@ -65,6 +65,15 @@ from mail_dock.usecases.sync_folders import FolderRefreshResult
 from mail_dock.usecases.sync_mail import SyncOptions, SyncProgress, SyncResult
 
 
+class _StorageWriteGate:
+    """Expose the monitor's current state to the purge use case."""
+
+    state = StorageState.ATTACHED
+
+    def is_write_allowed(self) -> bool:
+        return self.state is StorageState.ATTACHED
+
+
 class MainWindow(QMainWindow):
     """Own the visible application window and its two presentation workers."""
 
@@ -97,6 +106,7 @@ class MainWindow(QMainWindow):
         self._query_busy = False
         self._verify_dialog: IntegrityDialog | None = None
         self._operation_gate = Lock()
+        self._storage_write_gate = _StorageWriteGate()
         self._ui_settings = QSettings("mail-dock", "mail-dock")
 
         self.query_worker = QueryWorker(
@@ -131,6 +141,7 @@ class MainWindow(QMainWindow):
             query_worker,
             self,
             page_size=MessageListViewModel.DEFAULT_PAGE_SIZE,
+            trash_grace_days=context.settings.trash_grace_days,
         )
         self.message_list_view = MessageListView(
             self.message_table_model,
@@ -230,6 +241,10 @@ class MainWindow(QMainWindow):
         self.refresh_folders_action = QAction(strings.MAIN_TOOLBAR_REFRESH_FOLDERS, self)
         self.settings_action = QAction(strings.MAIN_TOOLBAR_SETTINGS, self)
         self.export_eml_action = QAction(strings.MAIN_MENU_EXPORT_EML, self)
+        self.restore_trash_action = QAction(strings.MAIN_MENU_RESTORE_TRASH, self)
+        self.purge_trash_action = QAction(strings.MAIN_MENU_PURGE_TRASH, self)
+        self.restore_trash_action.setEnabled(False)
+        self.purge_trash_action.setEnabled(False)
         self.thread_view_action = QAction(strings.MAIN_MENU_THREAD_VIEW, self)
         self.integrity_action = QAction(strings.MAIN_MENU_INTEGRITY, self)
         self.exit_action = QAction(strings.MAIN_MENU_EXIT, self)
@@ -248,10 +263,15 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.search_bar)
         toolbar.addSeparator()
         toolbar.addAction(self.settings_action)
+        toolbar.addSeparator()
+        toolbar.addAction(self.restore_trash_action)
+        toolbar.addAction(self.purge_trash_action)
         self.addToolBar(toolbar)
 
         file_menu = self.menuBar().addMenu(strings.MAIN_MENU_FILE)
         file_menu.addAction(self.export_eml_action)
+        file_menu.addAction(self.restore_trash_action)
+        file_menu.addAction(self.purge_trash_action)
         file_menu.addSeparator()
         file_menu.addAction(self.exit_action)
         view_menu = self.menuBar().addMenu(strings.MAIN_MENU_VIEW)
@@ -273,6 +293,8 @@ class MainWindow(QMainWindow):
         self.refresh_folders_action.triggered.connect(self._refresh_selected_account)
         self.settings_action.triggered.connect(self.settings_requested)
         self.export_eml_action.triggered.connect(self._export_current_message)
+        self.restore_trash_action.triggered.connect(self._restore_selected_from_trash)
+        self.purge_trash_action.triggered.connect(self._purge_selected_from_trash)
         self.thread_view_action.triggered.connect(self.detail_view.request_thread)
         self.exit_action.triggered.connect(self.close)
         self.settings_requested.connect(self._show_settings)
@@ -512,6 +534,9 @@ class MainWindow(QMainWindow):
         self.message_list_viewmodel.search_changed.connect(self.message_table_model.set_search)
         self.message_list_viewmodel.request_busy_changed.connect(self._set_query_busy)
         self.message_list_viewmodel.message_selected.connect(self._show_selected_message)
+        self.message_list_viewmodel.selection_changed.connect(
+            lambda _message_id: self._update_trash_actions()
+        )
         self.message_table_model.rowsInserted.connect(self._update_message_count)
         self.message_table_model.modelReset.connect(self._update_message_count)
         self.detail_view.thread_loaded.connect(self.message_table_model.show_thread)
@@ -525,6 +550,8 @@ class MainWindow(QMainWindow):
         self.sync_worker.folder_tree_updated.connect(self._update_folder_tree)
         self.sync_worker.error_reported.connect(self._show_sync_error)
         self.sync_worker.file_result.connect(self._show_file_result)
+        self.sync_worker.trash_result.connect(self._show_trash_result)
+        self.sync_worker.purge_result.connect(self._show_purge_result)
         self.verify_worker.verify_result.connect(self._refresh_after_integrity_result)
 
         self._cancel_button.clicked.connect(self._cancel_current_operation)
@@ -569,6 +596,39 @@ class MainWindow(QMainWindow):
         selected_filter = self.folder_tree_model.filter_for_index(current)
         if selected_filter is not None:
             self.message_list_viewmodel.set_filters(selected_filter)
+        self._update_trash_actions()
+
+    def _update_trash_actions(self) -> None:
+        selected_id = self.message_list_viewmodel.selected_message_id
+        in_trash = self.message_list_viewmodel.filters.local_states == frozenset({"trashed"})
+        selected_summary = next(
+            (item for item in self.message_table_model.items if item.id == selected_id),
+            None,
+        )
+        enabled = (
+            selected_summary is not None
+            and selected_summary.local_state == "trashed"
+            and in_trash
+            and self._storage_write_gate.is_write_allowed()
+        )
+        self.restore_trash_action.setEnabled(enabled)
+        self.purge_trash_action.setEnabled(enabled)
+
+    def _restore_selected_from_trash(self) -> None:
+        selected_id = self.message_list_viewmodel.selected_message_id
+        if selected_id is None or not self.restore_trash_action.isEnabled():
+            return
+        self._file_token = self.sync_worker.restore_from_trash((selected_id,))
+        self._status_label.setText(strings.STATUS_LOADING)
+
+    def _purge_selected_from_trash(self) -> None:
+        selected_id = self.message_list_viewmodel.selected_message_id
+        if selected_id is None or not self.purge_trash_action.isEnabled():
+            return
+        if not ConfirmationDialog(strings.DIALOG_CONFIRM_TRASH_PURGE, self).confirmed():
+            return
+        self._file_token = self.sync_worker.purge_messages((selected_id,), self._storage_write_gate)
+        self._status_label.setText(strings.STATUS_LOADING)
 
     def _sync_selected_account(self) -> None:
         if (
@@ -749,6 +809,9 @@ class MainWindow(QMainWindow):
             self._pending_attachment_request = None
             self._pending_attachment_plan = None
             self._status_label.setText(notification.message)
+        elif notification.operation in {"restore_from_trash", "purge"}:
+            self._file_token = None
+            self._status_label.setText(notification.message)
 
     def _build_verify_worker(self) -> VerifyWorker:
         manifest_reader_factory = getattr(self.context, "create_manifest_reader_all", None)
@@ -817,6 +880,30 @@ class MainWindow(QMainWindow):
         elif isinstance(result, Path):
             self._file_token = None
             self._status_label.setText(strings.SAVE_SUCCESS.format(filename=result.name))
+
+    def _show_trash_result(self, result: object) -> None:
+        from mail_dock.usecases.trash import TrashResult
+
+        if not isinstance(result, TrashResult):
+            return
+        self._file_token = None
+        self.message_list_viewmodel.select_message(None)
+        self.message_table_model.reload()
+        self._status_label.setText(
+            strings.STATUS_TRASH_RESTORED if result.restored_ids else strings.STATUS_READY
+        )
+
+    def _show_purge_result(self, result: object) -> None:
+        from mail_dock.usecases.trash import PurgeResult
+
+        if not isinstance(result, PurgeResult):
+            return
+        self._file_token = None
+        self.message_list_viewmodel.select_message(None)
+        self.message_table_model.reload()
+        self._status_label.setText(
+            strings.STATUS_TRASH_PURGED if result.purged_ids else strings.STATUS_READY
+        )
 
     def _handle_attachment_plan(self, plan: AttachmentSavePlan) -> None:
         request = self._pending_attachment_request
@@ -896,6 +983,10 @@ class MainWindow(QMainWindow):
     def set_storage_state(self, state: object) -> None:
         """Reflect the monitor's lifecycle state in the main window."""
 
+        if isinstance(state, StorageState):
+            self._storage_write_gate.state = state
+        self._update_trash_actions()
+
         if state in {StorageState.DETACHED, StorageState.DETACHED_BY_USER}:
             if state is StorageState.DETACHED_BY_USER:
                 self._show_storage_detached_by_user()
@@ -928,6 +1019,7 @@ class MainWindow(QMainWindow):
             )
         )
         self.detail_view.set_block_remote_images(settings.block_remote_images)
+        self.message_table_model.set_trash_grace_days(settings.trash_grace_days)
         root_uuid = getattr(self.context, "root_uuid", None)
         raw_profile = (
             settings.storage_profiles.get(root_uuid) if isinstance(root_uuid, str) else None

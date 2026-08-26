@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from math import ceil
 from typing import Literal, Protocol
 
 from PySide6.QtCore import (
@@ -95,6 +97,7 @@ _HEADERS = (
     strings.TABLE_HEADER_FROM,
     strings.TABLE_HEADER_SUBJECT,
     strings.TABLE_HEADER_SIZE,
+    strings.TABLE_HEADER_TRASH_REMAINING,
 )
 _STATUS_COLUMN = 4
 _DELETED_BRUSH = QBrush(QColor("#808080"))
@@ -137,10 +140,13 @@ class MessageTableModel(QAbstractTableModel):
         query: str = "",
         mode: SearchMode = "and",
         page_size: int = DEFAULT_PAGE_SIZE,
+        trash_grace_days: int = 30,
     ) -> None:
         super().__init__(parent)
         if page_size <= 0:
             raise ValueError("page_size must be positive")
+        if trash_grace_days < 0:
+            raise ValueError("trash_grace_days must be non-negative")
         if mode not in ("and", "or"):
             raise ValueError("mode must be 'and' or 'or'")
 
@@ -149,6 +155,7 @@ class MessageTableModel(QAbstractTableModel):
         self._query = query
         self._mode = mode
         self._page_size = page_size
+        self._trash_grace_days = trash_grace_days
         self._items: list[MessageSummary] = []
         self._next_cursor: PageCursor | None = None
         self._exhausted = False
@@ -193,6 +200,21 @@ class MessageTableModel(QAbstractTableModel):
         """Return the worker used for asynchronous requests."""
 
         return self._worker
+
+    def set_trash_grace_days(self, days: int) -> None:
+        """Update the grace period used by the trash column."""
+
+        if days < 0:
+            raise ValueError("trash_grace_days must be non-negative")
+        if days == self._trash_grace_days:
+            return
+        self._trash_grace_days = days
+        if self._items:
+            self.dataChanged.emit(
+                self.index(0, len(_HEADERS) - 1),
+                self.index(len(self._items) - 1, len(_HEADERS) - 1),
+                [Qt.ItemDataRole.DisplayRole],
+            )
 
     @property
     def thread_mode(self) -> bool:
@@ -403,8 +425,7 @@ class MessageTableModel(QAbstractTableModel):
         if getattr(result, "request_id", None) == self._pending_request_id:
             self._pending_request_id = None
 
-    @staticmethod
-    def _display_value(summary: MessageSummary, column: int) -> str:
+    def _display_value(self, summary: MessageSummary, column: int) -> str:
         values = (
             format_local_datetime(summary.date_sent or summary.internal_date),
             summary.account_id,
@@ -420,6 +441,7 @@ class MessageTableModel(QAbstractTableModel):
                 )
             ),
             _format_size(summary.size_bytes),
+            _format_remaining_trash_days(summary, self._trash_grace_days),
         )
         return values[column] if 0 <= column < len(values) else ""
 
@@ -456,3 +478,14 @@ def _format_size(size_bytes: int | None) -> str:
     if size_bytes < 1024 * 1024 * 1024:
         return f"{size_bytes / (1024 * 1024):.1f} MB"
     return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
+
+
+def _format_remaining_trash_days(summary: MessageSummary, grace_days: int) -> str:
+    if summary.local_state != "trashed" or summary.trashed_at is None:
+        return ""
+    trashed_at = summary.trashed_at
+    if trashed_at.tzinfo is None:
+        trashed_at = trashed_at.replace(tzinfo=UTC)
+    expires_at = trashed_at + timedelta(days=grace_days)
+    remaining_days = max(0, ceil((expires_at - datetime.now(UTC)).total_seconds() / 86400))
+    return strings.TRASH_REMAINING_DAYS.format(days=remaining_days)

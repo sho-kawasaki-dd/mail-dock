@@ -23,7 +23,7 @@ from PySide6.QtCore import (
 from mail_dock.domain.search import MessageFilter
 from mail_dock.presentation import strings
 
-FolderTreeNodeKind = Literal["root", "all_accounts", "account", "folder", "custom"]
+FolderTreeNodeKind = Literal["root", "all_accounts", "account", "folder", "trash", "custom"]
 _EMPTY_INDEX = QModelIndex()
 
 
@@ -112,11 +112,17 @@ def build_mail_account_root(
         kind="all_accounts",
         message_filter=MessageFilter(),
     )
+    trash = FolderTreeNode(
+        key="local-trash",
+        display_name=strings.TREE_LOCAL_TRASH,
+        kind="trash",
+        message_filter=MessageFilter(local_states=frozenset({"trashed"})),
+    )
     return FolderTreeNode(
         key="mail-accounts",
         display_name=strings.TREE_ROOT_MAIL_ACCOUNTS,
         kind="root",
-        children=(all_accounts, *account_nodes),
+        children=(all_accounts, *account_nodes, trash),
         message_filter=MessageFilter(),
     )
 

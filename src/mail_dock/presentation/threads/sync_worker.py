@@ -19,7 +19,12 @@ from mail_dock.domain.errors import (
 )
 from mail_dock.domain.fetcher import BaseMailFetcher, CancelToken
 from mail_dock.domain.messages import AttachmentSavePlan, SavedFile
-from mail_dock.domain.ports import BaseEmlStorage, BaseManifestWriter, BaseMessageRenderer
+from mail_dock.domain.ports import (
+    BaseEmlStorage,
+    BaseManifestWriter,
+    BaseMessageRenderer,
+    BasePurgeStorage,
+)
 from mail_dock.domain.repository import BaseMessageRepository, MessageRecord
 from mail_dock.presentation.errors import user_message
 from mail_dock.presentation.threads.worker import OperationGate, Worker, _Task, operation_gate
@@ -30,6 +35,12 @@ from mail_dock.usecases.save_attachment import (
 )
 from mail_dock.usecases.sync_folders import FolderRefreshResult, refresh_folders
 from mail_dock.usecases.sync_mail import SyncOptions, SyncProgress, SyncResult, sync_account
+from mail_dock.usecases.trash import (
+    PurgeResult,
+    TrashResult,
+    purge,
+    restore_from_trash,
+)
 
 SyncOperation = Literal[
     "sync",
@@ -37,6 +48,8 @@ SyncOperation = Literal[
     "prepare_attachment",
     "save_attachment",
     "export_eml",
+    "restore_from_trash",
+    "purge",
 ]
 RepositoryFactory = Callable[[], BaseMessageRepository]
 FetcherFactory = Callable[[MessageRecord], BaseMailFetcher]
@@ -81,6 +94,8 @@ class _SyncTaskResult:
         | AttachmentSavePlan
         | SavedFile
         | Path
+        | TrashResult
+        | PurgeResult
     )
 
 
@@ -97,6 +112,8 @@ class SyncWorker(Worker):
     fetch_failed = Signal(object)
     storage_detached = Signal(object)
     file_result = Signal(object)
+    trash_result = Signal(object)
+    purge_result = Signal(object)
 
     def __init__(
         self,
@@ -309,6 +326,69 @@ class SyncWorker(Worker):
 
         return self._submit_operation("export_eml", operation)
 
+    def restore_from_trash(self, message_ids: tuple[int, ...]) -> CancelToken:
+        """Restore selected messages on the single database writer thread."""
+
+        def operation(_token: CancelToken) -> _SyncTaskResult:
+            return _SyncTaskResult(
+                "restore_from_trash",
+                restore_from_trash(self._repository_factory(), message_ids=message_ids),
+            )
+
+        return self._submit_operation("restore_from_trash", operation)
+
+    def purge_messages(
+        self,
+        message_ids: tuple[int, ...],
+        storage_state: object,
+    ) -> CancelToken:
+        """Permanently remove selected messages on the single writer thread."""
+
+        def operation(_token: CancelToken) -> _SyncTaskResult:
+            repository = self._repository_factory()
+            storage = cast(BasePurgeStorage, self._storage_factory())
+            records_by_account: dict[str, list[int]] = {}
+            for message_id in message_ids:
+                record = repository.get_message(message_id)
+                account_id = record.get("account_id") if record is not None else None
+                if isinstance(account_id, str):
+                    records_by_account.setdefault(account_id, []).append(message_id)
+
+            purged_ids: list[Any] = []
+            skipped_ids: list[Any] = []
+            physical_paths: list[str] = []
+            shared_paths: list[str] = []
+            total_size_bytes = 0
+            for account_id, account_message_ids in records_by_account.items():
+                manifest = self._manifest_factory(account_id)
+                try:
+                    result = purge(
+                        repository,
+                        storage,
+                        manifest,
+                        message_ids=account_message_ids,
+                        storage_state=cast(Any, storage_state),
+                    )
+                finally:
+                    _close_manifest(manifest)
+                purged_ids.extend(result.purged_ids)
+                skipped_ids.extend(result.skipped_ids)
+                physical_paths.extend(result.physically_deleted_paths)
+                shared_paths.extend(result.shared_paths)
+                total_size_bytes += result.total_size_bytes
+            return _SyncTaskResult(
+                "purge",
+                PurgeResult(
+                    purged_ids=tuple(purged_ids),
+                    skipped_ids=tuple(skipped_ids),
+                    physically_deleted_paths=tuple(physical_paths),
+                    shared_paths=tuple(shared_paths),
+                    total_size_bytes=total_size_bytes,
+                ),
+            )
+
+        return self._submit_operation("purge", operation)
+
     def _message_renderer(self) -> BaseMessageRenderer:
         if self._renderer_factory is None:
             raise RuntimeError("file operations require a message renderer factory")
@@ -359,6 +439,10 @@ class SyncWorker(Worker):
             self.sync_result.emit(value.value)
         elif value.operation in {"prepare_attachment", "save_attachment", "export_eml"}:
             self.file_result.emit(value.value)
+        elif value.operation == "restore_from_trash":
+            self.trash_result.emit(value.value)
+        elif value.operation == "purge":
+            self.purge_result.emit(value.value)
         elif isinstance(value.value, _FolderRefreshTaskResult):
             self.folders_refreshed.emit(value.value.result)
             self.folder_tree_updated.emit(value.value.snapshot)

@@ -59,6 +59,9 @@ def test_builds_mail_account_root_and_uses_folder_display_names(qtbot: object) -
     assert model.message_filter(folder) == MessageFilter(
         account_ids=("account-1",), folder_ids=(10,)
     )
+    trash = model.index(3, 0, root)
+    assert model.data(trash) == strings.TREE_LOCAL_TRASH
+    assert model.message_filter(trash) == MessageFilter(local_states=frozenset({"trashed"}))
 
 
 def test_sync_target_is_visible_without_making_the_model_editable(qtbot: object) -> None:

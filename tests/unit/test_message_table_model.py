@@ -187,7 +187,7 @@ def test_columns_render_summary_values(qtbot: object) -> None:
     expected_date_value = _summary().date_sent
     assert expected_date_value is not None
     expected_date = expected_date_value.astimezone().strftime("%Y-%m-%d %H:%M")
-    assert headers == ["日付", "アカウント", "フォルダ", "差出人", "件名", "サイズ"]
+    assert headers == ["日付", "アカウント", "フォルダ", "差出人", "件名", "サイズ", "残り日数"]
     assert values == [
         expected_date,
         "account-1",
@@ -195,7 +195,20 @@ def test_columns_render_summary_values(qtbot: object) -> None:
         "sender@example.com",
         "件名",
         "2.0 KB",
+        "",
     ]
+
+
+def test_trash_column_renders_grace_period(qtbot: object) -> None:
+    del qtbot
+    trashed = replace(
+        _summary(),
+        local_state="trashed",
+        trashed_at=datetime.now(UTC),
+    )
+    model = _model_with_summary(trashed)
+
+    assert model.data(model.index(0, 6), Qt.ItemDataRole.DisplayRole) == "残り 30 日"
 
 
 def _model_with_summary(summary: MessageSummary) -> MessageTableModel:
