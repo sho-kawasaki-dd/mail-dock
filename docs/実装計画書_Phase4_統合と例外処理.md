@@ -297,21 +297,21 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **C-1. `usecases/verify.py` — 検証ユースケース**
 
-- [ ] `domain/ports.py` へ `BaseIntegrityStorage`（`stat` / `iter_chunks` / `iter_eml_paths` / `quarantine`）と `BasePurgeStorage`（`delete` / 存在確認）を新設し、既存 `BaseEmlStorage` へ検証・削除責務を無制限に追加しない（レビュー修正案 3.5）
-- [ ] `quick_verify(repo, storage, *, cancel) -> QuickVerifyResult` を実装する（`relative_path` の存在確認とサイズ照合。F-12）
-- [ ] `range_verify(repo, storage, manifest_reader, *, cancel) -> RangeVerifyResult` を実装する（F-13）
-    - [ ] 最後の `checkpoint` 以降のイベントに含まれるEMLのみSHA-256を再計算する
-    - [ ] 不一致レコードは未取得へ戻し（`sync_failures` へ記録）、当該EMLを `tmp/` へ隔離する
-- [ ] `full_verify(repo, storage, *, cancel, on_progress) -> FullVerifyResult` を実装する（F-14）
-    - [ ] `BaseIntegrityStorage.iter_chunks()` によるチャンク読みでハッシュ計算し、EML全体をメモリへ載せない（N-5）
-- [ ] `orphan_scan(repo, storage, *, cancel, on_progress) -> OrphanScanResult` を実装する（F-15）
-    - [ ] マニフェストの `fetch` イベントと `source_item_key` / パス / ハッシュが一致する孤児だけを再登録対象とする
-    - [ ] マニフェストに対応イベントが無い孤児は、UID・UIDVALIDITY・フォルダを推測せず `tmp/orphans/` などへ隔離し、次回同期の重複候補として監査ログへ記録する（レビュー修正案 3.6）
-- [ ] `verify_manifest(root, *, cancel) -> ManifestVerifyResult` を実装する（F-16）
-    - [ ] 既存 `manifest.repair_tail()` を利用し、**末尾の不完全レコードのみ**切り離す
-    - [ ] 末尾以外の破損は `ManifestCorruptError` として報告し、自動修復しない
-- [ ] すべてのユースケースが `CancelToken` に対応すること
-- [ ] `sqlite3` / PySide6 / infrastructure の具象を import しないこと
+- [x] `domain/ports.py` へ `BaseIntegrityStorage`（`stat` / `iter_chunks` / `iter_eml_paths` / `quarantine`）と `BasePurgeStorage`（`delete` / 存在確認）を新設し、既存 `BaseEmlStorage` へ検証・削除責務を無制限に追加しない（レビュー修正案 3.5）
+- [x] `quick_verify(repo, storage, *, cancel) -> QuickVerifyResult` を実装する（`relative_path` の存在確認とサイズ照合。F-12）
+- [x] `range_verify(repo, storage, manifest_reader, *, cancel) -> RangeVerifyResult` を実装する（F-13）
+    - [x] 最後の `checkpoint` 以降のイベントに含まれるEMLのみSHA-256を再計算する
+    - [x] 不一致レコードは未取得へ戻し（`sync_failures` へ記録）、当該EMLを `tmp/` へ隔離する
+- [x] `full_verify(repo, storage, *, cancel, on_progress) -> FullVerifyResult` を実装する（F-14）
+    - [x] `BaseIntegrityStorage.iter_chunks()` によるチャンク読みでハッシュ計算し、EML全体をメモリへ載せない（N-5）
+- [x] `orphan_scan(repo, storage, *, cancel, on_progress) -> OrphanScanResult` を実装する（F-15）
+    - [x] マニフェストの `fetch` イベントと `source_item_key` / パス / ハッシュが一致する孤児だけを再登録対象とする
+    - [x] マニフェストに対応イベントが無い孤児は、UID・UIDVALIDITY・フォルダを推測せず `tmp/orphans/` などへ隔離し、次回同期の重複候補として監査ログへ記録する（レビュー修正案 3.6）
+- [x] `verify_manifest(root, *, cancel) -> ManifestVerifyResult` を実装する（F-16）
+    - [x] 既存 `manifest.repair_tail()` を利用し、**末尾の不完全レコードのみ**切り離す
+    - [x] 末尾以外の破損は `ManifestCorruptError` として報告し、自動修復しない
+- [x] すべてのユースケースが `CancelToken` に対応すること
+- [x] `sqlite3` / PySide6 / infrastructure の具象を import しないこと
 
 #### **C-2. `usecases/reindex.py` — マニフェストからのDB完全再構築（*本フェーズの中核の1つ*）**
 

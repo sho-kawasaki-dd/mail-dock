@@ -13,6 +13,7 @@ import os
 import shutil
 import sys
 import uuid
+from collections.abc import Iterator
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,7 +21,7 @@ from pathlib import Path
 from mail_dock.domain.accounts import validate_account_id
 from mail_dock.domain.errors import StorageError
 from mail_dock.domain.messages import StoredEml
-from mail_dock.domain.ports import BaseEmlStorage
+from mail_dock.domain.ports import BaseEmlStorage, BaseIntegrityStorage, BasePurgeStorage
 from mail_dock.infrastructure.storage.detach import storage_io
 
 _HASH_LENGTH = hashlib.sha256().digest_size * 2
@@ -163,7 +164,7 @@ def cleanup_tmp(root: Path) -> int:
     return removed_files
 
 
-class EmlStorage(BaseEmlStorage):
+class EmlStorage(BaseEmlStorage, BaseIntegrityStorage, BasePurgeStorage):
     """Filesystem implementation of the atomic EML storage port."""
 
     def __init__(self, root: Path) -> None:
@@ -220,3 +221,58 @@ class EmlStorage(BaseEmlStorage):
         if actual_hash != expected_hash.casefold():
             raise StorageError("EML file hash does not match expected hash")
         return bytes(payload)
+
+    def stat(self, relative_path: str) -> os.stat_result:
+        """Return file metadata after validating the storage boundary."""
+
+        with storage_io():
+            return _resolve_inside(self.root, relative_path).stat()
+
+    def iter_chunks(
+        self, relative_path: str, chunk_size: int = 1024 * 1024
+    ) -> Iterator[bytes]:
+        """Yield bounded chunks without loading the EML into memory."""
+
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be positive")
+        path = _resolve_inside(self.root, relative_path)
+        with storage_io(), path.open("rb") as file:
+            yield from iter(lambda: file.read(chunk_size), b"")
+
+    def iter_eml_paths(self, account_id: str | None = None) -> Iterator[str]:
+        """Yield EML files below ``eml/`` as storage-relative POSIX paths."""
+
+        eml_root = self.root / "eml"
+        if account_id is not None:
+            validate_account_id(account_id)
+        search_root = eml_root if account_id is None else eml_root / account_id
+        with storage_io():
+            if not search_root.is_dir():
+                return
+            paths = tuple(path for path in search_root.rglob("*.eml") if path.is_file())
+        for path in sorted(paths):
+            yield _relative_path(self.root, path)
+
+    def quarantine(self, relative_path: str) -> None:
+        """Move a suspect EML to a same-volume quarantine directory."""
+
+        source = _resolve_inside(self.root, relative_path)
+        quarantine_root = self.root / "tmp" / "quarantine"
+        with storage_io():
+            if not source.exists():
+                return
+            quarantine_root.mkdir(parents=True, exist_ok=True)
+            destination = quarantine_root / f"{source.name}.{uuid.uuid4().hex}.eml"
+            os.replace(source, destination)  # noqa: PTH105
+
+    def exists(self, relative_path: str) -> bool:
+        """Return whether a regular file exists below the storage root."""
+
+        with storage_io():
+            return _resolve_inside(self.root, relative_path).is_file()
+
+    def delete(self, relative_path: str) -> None:
+        """Delete a stored EML, treating a missing file as already purged."""
+
+        with storage_io():
+            _resolve_inside(self.root, relative_path).unlink(missing_ok=True)

@@ -126,6 +126,26 @@ def test_read_verified_returns_bytes_only_for_a_matching_complete_hash(
         storage.read_verified(stored.relative_path, "0" * 64)
 
 
+def test_integrity_and_purge_storage_ports_are_bounded_and_idempotent(
+    tmp_storage_root: Path,
+) -> None:
+    storage = EmlStorage(tmp_storage_root)
+    raw = b"integrity content"
+    stored = storage.save("account", None, raw)
+
+    assert storage.stat(stored.relative_path).st_size == len(raw)
+    assert b"".join(storage.iter_chunks(stored.relative_path, chunk_size=3)) == raw
+    assert list(storage.iter_eml_paths("account")) == [stored.relative_path]
+    assert storage.exists(stored.relative_path)
+
+    storage.quarantine(stored.relative_path)
+    assert not storage.exists(stored.relative_path)
+    storage.delete(stored.relative_path)
+
+    with pytest.raises(ValueError, match="account_id"):
+        list(storage.iter_eml_paths("../outside"))
+
+
 def _open_with_share_delete(path: Path) -> BinaryIO:
     """Open via CreateFileW with FILE_SHARE_DELETE so a concurrent replace can succeed."""
     import msvcrt

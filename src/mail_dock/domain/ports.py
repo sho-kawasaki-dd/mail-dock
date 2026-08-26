@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Mapping
 from datetime import datetime
@@ -14,9 +15,11 @@ __all__ = [
     "AttachmentSavePlan",
     "BaseCredentialStore",
     "BaseEmlStorage",
+    "BaseIntegrityStorage",
     "BaseManifestReader",
     "BaseManifestWriter",
     "BaseMessageRenderer",
+    "BasePurgeStorage",
     "JSONValue",
     "SavedFile",
 ]
@@ -56,6 +59,38 @@ class BaseEmlStorage(ABC):
     @abstractmethod
     def read_verified(self, relative_path: str, expected_hash: str) -> bytes:
         """Read an EML once and return it only when its complete hash matches."""
+
+
+class BaseIntegrityStorage(ABC):
+    """Read-only storage operations used by integrity verification."""
+
+    @abstractmethod
+    def stat(self, relative_path: str) -> os.stat_result:
+        """Return metadata for a storage-relative file path."""
+
+    @abstractmethod
+    def iter_chunks(self, relative_path: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
+        """Yield a stored file in bounded-size chunks."""
+
+    @abstractmethod
+    def iter_eml_paths(self, account_id: str | None = None) -> Iterator[str]:
+        """Yield storage-relative EML paths, optionally limited to an account."""
+
+    @abstractmethod
+    def quarantine(self, relative_path: str) -> None:
+        """Move a suspect EML below the storage root into quarantine."""
+
+
+class BasePurgeStorage(ABC):
+    """Storage operations that can physically remove a previously stored EML."""
+
+    @abstractmethod
+    def exists(self, relative_path: str) -> bool:
+        """Return whether a storage-relative file currently exists."""
+
+    @abstractmethod
+    def delete(self, relative_path: str) -> None:
+        """Delete a storage-relative file; missing files are already purged."""
 
 
 class BaseMessageRenderer(ABC):
