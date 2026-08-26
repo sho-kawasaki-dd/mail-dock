@@ -238,14 +238,14 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **B-2. `presentation/native/device_watcher.py` — `WM_DEVICECHANGE` 監視**
 
-- [ ] `presentation/native/__init__.py` を新規作成する
-- [ ] `DeviceWatcher(QAbstractNativeEventFilter)` を実装する
-    - [ ] `DBT_DEVICEQUERYREMOVE (0x8001)`: **本命の分岐**。ハンドルを閉じて取り外しを許可する（拒否するとユーザーが引き抜く）
-    - [ ] `DBT_DEVICEREMOVECOMPLETE (0x8004)`: I/Oエラーを待たず `DETACHED` へ即遷移
-    - [ ] `DBT_DEVICEARRIVAL (0x8000)`: 再検出をトリガー
-- [ ] `DBT_DEVTYP_VOLUME` のブロードキャストから `dbcv_unitmask` を読み、ドライブレターを復元する
-- [ ] **非Windowsでは no-op 実装**とし、`install()` / `uninstall()` が安全に呼べること（D-21）
-- [ ] ドライブレターの復元ロジックをQt非依存の純粋関数へ分離し、通常CIでテストする
+- [x] `presentation/native/__init__.py` を新規作成する
+- [x] `DeviceWatcher(QAbstractNativeEventFilter)` を実装する
+    - [x] `DBT_DEVICEQUERYREMOVE (0x8001)`: **本命の分岐**。ハンドルを閉じて取り外しを許可する（拒否するとユーザーが引き抜く）
+    - [x] `DBT_DEVICEREMOVECOMPLETE (0x8004)`: I/Oエラーを待たず `DETACHED` へ即遷移
+    - [x] `DBT_DEVICEARRIVAL (0x8000)`: 再検出をトリガー
+ [x] `DBT_DEVTYP_VOLUME` のブロードキャストから `dbcv_unitmask` を読み、ドライブレターを復元する
+- [x] **非Windowsでは no-op 実装**とし、`install()` / `uninstall()` が安全に呼べること（D-21）
+ - [x] ドライブレターの復元ロジックをQt非依存の純粋関数へ分離し、通常CIでテストする
 
 #### **B-3. `presentation/storage_monitor.py` — ハートビートと縮退制御**
 
