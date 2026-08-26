@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from collections.abc import Iterator, Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
+
+import pytest
 
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.messages import StoredEml
@@ -185,8 +188,56 @@ def test_reindex_restores_remote_state_and_purged_tombstone_without_eml() -> Non
     assert repository.messages[1]["remote_state"] == "uncertain"
     assert repository.messages[1]["local_state"] == "purged"
     assert repository.messages[1]["relative_path"] is None
+    assert repository.messages[1]["file_hash"] == file_hash
     assert 1 not in repository.contents
+    assert result.contents_count == 0
     assert any(entry["operation"] == "local_purge" for entry in repository.audit_log)
+
+
+def test_reindex_restores_remote_delete_audit_metadata() -> None:
+    raw = _raw()
+    relative_path = "eml/account/2026/01/message.eml"
+    file_hash = hashlib.sha256(raw).hexdigest()
+    events = _base_events(relative_path, file_hash)
+    events.append(
+        {
+            "event": "remote_delete_completed",
+            "account_id": "account",
+            "folder_raw_name": "INBOX",
+            "uid": 7,
+            "uidvalidity": 42,
+            "mode": "trash",
+            "timestamp": "2026-01-03T00:00:00+00:00",
+        }
+    )
+
+    repository = InMemoryMessageRepository()
+    reindex(repository, MemoryEmlStorage({relative_path: raw}), MemoryManifestReader(events))
+
+    audit_entry = next(
+        entry for entry in repository.audit_log if entry["operation"] == "remote_delete"
+    )
+    assert audit_entry["message_id"] == "<reindexed@example.com>"
+    assert audit_entry["subject"] == "Reindexed"
+    assert audit_entry["size_bytes"] == len(raw)
+
+
+def test_rebuild_database_warns_and_skips_pst_manifests(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    root = tmp_path / "storage"
+    initialize_root(root)
+    (root / "manifests" / "pst" / "import-1").mkdir(parents=True)
+    caplog.set_level(logging.WARNING, logger="mail_dock.infrastructure.database.reindex")
+
+    result = rebuild_database(
+        root / "metadata.db",
+        EmlStorage(root),
+        [],
+    )
+
+    assert result.message_count == 0
+    assert "Skipping unsupported PST manifests" in caplog.text
 
 
 def test_rebuild_database_replaces_existing_database_only_after_verification(

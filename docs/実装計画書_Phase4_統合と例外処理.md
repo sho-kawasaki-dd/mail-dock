@@ -323,7 +323,7 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 - [x] `remote_delete_completed` / `delete_detected` / `moved` イベントから `remote_state` を復元する。`remote_delete_uncertain` のまま確定していない項目は再構築時も `uncertain` として扱う
 - [x] `folders.raw_name` / `display_name` / `uidvalidity` をマニフェストから復元し、`is_sync_target` は**既定で0**（勝手に同期対象にしない）
 - [x] `messages.id` / `folders.id` などのDB固有サロゲートIDをマニフェストの正本にせず、`account_id` / `folder_raw_name` / `source_item_key` などの自然キーから新しいIDを解決する（レビュー修正案 3.2）
-- [ ] PST永続マニフェスト（`manifests/pst/`）は Phase 4.5 のため、読み取り口だけ用意し未対応形式は明示的にスキップして警告ログを残す
+- [x] PST永続マニフェスト（`manifests/pst/`）は Phase 4.5 のため、読み取り口だけ用意し未対応形式は明示的にスキップして警告ログを残す
 - [x] 新しいDBファイルの作成・マイグレーション適用・整合性検証・既存 `metadata.db` との原子的入れ替えは、usecaseから直接SQLiteファイルを操作せず、infrastructure側の**再構築コーディネータ**が担当する（途中失敗で既存DBを壊さない。レビュー修正案 3.5）
 
 #### **C-3. `presentation/threads/verify_worker.py` — 3本目のワーカー（D-5）**

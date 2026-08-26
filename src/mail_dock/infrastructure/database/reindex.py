@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import uuid
@@ -18,6 +19,8 @@ from mail_dock.infrastructure.database.message_repository import SqliteMessageRe
 from mail_dock.infrastructure.database.migrator import migrate
 from mail_dock.infrastructure.storage.detach import storage_io
 from mail_dock.usecases.reindex import ReindexProgress, ReindexResult, reindex
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _fsync_parent(path: Path) -> None:
@@ -68,6 +71,12 @@ def rebuild_database(
     connection: sqlite3.Connection | None = None
     results: list[ReindexResult] = []
     try:
+        pst_manifest_root = database_path.parent / "manifests" / "pst"
+        if pst_manifest_root.is_dir():
+            _LOGGER.warning(
+                "Skipping unsupported PST manifests during reindex: path=%s",
+                pst_manifest_root,
+            )
         connection = connect(temporary_path, journal_mode=journal_mode)
         migrate(connection, temporary_path)
         repository = SqliteMessageRepository(connection)

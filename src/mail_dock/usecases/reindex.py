@@ -145,14 +145,24 @@ def _folder_record(event: Mapping[str, JSONValue]) -> MessageRecord | None:
     }
 
 
-def _audit_entry(event: Mapping[str, JSONValue], operation: str) -> MessageRecord:
+def _audit_entry(
+    event: Mapping[str, JSONValue],
+    operation: str,
+    related_event: Mapping[str, JSONValue] | None = None,
+) -> MessageRecord:
+    def value(field: str) -> JSONValue:
+        event_value = event.get(field)
+        if event_value is not None:
+            return event_value
+        return related_event.get(field) if related_event is not None else None
+
     return {
         "occurred_at": event.get("timestamp", datetime.now(UTC).isoformat()),
         "operation": operation,
-        "account_id": event.get("account_id"),
-        "message_id": event.get("message_id"),
-        "subject": event.get("subject"),
-        "size_bytes": event.get("size_bytes"),
+        "account_id": value("account_id"),
+        "message_id": value("message_id"),
+        "subject": value("subject"),
+        "size_bytes": value("size_bytes"),
         "detail": f"reconstructed from {event.get('event', 'manifest')} event",
     }
 
@@ -209,7 +219,8 @@ def reindex(
     states: dict[tuple[str, str, int, int], _MessageState] = {}
     purge_events: dict[tuple[str, str, str, str], Mapping[str, JSONValue]] = {}
     completed_purges: set[tuple[str, str, str, str]] = set()
-    audit_events: list[tuple[Mapping[str, JSONValue], str]] = []
+    audit_events: list[tuple[Mapping[str, JSONValue], str, Mapping[str, JSONValue] | None]] = []
+    parsed_metadata: dict[tuple[str, str], Mapping[str, JSONValue]] = {}
 
     try:
         for event in manifest_reader.read_all_events():
@@ -239,10 +250,16 @@ def reindex(
                 event_key = _event_key(event)
                 if event_key is not None:
                     _state_for_event(event, states, event_key)
+                    related_fetch_record = fetches.get(event_key)
+                    related_fetch_event = (
+                        related_fetch_record.event if related_fetch_record is not None else None
+                    )
+                else:
+                    related_fetch_event = None
                 if event_name in {"delete_detected", "moved"}:
-                    audit_events.append((event, str(event_name)))
+                    audit_events.append((event, str(event_name), related_fetch_event))
                 elif event_name == "remote_delete_completed":
-                    audit_events.append((event, "remote_delete"))
+                    audit_events.append((event, "remote_delete", related_fetch_event))
             elif event_name == "purge_intent":
                 purge_key = _purge_key(event)
                 if purge_key is not None:
@@ -251,7 +268,16 @@ def reindex(
                 purge_key = _purge_key(event)
                 if purge_key is not None:
                     completed_purges.add(purge_key)
-                    audit_events.append((event, "local_purge"))
+                    related_fetch = next(
+                        (
+                            fetch.event
+                            for fetch in fetches.values()
+                            if fetch.event.get("account_id") == event.get("account_id")
+                            and _source_item_key(event, fetch.key) == event.get("source_item_key")
+                        ),
+                        None,
+                    )
+                    audit_events.append((event, "local_purge", related_fetch))
     except OperationCancelledError:
         return ReindexResult(0, 0, 0, 0, 0, 0, (), True)
 
@@ -321,6 +347,11 @@ def reindex(
             state = states.get(fetch.key, _MessageState("present"))
             event_size = event.get("size_bytes")
             size_bytes = event_size if isinstance(event_size, int) else len(raw or b"")
+            parsed_metadata[(account_id, source_item_key)] = {
+                "message_id": parsed.message_id,
+                "subject": parsed.subject or None,
+                "size_bytes": size_bytes,
+            }
             message: dict[str, Any] = {
                 "account_id": account_id,
                 "message_id": parsed.message_id or _text(event, "message_id"),
@@ -347,18 +378,17 @@ def reindex(
             }
             destination = state.moved_to_folder_raw_name
             contents: MessageContents | None = None
-            if parsed.parse_error is None:
-                contents = _message_contents(parsed)
-                contents_count += 1
-            else:
+            if parsed.parse_error is not None:
                 warnings.append(f"EML parse failed: {relative_path}")
 
             if is_purged:
                 message["local_state"] = "purged"
                 message["relative_path"] = None
-                message["file_hash"] = None
                 contents = None
                 purged_count += 1
+            elif parsed.parse_error is None:
+                contents = _message_contents(parsed)
+                contents_count += 1
             prepared_messages.append(
                 (message, contents, (account_id, folder_raw_name), destination)
             )
@@ -391,8 +421,20 @@ def reindex(
     except OperationCancelledError:
         return ReindexResult(0, 0, 0, 0, 0, 0, tuple(warnings), True)
 
-    for event, operation in audit_events:
-        repo.record_audit(_audit_entry(event, operation))
+    for event, operation, related_event in audit_events:
+        audit_related = dict(related_event or {})
+        account_id = _text(event, "account_id")
+        audit_source_item_key = _text(event, "source_item_key")
+        event_key = _event_key(event)
+        if audit_source_item_key is None and event_key is not None:
+            audit_source_item_key = f"{event_key[2]}:{event_key[3]}"
+        if account_id is not None and audit_source_item_key is not None:
+            for field, value in parsed_metadata.get(
+                (account_id, audit_source_item_key), {}
+            ).items():
+                if value is not None:
+                    audit_related[field] = value
+        repo.record_audit(_audit_entry(event, operation, audit_related))
     for purge_key, event in purge_events.items():
         del event
         if purge_key not in completed_purges:
