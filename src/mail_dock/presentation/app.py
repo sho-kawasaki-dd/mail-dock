@@ -27,6 +27,7 @@ from mail_dock.domain.errors import (
     StorageForeignRootError,
     StorageUnsupportedError,
 )
+from mail_dock.domain.storage_state import StorageStateMachine
 from mail_dock.infrastructure.storage.capabilities import (
     capability_level,
     probe_capabilities,
@@ -51,6 +52,11 @@ from mail_dock.presentation.views.dialogs.error_dialog import show_error
 from mail_dock.presentation.views.setup_wizard import SetupWizard
 from mail_dock.presentation.web.schemes import register_schemes
 from mail_dock.usecases.snapshots import backfill_snapshots, repair_manifest_tails
+from mail_dock.usecases.trash import (
+    PurgeResult,
+    list_startup_purge_candidates,
+    purge,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -108,6 +114,13 @@ class _StartupVerificationCompletion(QObject):
         else:
             window = self._context.build_main_window()
         self._result["window"] = window
+        try:
+            _run_startup_purge(self._context, window)
+        except BaseException as error:
+            self._result["error"] = error
+            _show_error(error)
+            self._app.quit()
+            return
         window.show()
         if self._session.settings.sync_on_startup:
             start_sync = getattr(window, "start_startup_sync", None)
@@ -120,6 +133,86 @@ class _StartupVerificationCompletion(QObject):
             self._result["error"] = error
             _show_error(error)
         self._app.quit()
+
+
+def _startup_purge_confirmation_message(candidates: tuple[Mapping[str, Any], ...]) -> str:
+    total_size = sum(
+        int(record["size_bytes"])
+        for record in candidates
+        if isinstance(record.get("size_bytes"), int) and record["size_bytes"] >= 0
+    )
+    subjects = "\n".join(
+        f"- {str(record.get('subject') or '(件名なし)')[:80]}" for record in candidates
+    )
+    return (
+        f"猶予期間を過ぎたメール {len(candidates)} 件を完全削除します。\n"
+        f"合計サイズ: {total_size} bytes\n\n{subjects}\n\n実行しますか?"
+    )
+
+
+def _run_startup_purge(context: AppContext, parent: Any = None) -> PurgeResult | None:
+    """Apply the configured automatic purge policy before startup sync."""
+
+    settings = context.settings
+    if settings.purge_mode == "manual":
+        return None
+
+    repository = context.create_message_repository()
+    candidates = tuple(
+        list_startup_purge_candidates(
+            repository,
+            mode=settings.purge_mode,
+            now=datetime.now(UTC),
+            grace_days=settings.trash_grace_days,
+        )
+    )
+    if not candidates:
+        return PurgeResult()
+    if (
+        settings.purge_mode == "grace"
+        and not ConfirmationDialog(
+            _startup_purge_confirmation_message(candidates), parent
+        ).confirmed()
+    ):
+        return PurgeResult(skipped_ids=tuple(record.get("id") for record in candidates))
+
+    storage_state = StorageStateMachine()
+    storage = context.create_purge_storage()
+    purged_ids: list[Any] = []
+    skipped_ids: list[Any] = []
+    physical_paths: list[str] = []
+    shared_paths: list[str] = []
+    total_size_bytes = 0
+    records_by_account: dict[str, list[Any]] = {}
+    for record in candidates:
+        account_id = record.get("account_id")
+        message_id = record.get("id")
+        if isinstance(account_id, str) and message_id is not None:
+            records_by_account.setdefault(account_id, []).append(message_id)
+    for account_id, message_ids in records_by_account.items():
+        manifest = context.create_manifest_writer(account_id)
+        try:
+            result = purge(
+                repository,
+                storage,
+                manifest,
+                message_ids=message_ids,
+                storage_state=storage_state,
+            )
+        finally:
+            manifest.close()
+        purged_ids.extend(result.purged_ids)
+        skipped_ids.extend(result.skipped_ids)
+        physical_paths.extend(result.physically_deleted_paths)
+        shared_paths.extend(result.shared_paths)
+        total_size_bytes += result.total_size_bytes
+    return PurgeResult(
+        purged_ids=tuple(purged_ids),
+        skipped_ids=tuple(skipped_ids),
+        physically_deleted_paths=tuple(physical_paths),
+        shared_paths=tuple(shared_paths),
+        total_size_bytes=total_size_bytes,
+    )
 
 
 def _available_root(settings: config.AppConfig, requested_root: Path | None) -> Path | None:

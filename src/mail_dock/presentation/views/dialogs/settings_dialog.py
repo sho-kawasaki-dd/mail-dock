@@ -458,6 +458,23 @@ class SettingsDialog(QDialog):
         self._startup_verification.addItem(strings.SETTINGS_VERIFICATION_FULL, "full")
         index = self._startup_verification.findData(self._settings.startup_verification)
         self._startup_verification.setCurrentIndex(max(0, index))
+        self._purge_mode = QComboBox(settings_group)
+        self._purge_mode.setObjectName("purgeModeComboBox")
+        self._purge_mode.addItem(strings.SETTINGS_PURGE_MODE_MANUAL, "manual")
+        self._purge_mode.addItem(strings.SETTINGS_PURGE_MODE_GRACE, "grace")
+        self._purge_mode.addItem(strings.SETTINGS_PURGE_MODE_IMMEDIATE, "immediate")
+        purge_index = self._purge_mode.findData(self._settings.purge_mode)
+        self._purge_mode.setCurrentIndex(max(0, purge_index))
+        self._purge_mode.currentIndexChanged.connect(self._update_purge_warning)
+        self._trash_grace_days = QSpinBox(settings_group)
+        self._trash_grace_days.setObjectName("trashGraceDaysSpinBox")
+        self._trash_grace_days.setRange(0, 3650)
+        self._trash_grace_days.setSuffix(" 日")
+        self._trash_grace_days.setValue(self._settings.trash_grace_days)
+        self._purge_mode_warning = QLabel(settings_group)
+        self._purge_mode_warning.setObjectName("purgeModeWarningLabel")
+        self._purge_mode_warning.setWordWrap(True)
+        self._update_purge_warning()
         self._encryption_combo = QComboBox(settings_group)
         self._encryption_combo.setObjectName("encryptionDeclarationComboBox")
         self._encryption_combo.addItem(strings.WIZARD_ENCRYPTION_ENCRYPTED, "encrypted")
@@ -516,6 +533,9 @@ class SettingsDialog(QDialog):
             strings.SETTINGS_LABEL_STARTUP_VERIFICATION,
             self._startup_verification,
         )
+        settings_form.addRow(strings.SETTINGS_LABEL_PURGE_MODE, self._purge_mode)
+        settings_form.addRow(strings.SETTINGS_LABEL_TRASH_GRACE_DAYS, self._trash_grace_days)
+        settings_form.addRow(self._purge_mode_warning)
         settings_form.addRow(strings.SETTINGS_LABEL_ENCRYPTION, self._encryption_combo)
         capability_controls = QHBoxLayout()
         capability_controls.addWidget(self._capability_label, 1)
@@ -587,6 +607,12 @@ class SettingsDialog(QDialog):
         self._ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
         self._buttons = buttons
         layout.addWidget(buttons)
+
+    def _update_purge_warning(self) -> None:
+        is_immediate = self._purge_mode.currentData() == "immediate"
+        self._purge_mode_warning.setText(
+            strings.SETTINGS_WARNING_PURGE_IMMEDIATE if is_immediate else ""
+        )
 
     def _load_accounts(self) -> None:
         self._set_busy(True)
@@ -823,6 +849,8 @@ class SettingsDialog(QDialog):
             block_remote_images=self._block_remote_images.isChecked(),
             sync_on_startup=self._sync_on_startup.isChecked(),
             startup_verification=startup_verification,
+            purge_mode=cast(str, self._purge_mode.currentData()),
+            trash_grace_days=self._trash_grace_days.value(),
             storage_profiles=storage_profiles,
             credential_storage=self._credential_storage_mode(),
         )

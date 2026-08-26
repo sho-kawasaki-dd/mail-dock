@@ -15,6 +15,7 @@ from mail_dock.domain.ports import (
 )
 from mail_dock.usecases.trash import (
     list_purge_candidates,
+    list_startup_purge_candidates,
     move_to_trash,
     purge,
     recover_incomplete_purges,
@@ -174,6 +175,31 @@ def test_list_purge_candidates_uses_grace_period() -> None:
 
     assert [record["id"] for record in candidates] == [old]
     assert recent not in [record["id"] for record in candidates]
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_ids"),
+    [("manual", ()), ("grace", (1,)), ("immediate", (1,))],
+)
+def test_startup_purge_candidates_follow_mode(mode: str, expected_ids: tuple[int, ...]) -> None:
+    repo = InMemoryMessageRepository()
+    _message(
+        repo,
+        uid=1,
+        path="old.eml",
+        raw=b"old",
+        local_state="trashed",
+        trashed_at="2026-07-20T00:00:00+00:00",
+    )
+
+    candidates = list_startup_purge_candidates(
+        repo,
+        mode=mode,
+        now=datetime(2026, 8, 27, tzinfo=UTC),
+        grace_days=30,
+    )
+
+    assert tuple(record["id"] for record in candidates) == expected_ids
 
 
 def test_purge_preserves_shared_eml_until_last_reference() -> None:

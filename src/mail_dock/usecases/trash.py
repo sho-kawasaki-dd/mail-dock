@@ -144,6 +144,27 @@ def list_purge_candidates(
     return repo.list_trashed(older_than=cutoff.isoformat())
 
 
+def list_startup_purge_candidates(
+    repo: BaseMessageRepository,
+    *,
+    mode: str,
+    now: datetime,
+    grace_days: int,
+) -> Sequence[MessageRecord]:
+    """Return candidates for the configured startup purge policy.
+
+    Manual mode is intentionally excluded from startup processing.  The
+    presentation layer decides whether a grace-mode run is confirmed before
+    calling ``purge``; immediate mode can proceed without that prompt.
+    """
+
+    if mode == "manual":
+        return ()
+    if mode not in {"grace", "immediate"}:
+        raise ValueError(f"unsupported purge mode: {mode}")
+    return list_purge_candidates(repo, now=now, grace_days=grace_days)
+
+
 def _purge_event(
     event: str,
     record: Mapping[str, Any],

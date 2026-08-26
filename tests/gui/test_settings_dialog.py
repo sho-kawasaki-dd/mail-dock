@@ -166,7 +166,7 @@ def test_account_dialog_edit_requires_connection_test_when_host_changes(qtbot: A
     dialog._stop_worker()
 
 
-def test_active_settings_are_saved_and_phase4_controls_are_absent(qtbot: Any) -> None:
+def test_active_settings_are_saved_with_purge_controls(qtbot: Any) -> None:
     context = _Context()
     dialog = SettingsDialog(context)
     qtbot.addWidget(dialog)
@@ -177,14 +177,17 @@ def test_active_settings_are_saved_and_phase4_controls_are_absent(qtbot: Any) ->
     dialog._block_remote_images.setChecked(False)
     dialog._sync_on_startup.setChecked(False)
     dialog._startup_verification.setCurrentIndex(dialog._startup_verification.findData("full"))
+    dialog._purge_mode.setCurrentIndex(dialog._purge_mode.findData("immediate"))
+    dialog._trash_grace_days.setValue(45)
 
     assert dialog._save_settings()
     assert context.saved[-1].max_message_bytes == 12 * 1024 * 1024
     assert not context.saved[-1].block_remote_images
     assert not context.saved[-1].sync_on_startup
     assert context.saved[-1].startup_verification == "full"
-    assert not hasattr(dialog, "_remote_delete_mode")
-    assert not hasattr(dialog, "_purge_mode")
+    assert context.saved[-1].purge_mode == "immediate"
+    assert context.saved[-1].trash_grace_days == 45
+    assert dialog._purge_mode_warning.text() == strings.SETTINGS_WARNING_PURGE_IMMEDIATE
     dialog._stop_worker()
 
 

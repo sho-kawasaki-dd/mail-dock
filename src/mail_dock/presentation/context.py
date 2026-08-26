@@ -23,6 +23,7 @@ from mail_dock.domain.ports import (
     BaseEmlStorage,
     BaseManifestReader,
     BaseManifestWriter,
+    BasePurgeStorage,
     JSONValue,
 )
 from mail_dock.domain.repository import MessageRecord
@@ -146,6 +147,11 @@ class AppContext:
 
     def create_eml_storage(self) -> BaseEmlStorage:
         """Create an EML storage adapter bound to this root."""
+
+        return EmlStorage(self.storage_root)
+
+    def create_purge_storage(self) -> BasePurgeStorage:
+        """Create the purge-capable storage adapter bound to this root."""
 
         return EmlStorage(self.storage_root)
 

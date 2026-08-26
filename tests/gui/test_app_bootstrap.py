@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import pytest
 
@@ -9,6 +9,7 @@ from mail_dock import config
 from mail_dock.domain.errors import StorageUnsupportedError
 from mail_dock.infrastructure.storage.capabilities import CapabilityLevel, StorageCapabilities
 from mail_dock.presentation import app
+from mail_dock.usecases.trash import PurgeResult
 
 pytestmark = pytest.mark.gui
 
@@ -105,6 +106,34 @@ class _FakeWindow:
         self.stop_calls += 1
 
 
+class _PurgeManifest:
+    def __init__(self, account_id: str) -> None:
+        self.account_id = account_id
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+
+class _PurgeContext:
+    def __init__(self, mode: str) -> None:
+        self.settings = config.AppConfig(purge_mode=mode)
+        self.manifest_accounts: list[str] = []
+
+    def create_message_repository(self) -> object:
+        return object()
+
+    def create_eml_storage(self) -> object:
+        return object()
+
+    def create_purge_storage(self) -> object:
+        return object()
+
+    def create_manifest_writer(self, account_id: str) -> _PurgeManifest:
+        self.manifest_accounts.append(account_id)
+        return _PurgeManifest(account_id)
+
+
 class _FakeThread:
     def isRunning(self) -> bool:  # noqa: N802
         return False
@@ -165,6 +194,73 @@ def test_run_gui_starts_session_only_after_root_confirmation(
     assert _FakeContext.instances[0].save_calls == 1
     assert window.stop_calls == 1
     assert errors == []
+
+
+def test_immediate_startup_purge_does_not_prompt_and_separates_manifests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _PurgeContext("immediate")
+    candidates = (
+        {"id": 1, "account_id": "account-a", "subject": "first", "size_bytes": 10},
+        {"id": 2, "account_id": "account-b", "subject": "second", "size_bytes": 20},
+    )
+    purge_calls: list[tuple[str, tuple[int, ...]]] = []
+
+    monkeypatch.setattr(app, "list_startup_purge_candidates", lambda *_args, **_kwargs: candidates)
+    monkeypatch.setattr(
+        app,
+        "ConfirmationDialog",
+        lambda *_args, **_kwargs: pytest.fail("immediate purge must not prompt"),
+    )
+
+    def fake_purge(
+        _repo: object,
+        _storage: object,
+        manifest: _PurgeManifest,
+        **kwargs: object,
+    ) -> PurgeResult:
+        message_ids = kwargs["message_ids"]
+        assert isinstance(message_ids, list)
+        purge_calls.append((manifest.account_id, tuple(message_ids)))
+        return PurgeResult(purged_ids=tuple(message_ids))
+
+    monkeypatch.setattr(app, "purge", fake_purge)
+
+    result = app._run_startup_purge(cast(Any, context))
+
+    assert result is not None
+    assert result.purged_ids == (1, 2)
+    assert purge_calls == [("account-a", (1,)), ("account-b", (2,))]
+    assert context.manifest_accounts == ["account-a", "account-b"]
+
+
+def test_grace_startup_purge_shows_candidates_and_honors_rejection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _PurgeContext("grace")
+    candidates = ({"id": 1, "account_id": "account-a", "subject": "old mail", "size_bytes": 10},)
+    messages: list[str] = []
+    purge_calls: list[object] = []
+
+    monkeypatch.setattr(app, "list_startup_purge_candidates", lambda *_args, **_kwargs: candidates)
+
+    class RejectDialog:
+        def __init__(self, message: str, _parent: object) -> None:
+            messages.append(message)
+
+        def confirmed(self) -> bool:
+            return False
+
+    monkeypatch.setattr(app, "ConfirmationDialog", RejectDialog)
+    monkeypatch.setattr(app, "purge", lambda *_args, **_kwargs: purge_calls.append(True))
+
+    result = app._run_startup_purge(cast(Any, context))
+
+    assert result is not None
+    assert result.skipped_ids == (1,)
+    assert purge_calls == []
+    assert "old mail" in messages[0]
+    assert "1 件" in messages[0]
 
 
 def test_setup_root_probe_does_not_initialize_or_persist_root(
