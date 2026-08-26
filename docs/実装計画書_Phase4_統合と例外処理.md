@@ -328,13 +328,13 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **C-3. `presentation/threads/verify_worker.py` — 3本目のワーカー（D-5）**
 
-- [ ] `VerifyWorker(Worker)` を実装する（読み取り中心）
-- [ ] `quick_verify` / `range_verify` / `full_verify` / `orphan_scan` / `verify_manifest` / `reindex` / `reparse` を受け付ける
-- [ ] 進捗を100ms間引きして Signal へ中継する（`SyncWorker` と同じ規約）
-- [ ] **DB書き込みを伴う後処理は `SyncWorker` へ委譲するか、`SyncWorker` の停止を確認したうえで排他実行する**。単一ライター規約を崩さないことをコメントとテストで固定する
-- [ ] `VerifyWorker` は `BasePurgeStorage.delete()` など物理削除を伴うポートを直接呼び出さず、検証結果を返すだけにする（レビュー修正案 3.5）
-- [ ] `StorageDetachedError` を `storage_detached` Signal で `StorageMonitor` へ通知する
-- [ ] スレッド終了時に、そのスレッドが開いたSQLite接続を必ず閉じる
+- [x] `VerifyWorker(Worker)` を実装する（読み取り中心）
+- [x] `quick_verify` / `range_verify` / `full_verify` / `orphan_scan` / `verify_manifest` / `reindex` / `reparse` を受け付ける
+- [x] 進捗を100ms間引きして Signal へ中継する（`SyncWorker` と同じ規約）
+- [x] **DB書き込みを伴う後処理は `SyncWorker` へ委譲するか、`SyncWorker` の停止を確認したうえで排他実行する**。単一ライター規約を崩さないことをコメントとテストで固定する
+- [x] `VerifyWorker` は `BasePurgeStorage.delete()` など物理削除を伴うポートを直接呼び出さず、検証結果を返すだけにする（レビュー修正案 3.5）
+- [x] `StorageDetachedError` を `storage_detached` Signal で `StorageMonitor` へ通知する
+- [x] スレッド終了時に、そのスレッドが開いたSQLite接続を必ず閉じる
 
 #### **C-4. CLI 拡張（F-19 / D-3）**
 
