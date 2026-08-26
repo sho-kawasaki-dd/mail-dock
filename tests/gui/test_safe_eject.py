@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -55,7 +55,7 @@ def test_safe_detach_releases_resources_in_required_order() -> None:
     events: list[str] = []
     runtime = app._GuiRuntime(None, config.AppConfig())  # type: ignore[arg-type]
     runtime.session = _Session(events)  # type: ignore[assignment]
-    runtime.context = object()
+    runtime.context = cast(Any, object())
     runtime.window = _Window(events)
     runtime.storage_monitor = _Monitor(events)  # type: ignore[assignment]
 

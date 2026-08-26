@@ -151,6 +151,8 @@ def _open_with_share_delete(path: Path) -> BinaryIO:
     import msvcrt
     from ctypes import wintypes
 
+    ctypes_windows: Any = ctypes
+    msvcrt_windows: Any = msvcrt
     generic_read = 0x80000000
     file_share_read = 0x00000001
     file_share_write = 0x00000002
@@ -159,7 +161,7 @@ def _open_with_share_delete(path: Path) -> BinaryIO:
     file_attribute_normal = 0x80
     invalid_handle_value = wintypes.HANDLE(-1).value
 
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32 = ctypes_windows.WinDLL("kernel32", use_last_error=True)
     kernel32.CreateFileW.argtypes = [
         wintypes.LPCWSTR,
         wintypes.DWORD,
@@ -181,8 +183,8 @@ def _open_with_share_delete(path: Path) -> BinaryIO:
         None,
     )
     if handle == invalid_handle_value:
-        raise ctypes.WinError(ctypes.get_last_error())
-    fd = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+        raise ctypes_windows.WinError(ctypes_windows.get_last_error())
+    fd = msvcrt_windows.open_osfhandle(handle, os.O_RDONLY | getattr(os, "O_BINARY", 0))
     return cast(BinaryIO, os.fdopen(fd, "rb"))
 
 
@@ -197,6 +199,7 @@ def _replace_with_posix_semantics(source: Path, target: Path) -> None:
     import struct
     from ctypes import wintypes
 
+    ctypes_windows: Any = ctypes
     delete_access = 0x00010000
     file_share_read = 0x00000001
     file_share_write = 0x00000002
@@ -208,7 +211,7 @@ def _replace_with_posix_semantics(source: Path, target: Path) -> None:
     posix_semantics = 0x2
     invalid_handle_value = wintypes.HANDLE(-1).value
 
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32 = ctypes_windows.WinDLL("kernel32", use_last_error=True)
     kernel32.CreateFileW.argtypes = [
         wintypes.LPCWSTR,
         wintypes.DWORD,
@@ -238,7 +241,7 @@ def _replace_with_posix_semantics(source: Path, target: Path) -> None:
         None,
     )
     if handle == invalid_handle_value:
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise ctypes_windows.WinError(ctypes_windows.get_last_error())
     try:
         name = str(target).encode("utf-16-le")
         flags = replace_if_exists | posix_semantics
@@ -246,7 +249,7 @@ def _replace_with_posix_semantics(source: Path, target: Path) -> None:
         if not kernel32.SetFileInformationByHandle(
             handle, file_rename_info_ex, buffer, len(buffer)
         ):
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise ctypes_windows.WinError(ctypes_windows.get_last_error())
     finally:
         kernel32.CloseHandle(handle)
 
