@@ -76,6 +76,18 @@ class MemoryManifest(BaseManifestWriter):
     def flush_and_sync(self) -> None:
         self.sync_count += 1
 
+    def checkpoint(self, sequence: int, batch_id: str) -> None:
+        self.append(
+            {
+                "event": "checkpoint",
+                "account_id": "account",
+                "timestamp": datetime.now(UTC).isoformat(),
+                "sequence": sequence,
+                "batch_id": batch_id,
+            }
+        )
+        self.flush_and_sync()
+
 
 class TrackingFetcher(FakeFetcher):
     def __init__(

@@ -184,9 +184,9 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **A-2. `domain/ports.py` — マニフェストポートの拡張**
 
-- [ ] `BaseManifestWriter` に `checkpoint(sequence: int, batch_id: str) -> None` を追加する
-- [ ] `BaseManifestReader` を新設し、全イベント列挙・最後の `checkpoint` 取得・`checkpoint` 以降のイベント列挙・未完了 `purge_intent` / `remote_delete_intent` の列挙を提供する（レビュー修正案 3.5）
-- [ ] 既存のテストダブル（`tests/support/` 配下）をすべて更新する
+- [x] `BaseManifestWriter` に `checkpoint(sequence: int, batch_id: str) -> None` を追加する
+- [x] `BaseManifestReader` を新設し、全イベント列挙・最後の `checkpoint` 取得・`checkpoint` 以降のイベント列挙・未完了 `purge_intent` / `remote_delete_intent` の列挙を提供する（レビュー修正案 3.5）
+- [x] 既存のテストダブル（`tests/support/` 配下）をすべて更新する
 
 #### **A-3. `usecases/sync_mail.py` — checkpoint と WAL チェックポイントの記録**
 

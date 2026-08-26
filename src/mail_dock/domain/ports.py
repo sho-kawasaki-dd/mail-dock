@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from datetime import datetime
 
 from mail_dock.domain.messages import AttachmentSavePlan, RenderedMessage, SavedFile, StoredEml
@@ -14,6 +14,7 @@ __all__ = [
     "AttachmentSavePlan",
     "BaseCredentialStore",
     "BaseEmlStorage",
+    "BaseManifestReader",
     "BaseManifestWriter",
     "BaseMessageRenderer",
     "JSONValue",
@@ -79,3 +80,27 @@ class BaseManifestWriter(ABC):
     @abstractmethod
     def flush_and_sync(self) -> None:
         """Flush buffered events and make them durable."""
+
+    @abstractmethod
+    def checkpoint(self, sequence: int, batch_id: str) -> None:
+        """Append and durably flush a completed synchronization batch marker."""
+
+
+class BaseManifestReader(ABC):
+    """Read-only port for an account's durable manifest history."""
+
+    @abstractmethod
+    def read_all_events(self) -> Iterator[Mapping[str, JSONValue]]:
+        """Yield every valid event in manifest order."""
+
+    @abstractmethod
+    def read_last_checkpoint(self) -> Mapping[str, JSONValue] | None:
+        """Return the latest durable checkpoint, if one exists."""
+
+    @abstractmethod
+    def read_events_since_checkpoint(self) -> Iterator[Mapping[str, JSONValue]]:
+        """Yield events written after the latest durable checkpoint."""
+
+    @abstractmethod
+    def read_incomplete_intents(self) -> Iterator[Mapping[str, JSONValue]]:
+        """Yield destructive-operation intents without completion events."""
