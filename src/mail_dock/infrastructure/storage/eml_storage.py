@@ -228,9 +228,7 @@ class EmlStorage(BaseEmlStorage, BaseIntegrityStorage, BasePurgeStorage):
         with storage_io():
             return _resolve_inside(self.root, relative_path).stat()
 
-    def iter_chunks(
-        self, relative_path: str, chunk_size: int = 1024 * 1024
-    ) -> Iterator[bytes]:
+    def iter_chunks(self, relative_path: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
         """Yield bounded chunks without loading the EML into memory."""
 
         if chunk_size <= 0:

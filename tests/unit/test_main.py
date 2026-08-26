@@ -205,21 +205,15 @@ def test_storage_session_marks_shutdown_unclean_until_normal_exit(
 
     with StorageSession(config.AppConfig(), tmp_storage_root) as session:
         assert session.previous_clean_shutdown is None
-        assert (
-            session.connection_manager.get_connection()
-            .execute("SELECT value FROM app_state WHERE key = 'clean_shutdown'")
-            .fetchone()
-            == ("0",)
-        )
+        assert session.connection_manager.get_connection().execute(
+            "SELECT value FROM app_state WHERE key = 'clean_shutdown'"
+        ).fetchone() == ("0",)
 
     with StorageSession(config.AppConfig(), tmp_storage_root) as session:
         assert session.previous_clean_shutdown is True
-        assert (
-            session.connection_manager.get_connection()
-            .execute("SELECT value FROM app_state WHERE key = 'clean_shutdown'")
-            .fetchone()
-            == ("0",)
-        )
+        assert session.connection_manager.get_connection().execute(
+            "SELECT value FROM app_state WHERE key = 'clean_shutdown'"
+        ).fetchone() == ("0",)
 
 
 def test_storage_session_retains_unclean_shutdown_after_exception(
