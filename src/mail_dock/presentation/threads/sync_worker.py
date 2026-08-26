@@ -22,7 +22,7 @@ from mail_dock.domain.messages import AttachmentSavePlan, SavedFile
 from mail_dock.domain.ports import BaseEmlStorage, BaseManifestWriter, BaseMessageRenderer
 from mail_dock.domain.repository import BaseMessageRepository, MessageRecord
 from mail_dock.presentation.errors import user_message
-from mail_dock.presentation.threads.worker import Worker, _Task
+from mail_dock.presentation.threads.worker import OperationGate, Worker, _Task, operation_gate
 from mail_dock.usecases.export_message import export_eml
 from mail_dock.usecases.save_attachment import (
     commit_attachment_save,
@@ -110,6 +110,7 @@ class SyncWorker(Worker):
         refresh_folders_usecase: RefreshFoldersUseCase = refresh_folders,
         sync_options: SyncOptions | None = None,
         connection_manager: Any | None = None,
+        operation_gate: OperationGate | None = None,
         clock: Clock = time.monotonic,
     ) -> None:
         super().__init__(connection_manager)
@@ -122,6 +123,7 @@ class SyncWorker(Worker):
         self._refresh_folders_usecase = refresh_folders_usecase
         self._sync_options = sync_options or SyncOptions()
         self._clock = clock
+        self._operation_gate = operation_gate
         self._operations_by_token: dict[CancelToken, SyncOperation] = {}
 
         self.task_failed.connect(self._on_task_failed)
@@ -323,7 +325,8 @@ class SyncWorker(Worker):
 
         def run() -> _SyncTaskResult:
             token.raise_if_cancelled()
-            return operation(token)
+            with operation_gate(self._operation_gate, token):
+                return operation(token)
 
         self._operations_by_token[token] = operation_kind
         try:

@@ -19,7 +19,7 @@ from mail_dock.domain.ports import (
 )
 from mail_dock.domain.repository import BaseMessageRepository
 from mail_dock.presentation.errors import user_message
-from mail_dock.presentation.threads.worker import Worker, _Task
+from mail_dock.presentation.threads.worker import OperationGate, Worker, _Task, operation_gate
 from mail_dock.usecases.reindex import ReindexProgress, ReindexResult, reindex
 from mail_dock.usecases.reparse import ReparseResult, reparse_messages
 from mail_dock.usecases.verify import (
@@ -50,6 +50,7 @@ StorageFactory = Callable[[], BaseIntegrityStorage]
 ManifestReaderFactory = Callable[[], BaseManifestReader]
 ProgressCallback = Callable[[VerifyProgress | ReindexProgress], None]
 ExclusiveWriteGuard = Callable[[], None]
+ReindexCoordinator = Callable[..., ReindexResult]
 Clock = Callable[[], float]
 VerifyResult = (
     QuickVerifyResult
@@ -116,9 +117,11 @@ class VerifyWorker(Worker):
         orphan_scan_usecase: Callable[..., OrphanScanResult] = orphan_scan,
         verify_manifest_usecase: Callable[..., ManifestVerifyResult] = verify_manifest,
         reindex_usecase: Callable[..., ReindexResult] = reindex,
+        reindex_coordinator: ReindexCoordinator | None = None,
         reparse_usecase: Callable[..., ReparseResult] = reparse_messages,
         exclusive_write_guard: ExclusiveWriteGuard | None = None,
         connection_manager: Any | None = None,
+        operation_gate: OperationGate | None = None,
         clock: Clock = time.monotonic,
     ) -> None:
         super().__init__(connection_manager)
@@ -132,8 +135,10 @@ class VerifyWorker(Worker):
         self._orphan_scan_usecase = orphan_scan_usecase
         self._verify_manifest_usecase = verify_manifest_usecase
         self._reindex_usecase = reindex_usecase
+        self._reindex_coordinator = reindex_coordinator
         self._reparse_usecase = reparse_usecase
         self._exclusive_write_guard = exclusive_write_guard
+        self._operation_gate = operation_gate
         self._clock = clock
         self._operations_by_token: dict[CancelToken, VerifyOperation] = {}
 
@@ -208,7 +213,7 @@ class VerifyWorker(Worker):
 
         return self._submit_operation(
             "verify_manifest",
-            lambda token: self._verify_manifest_usecase(selected_root, cancel=token),
+            lambda token: self._verify_manifest_with_guard(selected_root, token),
         )
 
     request_verify_manifest = verify_manifest
@@ -218,6 +223,11 @@ class VerifyWorker(Worker):
 
         def operation(token: CancelToken) -> ReindexResult:
             self._ensure_exclusive_write()
+            if self._reindex_coordinator is not None:
+                return self._reindex_coordinator(
+                    cancel=token,
+                    on_progress=self._forward_progress(),
+                )
             return self._reindex_usecase(
                 self._repository_factory(),
                 cast(BaseEmlStorage, self._storage_factory()),
@@ -258,6 +268,14 @@ class VerifyWorker(Worker):
             raise RuntimeError("this verification operation requires a manifest reader")
         return self._manifest_reader_factory()
 
+    def _verify_manifest_with_guard(
+        self,
+        root: Path,
+        token: CancelToken,
+    ) -> ManifestVerifyResult:
+        self._ensure_exclusive_write()
+        return self._verify_manifest_usecase(root, cancel=token)
+
     def _ensure_exclusive_write(self) -> None:
         """Require the presentation layer to serialize repository mutations."""
 
@@ -276,7 +294,8 @@ class VerifyWorker(Worker):
 
         def run() -> VerifyTaskResult:
             token.raise_if_cancelled()
-            return VerifyTaskResult(operation_kind, cast(VerifyResult, operation(token)))
+            with operation_gate(self._operation_gate, token):
+                return VerifyTaskResult(operation_kind, cast(VerifyResult, operation(token)))
 
         self._operations_by_token[token] = operation_kind
         try:

@@ -90,6 +90,8 @@ MAIN_MENU_EXPORT_EML = ".eml として保存"
 MAIN_MENU_EXIT = "終了"
 MAIN_MENU_VIEW = "表示"
 MAIN_MENU_THREAD_VIEW = "スレッド表示"
+MAIN_MENU_TOOLS = "ツール"
+MAIN_MENU_INTEGRITY = "整合性チェック"
 MAIN_MENU_HELP = "ヘルプ"
 MAIN_MENU_HELP_ENCRYPTION = "保管先の暗号化について"
 MAIN_MENU_OPEN_LOG_FOLDER = "ログフォルダを開く"
@@ -102,6 +104,49 @@ MAIN_TOOLBAR_SYNC = "同期"
 MAIN_TOOLBAR_REFRESH_FOLDERS = "フォルダを再取得"
 MAIN_TOOLBAR_SEARCH = "検索"
 MAIN_TOOLBAR_SETTINGS = "設定"
+
+INTEGRITY_TITLE = "整合性チェック"
+INTEGRITY_RUN = "実行"
+INTEGRITY_MODE_QUICK = "簡易検証"
+INTEGRITY_MODE_RANGE = "範囲限定検証"
+INTEGRITY_MODE_FULL = "完全検証"
+INTEGRITY_MODE_ORPHANS = "孤児スキャン"
+INTEGRITY_MODE_MANIFEST = "マニフェスト検証"
+INTEGRITY_MODE_REINDEX = "データベース再構築"
+INTEGRITY_MODE_REPARSE = "失敗メールを再解析"
+INTEGRITY_CONFIRM_REINDEX = (
+    "データベースを再構築します。既存のメタデータキャッシュを置き換えますか?"
+)
+INTEGRITY_STATUS_READY = "検証モードを選択して実行してください。"
+INTEGRITY_STATUS_RUNNING = "処理中..."
+INTEGRITY_STATUS_CANCELLING = "キャンセルしています..."
+INTEGRITY_STATUS_CANCELLED = "操作をキャンセルしました。"
+INTEGRITY_STATUS_COMPLETE = "処理が完了しました。"
+INTEGRITY_STATUS_PROGRESS = "{checked} / {total}: {path}"
+INTEGRITY_RESULT_QUICK = "簡易検証完了: {checked} 件確認 / 問題 {issues} 件"
+INTEGRITY_RESULT_RANGE = (
+    "範囲限定検証完了: {checked} 件確認 / 問題 {issues} 件 / 修復 {repaired} 件"
+)
+INTEGRITY_RESULT_FULL = "完全検証完了: {checked} 件確認 / 問題 {issues} 件"
+INTEGRITY_RESULT_ORPHANS = (
+    "孤児スキャン完了: {checked} 件確認 / 登録候補 {registerable} 件 / 隔離 {quarantined} 件"
+)
+INTEGRITY_RESULT_MANIFEST = (
+    "マニフェスト検証完了: {files} ファイル / {records} レコード / 修復 {repaired} bytes"
+)
+INTEGRITY_RESULT_REINDEX = (
+    "再構築完了: アカウント {accounts} / フォルダ {folders} / "
+    "メッセージ {messages} / スキップ {skipped}"
+)
+INTEGRITY_RESULT_REPARSE = "再解析完了: 成功 {reparsed} 件 / スキップ {skipped} 件"
+INTEGRITY_MISSING = "欠落"
+INTEGRITY_SIZE_MISMATCH = "サイズ不一致"
+INTEGRITY_ORPHAN_REGISTERABLE = "登録候補"
+INTEGRITY_ORPHAN_QUARANTINED = "隔離"
+INTEGRITY_MANIFEST_REPAIRED = "末尾を {bytes} bytes 修復しました。"
+INTEGRITY_MANIFEST_DAMAGED = "破損を修復"
+INTEGRITY_REINDEX_WARNING = "警告"
+INTEGRITY_SYNC_BUSY = "同期が実行中のため、整合性チェックを開始できません。"
 
 TABLE_HEADER_DATE = "日付"
 TABLE_HEADER_ACCOUNT = "アカウント"

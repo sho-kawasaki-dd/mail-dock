@@ -120,6 +120,7 @@ class ManifestVerifyResult:
     records_checked: int
     repaired_bytes: int
     cancelled: bool
+    damaged_paths: tuple[str, ...] = ()
 
     @property
     def repaired_count(self) -> int:
@@ -541,6 +542,7 @@ def verify_manifest(root: Any, *, cancel: CancelToken | None = None) -> Manifest
     files_checked = 0
     records_checked = 0
     repaired_bytes = 0
+    damaged_paths: list[str] = []
     cancelled = False
     for path in paths:
         try:
@@ -552,7 +554,15 @@ def verify_manifest(root: Any, *, cancel: CancelToken | None = None) -> Manifest
         files_checked += 1
         records_checked += file_records
         repaired_bytes += file_repaired_bytes
-    return ManifestVerifyResult(files_checked, records_checked, repaired_bytes, cancelled)
+        if file_repaired_bytes:
+            damaged_paths.append(str(path))
+    return ManifestVerifyResult(
+        files_checked,
+        records_checked,
+        repaired_bytes,
+        cancelled,
+        tuple(damaged_paths),
+    )
 
 
 __all__ = [

@@ -6,6 +6,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Lock
 from typing import Any, cast
 
 from PySide6.QtCore import QItemSelectionModel, QModelIndex, QSettings, Qt, QUrl, Signal
@@ -32,6 +33,7 @@ from PySide6.QtWidgets import (
 from mail_dock import config
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.messages import AttachmentSavePlan, SavedFile
+from mail_dock.domain.ports import BaseIntegrityStorage
 from mail_dock.domain.search import MessageDetail
 from mail_dock.domain.storage_state import StorageState
 from mail_dock.presentation import strings
@@ -47,6 +49,7 @@ from mail_dock.presentation.threads.sync_worker import (
     SyncErrorNotification,
     SyncWorker,
 )
+from mail_dock.presentation.threads.verify_worker import VerifyWorker
 from mail_dock.presentation.viewmodels.message_list_viewmodel import MessageListViewModel
 from mail_dock.presentation.views.detail_view import AttachmentSaveRequest, DetailView
 from mail_dock.presentation.views.dialogs.confirmation_dialog import (
@@ -54,8 +57,10 @@ from mail_dock.presentation.views.dialogs.confirmation_dialog import (
     confirm_overwrite,
     confirm_save_executable,
 )
+from mail_dock.presentation.views.dialogs.integrity_dialog import IntegrityDialog
 from mail_dock.presentation.views.dialogs.settings_dialog import SettingsDialog
 from mail_dock.presentation.views.message_list import MessageListSearchBar, MessageListView
+from mail_dock.usecases.reindex import ReindexResult
 from mail_dock.usecases.sync_folders import FolderRefreshResult
 from mail_dock.usecases.sync_mail import SyncOptions, SyncProgress, SyncResult
 
@@ -90,6 +95,8 @@ class MainWindow(QMainWindow):
         self._pending_attachment_request: AttachmentSaveRequest | None = None
         self._pending_attachment_plan: AttachmentSavePlan | None = None
         self._query_busy = False
+        self._verify_dialog: IntegrityDialog | None = None
+        self._operation_gate = Lock()
         self._ui_settings = QSettings("mail-dock", "mail-dock")
 
         self.query_worker = QueryWorker(
@@ -111,9 +118,12 @@ class MainWindow(QMainWindow):
                 flag_refresh_min_interval_seconds=context.settings.flag_refresh_min_interval_seconds,
             ),
             connection_manager=context.connection_manager,
+            operation_gate=self._operation_gate,
         )
         self.query_worker.start()
         self.sync_worker.start()
+        self.verify_worker = self._build_verify_worker()
+        self.verify_worker.start()
 
         query_worker = cast(Any, self.query_worker)
         self.message_list_viewmodel = MessageListViewModel(query_worker, self)
@@ -177,6 +187,7 @@ class MainWindow(QMainWindow):
         self.message_list_viewmodel.cancel_search()
         self.sync_worker.stop()
         self.query_worker.stop()
+        self.verify_worker.stop()
         self.context.stop_workers()
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
@@ -220,6 +231,7 @@ class MainWindow(QMainWindow):
         self.settings_action = QAction(strings.MAIN_TOOLBAR_SETTINGS, self)
         self.export_eml_action = QAction(strings.MAIN_MENU_EXPORT_EML, self)
         self.thread_view_action = QAction(strings.MAIN_MENU_THREAD_VIEW, self)
+        self.integrity_action = QAction(strings.MAIN_MENU_INTEGRITY, self)
         self.exit_action = QAction(strings.MAIN_MENU_EXIT, self)
         self.open_log_folder_action = QAction(strings.MAIN_MENU_OPEN_LOG_FOLDER, self)
         self.storage_info_action = QAction(strings.MAIN_MENU_STORAGE_INFO, self)
@@ -244,6 +256,8 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.exit_action)
         view_menu = self.menuBar().addMenu(strings.MAIN_MENU_VIEW)
         view_menu.addAction(self.thread_view_action)
+        tools_menu = self.menuBar().addMenu(strings.MAIN_MENU_TOOLS)
+        tools_menu.addAction(self.integrity_action)
         storage_menu = self.menuBar().addMenu(strings.MAIN_MENU_STORAGE)
         storage_menu.addAction(self.storage_info_action)
         storage_menu.addAction(self.storage_switch_action)
@@ -262,6 +276,7 @@ class MainWindow(QMainWindow):
         self.thread_view_action.triggered.connect(self.detail_view.request_thread)
         self.exit_action.triggered.connect(self.close)
         self.settings_requested.connect(self._show_settings)
+        self.integrity_action.triggered.connect(self._show_integrity_dialog)
         self.open_log_folder_action.triggered.connect(self._open_log_folder)
         self.encryption_help_action.triggered.connect(self._open_encryption_guide)
         self.storage_info_action.triggered.connect(self._show_storage_root)
@@ -317,6 +332,7 @@ class MainWindow(QMainWindow):
                 self._folder_refresh_token is not None,
                 self._file_token is not None,
                 self._query_busy,
+                bool(self.verify_worker.active_tokens),
             )
         )
 
@@ -509,6 +525,7 @@ class MainWindow(QMainWindow):
         self.sync_worker.folder_tree_updated.connect(self._update_folder_tree)
         self.sync_worker.error_reported.connect(self._show_sync_error)
         self.sync_worker.file_result.connect(self._show_file_result)
+        self.verify_worker.verify_result.connect(self._refresh_after_integrity_result)
 
         self._cancel_button.clicked.connect(self._cancel_current_operation)
         self.message_list_viewmodel.request_page()
@@ -520,6 +537,12 @@ class MainWindow(QMainWindow):
         self._count_label.setText(
             strings.STATUS_MESSAGE_COUNT.format(count=self.message_table_model.rowCount())
         )
+
+    def _refresh_after_integrity_result(self, result: object) -> None:
+        if not isinstance(result, ReindexResult):
+            return
+        self.message_table_model.reload()
+        self.sync_worker.load_folder_tree()
 
     def _set_query_busy(self, busy: bool) -> None:
         self._query_busy = busy
@@ -541,12 +564,18 @@ class MainWindow(QMainWindow):
 
     def _folder_selection_changed(self, current: Any, previous: Any) -> None:
         del previous
+        if self._workers_stopped:
+            return
         selected_filter = self.folder_tree_model.filter_for_index(current)
         if selected_filter is not None:
             self.message_list_viewmodel.set_filters(selected_filter)
 
     def _sync_selected_account(self) -> None:
-        if self._sync_token is not None or self._folder_refresh_token is not None:
+        if (
+            self._sync_token is not None
+            or self._folder_refresh_token is not None
+            or self.verify_worker.active_tokens
+        ):
             return
         account_id = self._selected_account_id()
         if account_id is not None:
@@ -571,7 +600,11 @@ class MainWindow(QMainWindow):
         self._start_sync(self.sync_worker.sync_account(account_ids[0]))
 
     def _refresh_selected_account(self) -> None:
-        if self._sync_token is not None or self._folder_refresh_token is not None:
+        if (
+            self._sync_token is not None
+            or self._folder_refresh_token is not None
+            or self.verify_worker.active_tokens
+        ):
             return
         account_id = self._selected_account_id()
         if account_id is None:
@@ -716,6 +749,41 @@ class MainWindow(QMainWindow):
             self._pending_attachment_request = None
             self._pending_attachment_plan = None
             self._status_label.setText(notification.message)
+
+    def _build_verify_worker(self) -> VerifyWorker:
+        manifest_reader_factory = getattr(self.context, "create_manifest_reader_all", None)
+        return VerifyWorker(
+            self.context.create_message_repository,
+            cast(Callable[[], BaseIntegrityStorage], self.context.create_eml_storage),
+            manifest_reader_factory if callable(manifest_reader_factory) else None,
+            manifest_root=self.context.storage_root,
+            reindex_coordinator=getattr(self.context, "rebuild_database", None),
+            exclusive_write_guard=self._ensure_verify_write_exclusive,
+            connection_manager=self.context.connection_manager,
+            operation_gate=self._operation_gate,
+        )
+
+    def _ensure_verify_write_exclusive(self) -> None:
+        if self._sync_token is not None or self.sync_worker.active_tokens:
+            raise RuntimeError(strings.INTEGRITY_SYNC_BUSY)
+
+    def _show_integrity_dialog(self) -> None:
+        if self._verify_dialog is not None:
+            self._verify_dialog.raise_()
+            self._verify_dialog.activateWindow()
+            return
+        dialog = IntegrityDialog(self.verify_worker, parent=self)
+        dialog.operation_finished.connect(self._integrity_finished)
+        dialog.finished.connect(self._integrity_dialog_closed)
+        self._verify_dialog = dialog
+        dialog.show()
+
+    def _integrity_finished(self) -> None:
+        if self._verify_dialog is not None and not self._verify_dialog.isVisible():
+            self._verify_dialog = None
+
+    def _integrity_dialog_closed(self, _result: int) -> None:
+        self._verify_dialog = None
 
     def _prepare_attachment_save(self, request: object) -> None:
         if not isinstance(request, AttachmentSaveRequest):

@@ -9,7 +9,8 @@ protocol so this module does not depend on the infrastructure layer.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from threading import Lock
 from typing import Protocol
@@ -27,6 +28,30 @@ class _ConnectionCloser(Protocol):
 
     def close_current_thread(self) -> None:
         """Close the SQLite connection owned by the calling thread."""
+
+
+class OperationGate(Protocol):
+    """Lock boundary shared by workers that mutate storage."""
+
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool: ...
+
+    def release(self) -> None: ...
+
+
+@contextmanager
+def operation_gate(gate: OperationGate | None, token: CancelToken) -> Iterator[None]:
+    """Hold a shared gate while allowing cancellation during contention."""
+
+    if gate is None:
+        yield
+        return
+    while not gate.acquire(timeout=0.1):
+        token.raise_if_cancelled()
+    try:
+        token.raise_if_cancelled()
+        yield
+    finally:
+        gate.release()
 
 
 @dataclass(frozen=True)

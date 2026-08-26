@@ -337,6 +337,7 @@ class _GuiRuntime:
             for worker in (
                 getattr(window, "query_worker", None),
                 getattr(window, "sync_worker", None),
+                getattr(window, "verify_worker", None),
             )
             if worker is not None
         )

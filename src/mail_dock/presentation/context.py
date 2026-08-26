@@ -8,7 +8,8 @@ this context only exposes their active lifetime to the presentation layer.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import suppress
 from dataclasses import replace
 from importlib import import_module
 from pathlib import Path
@@ -22,6 +23,7 @@ from mail_dock.domain.ports import (
     BaseEmlStorage,
     BaseManifestReader,
     BaseManifestWriter,
+    JSONValue,
 )
 from mail_dock.domain.repository import MessageRecord
 from mail_dock.domain.search import BaseSearchRepository
@@ -48,6 +50,37 @@ if TYPE_CHECKING:
 
 MessageRendererFactory = Callable[[], Any]
 HtmlSanitizerFactory = Callable[..., str]
+
+
+class _CombinedManifestReader(BaseManifestReader):
+    """Read account manifests through one provider-independent reader port."""
+
+    def __init__(self, readers: tuple[BaseManifestReader, ...]) -> None:
+        self._readers = readers
+
+    def read_all_events(self) -> Iterator[Mapping[str, JSONValue]]:
+        for reader in self._readers:
+            yield from reader.read_all_events()
+
+    def read_last_checkpoint(self) -> Mapping[str, JSONValue] | None:
+        checkpoints = [
+            checkpoint
+            for reader in self._readers
+            if (checkpoint := reader.read_last_checkpoint()) is not None
+        ]
+        return max(
+            checkpoints,
+            key=lambda checkpoint: str(checkpoint.get("timestamp", "")),
+            default=None,
+        )
+
+    def read_events_since_checkpoint(self) -> Iterator[Mapping[str, JSONValue]]:
+        for reader in self._readers:
+            yield from reader.read_events_since_checkpoint()
+
+    def read_incomplete_intents(self) -> Iterator[Mapping[str, JSONValue]]:
+        for reader in self._readers:
+            yield from reader.read_incomplete_intents()
 
 
 class AppContext:
@@ -130,6 +163,48 @@ class AppContext:
         """Create a read-only account-scoped manifest reader."""
 
         return ManifestReader(self.storage_root, account_id)
+
+    def create_manifest_reader_all(self) -> BaseManifestReader:
+        """Create a reader spanning all configured account manifests."""
+
+        account_ids = set(self._manifest_account_ids())
+        with suppress(Exception):
+            account_ids.update(
+                account_id
+                for account in self.create_message_repository().list_accounts()
+                if isinstance(account_id := account.get("id"), str) and account_id
+            )
+        return _CombinedManifestReader(
+            tuple(self.create_manifest_reader(account_id) for account_id in sorted(account_ids))
+        )
+
+    def rebuild_database(
+        self,
+        *,
+        cancel: Any = None,
+        on_progress: Callable[[Any], None] | None = None,
+    ) -> Any:
+        """Rebuild and atomically replace the active metadata cache."""
+
+        from mail_dock.infrastructure.database.reindex import rebuild_database
+
+        return rebuild_database(
+            self.database_path,
+            self.create_eml_storage(),
+            (
+                self.create_manifest_reader(account_id)
+                for account_id in self._manifest_account_ids()
+            ),
+            cancel=cancel,
+            on_progress=on_progress,
+        )
+
+    def _manifest_account_ids(self) -> tuple[str, ...]:
+        manifest_root = self.storage_root / "manifests" / "imap"
+        try:
+            return tuple(sorted(path.name for path in manifest_root.iterdir() if path.is_dir()))
+        except OSError:
+            return ()
 
     def create_fetcher(self, account: MessageRecord) -> BaseMailFetcher:
         """Create an authenticated fetcher for the calling worker thread."""
