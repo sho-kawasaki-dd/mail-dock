@@ -190,10 +190,10 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **A-3. `usecases/sync_mail.py` — checkpoint と WAL チェックポイントの記録**
 
-- [ ] バッチコミット境界（既存 `_BATCH_MESSAGE_LIMIT` / `_BATCH_BYTES_LIMIT`）でDBコミットを行う
-- [ ] **バッチコミット10回ごと（＝約1,000通ごと）に `PRAGMA wal_checkpoint(TRUNCATE)` を実行**する（N-6）
-- [ ] checkpoint は「このマニフェスト位置まで対応するDB変更がコミット済みである」ことを表す**完了マーカー**とし、`ManifestWriter.checkpoint()` の追記は**DBコミットが成功した後**に fsync まで完了させる（レビュー修正案 3.1。DBコミット前に checkpoint を書かない）
-- [ ] DBコミットに失敗した場合は checkpoint を追記しないこと、失敗した直前のバッチが次回の範囲限定検証で再検証対象になることをコードで保証する
+- [x] バッチコミット境界（既存 `_BATCH_MESSAGE_LIMIT` / `_BATCH_BYTES_LIMIT`）でDBコミットを行う
+- [x] **バッチコミット10回ごと（＝約1,000通ごと）に `PRAGMA wal_checkpoint(TRUNCATE)` を実行**する（N-6）
+- [x] checkpoint は「このマニフェスト位置まで対応するDB変更がコミット済みである」ことを表す**完了マーカー**とし、`ManifestWriter.checkpoint()` の追記は**DBコミットが成功した後**に fsync まで完了させる（レビュー修正案 3.1。DBコミット前に checkpoint を書かない）
+- [x] DBコミットに失敗した場合は checkpoint を追記しないこと、失敗した直前のバッチが次回の範囲限定検証で再検証対象になることをコードで保証する
 
 #### **A-4. `migrations/005_phase4.sql` — 運用クエリ用インデックス**
 

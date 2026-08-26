@@ -9,6 +9,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
+from uuid import uuid4
 
 from mail_dock.domain.errors import (
     AuthenticationError,
@@ -354,7 +355,7 @@ def sync_account(
     targets = [dict(folder) for folder in repo.list_sync_targets(account_id)]
     folder_raw_names = {folder["id"]: str(folder["raw_name"]) for folder in targets}
     known_messages: dict[tuple[Any, int, int], _LocalMessage] = {}
-    batch_number = 0
+    checkpoint_sequence = manifest.last_checkpoint_sequence or 0
 
     def report(folder_name: str) -> None:
         if on_progress is None:
@@ -381,7 +382,7 @@ def sync_account(
         backfill_next_uid: int | None = None,
         initial_sync_completed: bool | None = None,
     ) -> None:
-        nonlocal batch_number
+        nonlocal checkpoint_sequence
         if not pending and cursor_folder_id is None:
             return
         for item in pending:
@@ -427,8 +428,9 @@ def sync_account(
             )
         repo.commit_batch()
         pending.clear()
-        batch_number += 1
-        if batch_number % 10 == 0:
+        checkpoint_sequence += 1
+        manifest.checkpoint(checkpoint_sequence, uuid4().hex)
+        if checkpoint_sequence % 10 == 0:
             repo.checkpoint()
 
     def make_item(

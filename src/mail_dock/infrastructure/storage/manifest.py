@@ -322,6 +322,10 @@ class ManifestWriter(BaseManifestWriter):
         self._handles: dict[Path, BinaryIO] = {}
         self._last_checkpoint_sequence = _last_checkpoint_sequence(root, account_id)
 
+    @property
+    def last_checkpoint_sequence(self) -> int | None:
+        return self._last_checkpoint_sequence
+
     def _path_for(self, timestamp: datetime) -> Path:
         return (
             self._root / "manifests" / "imap" / self._account_id / f"events-{timestamp:%Y%m}.jsonl"

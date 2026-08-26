@@ -73,6 +73,11 @@ class BaseMessageRenderer(ABC):
 class BaseManifestWriter(ABC):
     """Append-only port for durable synchronization events."""
 
+    @property
+    def last_checkpoint_sequence(self) -> int | None:
+        """Return the latest durable checkpoint sequence, if known."""
+        return None
+
     @abstractmethod
     def append(self, event: Mapping[str, JSONValue]) -> None:
         """Append an event to the manifest without forcing a sync."""

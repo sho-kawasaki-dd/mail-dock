@@ -89,6 +89,38 @@ class MemoryManifest(BaseManifestWriter):
         self.flush_and_sync()
 
 
+class TrackingRepository(InMemoryMessageRepository):
+    def __init__(self) -> None:
+        super().__init__()
+        self.operations: list[str] = []
+
+    def commit_batch(self) -> None:
+        self.operations.append("db_commit")
+        super().commit_batch()
+
+
+class TrackingManifest(MemoryManifest):
+    def __init__(self, operations: list[str]) -> None:
+        super().__init__()
+        self.operations = operations
+
+    def checkpoint(self, sequence: int, batch_id: str) -> None:
+        self.operations.append("manifest_checkpoint")
+        super().checkpoint(sequence, batch_id)
+
+
+class FailingCommitRepository(InMemoryMessageRepository):
+    def __init__(self) -> None:
+        super().__init__()
+        self.commit_attempts = 0
+
+    def commit_batch(self) -> None:
+        self.commit_attempts += 1
+        if self.commit_attempts == 2:
+            raise RuntimeError("database commit failed")
+        super().commit_batch()
+
+
 class TrackingFetcher(FakeFetcher):
     def __init__(
         self,
@@ -295,6 +327,100 @@ def test_initial_sync_processes_newest_first_and_initializes_cursors() -> None:
     }
     assert len(repo.messages) == 3
     assert manifest.sync_count >= 1
+
+
+def test_manifest_checkpoint_follows_db_commit() -> None:
+    tracked_repo = TrackingRepository()
+    tracked_repo.upsert_account({"id": "account", "provider_type": "imap"})
+    tracked_repo.upsert_folder(
+        {
+            "account_id": "account",
+            "raw_name": "INBOX",
+            "display_name": "Inbox",
+            "is_sync_target": 1,
+        }
+    )
+    raw = _eml(1)
+    fetcher = FakeFetcher(
+        folders=[RemoteFolder("INBOX", "Inbox", uidvalidity=41)],
+        messages={"INBOX": [RemoteMessageRef(uid=1, size_bytes=len(raw))]},
+        eml_bytes={("INBOX", 1): raw},
+    )
+    manifest = TrackingManifest(tracked_repo.operations)
+
+    sync_account(
+        fetcher,
+        tracked_repo,
+        MemoryStorage(),
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+        cancel=CancelToken(),
+    )
+
+    assert tracked_repo.operations[-2:] == ["db_commit", "manifest_checkpoint"]
+
+
+def test_wal_checkpoint_runs_after_every_ten_message_batches() -> None:
+    repo, _ = _repository()
+    raw_by_uid = {uid: _eml(uid) for uid in range(1, 1002)}
+    fetcher = FakeFetcher(
+        folders=[RemoteFolder("INBOX", "Inbox", uidvalidity=41)],
+        messages={
+            "INBOX": [
+                RemoteMessageRef(uid=uid, size_bytes=len(raw)) for uid, raw in raw_by_uid.items()
+            ]
+        },
+        eml_bytes={("INBOX", uid): raw for uid, raw in raw_by_uid.items()},
+    )
+    manifest = MemoryManifest()
+
+    sync_account(
+        fetcher,
+        repo,
+        MemoryStorage(),
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+        cancel=CancelToken(),
+    )
+
+    checkpoints = [event for event in manifest.events if event["event"] == "checkpoint"]
+    assert [event["sequence"] for event in checkpoints] == list(range(1, 12))
+    assert repo.checkpoint_count == 1
+
+
+def test_failed_db_commit_does_not_write_manifest_checkpoint() -> None:
+    repo = FailingCommitRepository()
+    repo.upsert_account({"id": "account", "provider_type": "imap"})
+    repo.upsert_folder(
+        {
+            "account_id": "account",
+            "raw_name": "INBOX",
+            "display_name": "Inbox",
+            "is_sync_target": 1,
+        }
+    )
+    raw = _eml(1)
+    fetcher = FakeFetcher(
+        folders=[RemoteFolder("INBOX", "Inbox", uidvalidity=41)],
+        messages={"INBOX": [RemoteMessageRef(uid=1, size_bytes=len(raw))]},
+        eml_bytes={("INBOX", 1): raw},
+    )
+    manifest = MemoryManifest()
+
+    with pytest.raises(RuntimeError, match="database commit failed"):
+        sync_account(
+            fetcher,
+            repo,
+            MemoryStorage(),
+            manifest,
+            account_id="account",
+            options=SyncOptions(),
+            cancel=CancelToken(),
+        )
+
+    assert [event for event in manifest.events if event["event"] == "checkpoint"] == []
 
 
 def test_cancel_at_history_batch_boundary_resumes_without_duplicates() -> None:
