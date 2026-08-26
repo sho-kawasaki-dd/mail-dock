@@ -230,11 +230,11 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **B-1. `domain/storage_state.py` — 状態機械（*Qt非依存*）**
 
-- [ ] `StorageState(StrEnum)` を定義する: `ATTACHED` / `DEGRADED` / `DETACHED` / `DETACHED_BY_USER` / `RECONNECTING` / `VERIFYING`
-- [ ] `StorageEvent(StrEnum)` を定義する: `PROBE_OK` / `PROBE_MISSING` / `PROBE_FOREIGN` / `IO_ERROR` / `REPROBE_OK` / `REPROBE_FAILED` / `DEVICE_REMOVED` / `DEVICE_ARRIVED` / `USER_DETACH` / `RECONNECT_REQUESTED` / `IDENTITY_OK` / `IDENTITY_FOREIGN` / `VERIFY_OK` / `VERIFY_FAILED`（`PROBE_*` は定期ハートビート監視の結果、`REPROBE_*` は瞬断からの再試行結果として明確に区別する。レビュー修正案 3.7）
-- [ ] `StorageStateMachine` を実装し、開発計画書 5.7.1-3 の遷移図に加え、次の遷移を明示する: `ATTACHED + PROBE_MISSING -> DEGRADED` / `ATTACHED + PROBE_FOREIGN -> DETACHED`（`FOREIGN` はリプローブを待たず即座に遷移する。レビュー修正案 3.7）
-- [ ] `is_write_allowed()` / `is_remote_delete_allowed()` を公開し、**`ATTACHED` 以外では両方とも偽**を返すこと（`DEGRADED` は瞬断判定中であり、書き込みを許可しない）
-- [ ] 外部依存ゼロを維持し、PySide6 / `sqlite3` / ファイルI/O を持ち込まない
+- [x] `StorageState(StrEnum)` を定義する: `ATTACHED` / `DEGRADED` / `DETACHED` / `DETACHED_BY_USER` / `RECONNECTING` / `VERIFYING`
+- [x] `StorageEvent(StrEnum)` を定義する: `PROBE_OK` / `PROBE_MISSING` / `PROBE_FOREIGN` / `IO_ERROR` / `REPROBE_OK` / `REPROBE_FAILED` / `DEVICE_REMOVED` / `DEVICE_ARRIVED` / `USER_DETACH` / `RECONNECT_REQUESTED` / `IDENTITY_OK` / `IDENTITY_FOREIGN` / `VERIFY_OK` / `VERIFY_FAILED`（`PROBE_*` は定期ハートビート監視の結果、`REPROBE_*` は瞬断からの再試行結果として明確に区別する。レビュー修正案 3.7）
+- [x] `StorageStateMachine` を実装し、開発計画書 5.7.1-3 の遷移図に加え、次の遷移を明示する: `ATTACHED + PROBE_MISSING -> DEGRADED` / `ATTACHED + PROBE_FOREIGN -> DETACHED`（`FOREIGN` はリプローブを待たず即座に遷移する。レビュー修正案 3.7）
+- [x] `is_write_allowed()` / `is_remote_delete_allowed()` を公開し、**`ATTACHED` 以外では両方とも偽**を返すこと（`DEGRADED` は瞬断判定中であり、書き込みを許可しない）
+- [x] 外部依存ゼロを維持し、PySide6 / `sqlite3` / ファイルI/O を持ち込まない
 
 #### **B-2. `presentation/native/device_watcher.py` — `WM_DEVICECHANGE` 監視**
 
