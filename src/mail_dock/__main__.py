@@ -59,7 +59,7 @@ from mail_dock.infrastructure.storage.capabilities import (
 )
 from mail_dock.infrastructure.storage.detach import storage_io
 from mail_dock.infrastructure.storage.eml_storage import EmlStorage, cleanup_tmp
-from mail_dock.infrastructure.storage.manifest import ManifestWriter
+from mail_dock.infrastructure.storage.manifest import ManifestReader, ManifestWriter
 from mail_dock.infrastructure.storage.storage_root import (
     DriveKind,
     RootProbe,
@@ -79,6 +79,7 @@ from mail_dock.usecases.register_account import (
 from mail_dock.usecases.reparse import reparse_messages
 from mail_dock.usecases.search_messages import search_messages
 from mail_dock.usecases.search_query import parse_query
+from mail_dock.usecases.snapshots import backfill_snapshots
 from mail_dock.usecases.sync_folders import refresh_folders, set_sync_target
 from mail_dock.usecases.sync_mail import SyncOptions, SyncProgress, sync_account
 
@@ -817,20 +818,25 @@ def _run_account_command(
     args: argparse.Namespace,
     repo: SqliteMessageRepository,
     credential_store: BaseCredentialStore,
+    storage_root: Path,
 ) -> None:
     account_command = getattr(args, "account_command", None)
     if account_command == "add":
         password = getpass.getpass("IMAP password: ")
-        account_id = register_account(
-            repo,
-            credential_store,
-            account_id=args.account_id,
-            host=args.host,
-            port=args.port,
-            username=args.username,
-            password=password,
-            display_name=getattr(args, "display_name", None),
-        )
+        account_id = args.account_id
+        with ManifestWriter(storage_root, account_id) as manifest:
+            account_id = register_account(
+                repo,
+                credential_store,
+                account_id=account_id,
+                host=args.host,
+                port=args.port,
+                username=args.username,
+                password=password,
+                display_name=getattr(args, "display_name", None),
+                manifest=manifest,
+                manifest_reader=ManifestReader(storage_root, account_id),
+            )
         print(f"Registered account: {account_id}")
         return
     if account_command == "list":
@@ -844,19 +850,45 @@ def _run_folders_command(
     repo: SqliteMessageRepository,
     credential_store: BaseCredentialStore,
     settings: config.AppConfig,
+    storage_root: Path,
 ) -> None:
     account_id = args.account
     if args.refresh:
         account = _account_by_id(repo, account_id)
-        with _account_fetcher(account, credential_store, settings) as fetcher:
-            result = refresh_folders(fetcher, repo, account_id)
+        with (
+            _account_fetcher(account, credential_store, settings) as fetcher,
+            ManifestWriter(storage_root, account_id) as manifest,
+        ):
+            result = refresh_folders(
+                fetcher,
+                repo,
+                account_id,
+                manifest=manifest,
+                manifest_reader=ManifestReader(storage_root, account_id),
+            )
         print(f"Discovered {result.new_count} new folder(s).")
         for raw_name in result.removed_raw_names:
             print(f"Remote folder unavailable: {raw_name}", file=sys.stderr)
     if args.enable is not None:
-        set_sync_target(repo, account_id, args.enable, True)
+        with ManifestWriter(storage_root, account_id) as manifest:
+            set_sync_target(
+                repo,
+                account_id,
+                args.enable,
+                True,
+                manifest=manifest,
+                manifest_reader=ManifestReader(storage_root, account_id),
+            )
     elif args.disable is not None:
-        set_sync_target(repo, account_id, args.disable, False)
+        with ManifestWriter(storage_root, account_id) as manifest:
+            set_sync_target(
+                repo,
+                account_id,
+                args.disable,
+                False,
+                manifest=manifest,
+                manifest_reader=ManifestReader(storage_root, account_id),
+            )
     _print_folders(repo.list_folders(account_id))
 
 
@@ -944,10 +976,10 @@ def _run_application_command(
 ) -> int:
     command = getattr(args, "command", None)
     if command == "account":
-        _run_account_command(args, repo, credential_store)
+        _run_account_command(args, repo, credential_store, storage_root)
         return 0
     if command == "folders":
-        _run_folders_command(args, repo, credential_store, settings)
+        _run_folders_command(args, repo, credential_store, settings, storage_root)
         return 0
     if command == "sync":
         return _run_sync_command(args, repo, credential_store, storage_root, settings)
@@ -972,6 +1004,11 @@ def _run_command(
                 raise ConfigError("Command arguments are missing")
             repository = SqliteMessageRepository(session.connection_manager)
             search_repository = SqliteSearchRepository(session.connection_manager)
+            backfill_snapshots(
+                repository,
+                lambda account_id: ManifestWriter(session.root, account_id),
+                lambda account_id: ManifestReader(session.root, account_id),
+            )
             result = _run_application_command(
                 args,
                 repository,

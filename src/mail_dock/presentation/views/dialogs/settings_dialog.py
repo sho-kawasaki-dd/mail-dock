@@ -47,6 +47,51 @@ from .progress_dialog import ProgressDialog
 _MEGABYTE = 1024 * 1024
 
 
+def _register_account_with_snapshot(context: Any, values: Mapping[str, Any]) -> str:
+    account_id = str(values["account_id"])
+    manifest = context.create_manifest_writer(account_id)
+    try:
+        return register_account(
+            context.create_message_repository(),
+            context.credential_store,
+            account_id=account_id,
+            host=values["host"],
+            port=values["port"],
+            username=values["username"],
+            password=values["password"],
+            display_name=values["display_name"] or None,
+            manifest=manifest,
+            manifest_reader=context.create_manifest_reader(account_id),
+        )
+    finally:
+        manifest.close()
+
+
+def _update_account_with_snapshot(
+    context: Any,
+    values: Mapping[str, Any],
+    is_enabled: bool,
+) -> str:
+    account_id = str(values["account_id"])
+    manifest = context.create_manifest_writer(account_id)
+    try:
+        return update_account(
+            context.create_message_repository(),
+            context.credential_store,
+            account_id=account_id,
+            host=values["host"],
+            port=values["port"],
+            username=values["username"],
+            password=values["password"] or None,
+            display_name=values["display_name"] or None,
+            is_enabled=is_enabled,
+            manifest=manifest,
+            manifest_reader=context.create_manifest_reader(account_id),
+        )
+    finally:
+        manifest.close()
+
+
 class _OperationResult:
     def __init__(self, operation: str, value: object) -> None:
         self.operation = operation
@@ -208,31 +253,12 @@ class AccountDialog(QDialog):
             is_enabled = bool(existing.get("is_enabled", 1))
             self._submit(
                 "update",
-                lambda: update_account(
-                    self._context.create_message_repository(),
-                    self._context.credential_store,
-                    account_id=values["account_id"],
-                    host=values["host"],
-                    port=values["port"],
-                    username=values["username"],
-                    password=values["password"] or None,
-                    display_name=values["display_name"] or None,
-                    is_enabled=is_enabled,
-                ),
+                lambda: _update_account_with_snapshot(self._context, values, is_enabled),
             )
         else:
             self._submit(
                 "register",
-                lambda: register_account(
-                    self._context.create_message_repository(),
-                    self._context.credential_store,
-                    account_id=values["account_id"],
-                    host=values["host"],
-                    port=values["port"],
-                    username=values["username"],
-                    password=values["password"],
-                    display_name=values["display_name"] or None,
-                ),
+                lambda: _register_account_with_snapshot(self._context, values),
             )
 
     def _account_values(self) -> dict[str, Any] | None:
@@ -611,8 +637,18 @@ class SettingsDialog(QDialog):
     ) -> tuple[MessageRecord, ...]:
         repository = self._context.create_message_repository()
         fetcher = self._context.create_fetcher(account)
-        with fetcher:
-            refresh_folders(fetcher, repository, account_id)
+        manifest = self._context.create_manifest_writer(account_id)
+        try:
+            with fetcher:
+                refresh_folders(
+                    fetcher,
+                    repository,
+                    account_id,
+                    manifest=manifest,
+                    manifest_reader=self._context.create_manifest_reader(account_id),
+                )
+        finally:
+            manifest.close()
         return tuple(repository.list_folders(account_id))
 
     def _save_folders(self) -> None:
@@ -636,9 +672,21 @@ class SettingsDialog(QDialog):
         selections: Sequence[tuple[str, bool]],
     ) -> None:
         repository = self._context.create_message_repository()
-        for raw_name, enabled in selections:
-            if raw_name:
-                set_sync_target(repository, account_id, raw_name, enabled)
+        manifest = self._context.create_manifest_writer(account_id)
+        try:
+            reader = self._context.create_manifest_reader(account_id)
+            for raw_name, enabled in selections:
+                if raw_name:
+                    set_sync_target(
+                        repository,
+                        account_id,
+                        raw_name,
+                        enabled,
+                        manifest=manifest,
+                        manifest_reader=reader,
+                    )
+        finally:
+            manifest.close()
 
     def _add_account(self) -> None:
         dialog = AccountDialog(self._context, self)

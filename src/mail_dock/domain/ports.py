@@ -90,6 +90,10 @@ class BaseManifestWriter(ABC):
     def checkpoint(self, sequence: int, batch_id: str) -> None:
         """Append and durably flush a completed synchronization batch marker."""
 
+    def close(self) -> None:
+        """Release writer resources, if the implementation owns any."""
+        return None
+
 
 class BaseManifestReader(ABC):
     """Read-only port for an account's durable manifest history."""

@@ -218,11 +218,11 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **A-6. アカウント/フォルダ snapshot の書き込みとバックフィル（レビュー修正案 9.1）**
 
-- [ ] アカウント登録・設定変更の既存ユースケース入口へ、`account_snapshot` の追記を追加する
-- [ ] フォルダ属性が変化した際（`is_sync_target` 切替え等）に `folder_snapshot` を追記する
-- [ ] 直前の snapshot と非秘密フィールドが完全一致する場合は追記を省略し、マニフェストの肥大化を防ぐ
-- [ ] Phase 4 導入時の起動パスへ、既存アカウント・既存フォルダについて `account_snapshot` / `folder_snapshot` が一度も存在しない場合に現在の状態で遡及して一回だけ書く**バックフィル**を実装する（B-5の起動パスから呼ぶ。これが無いとPhase 3以前作成の既存アカウントは `reindex` で復元不能になる）
-- [ ] `sqlite3` / PySide6 / infrastructure の具象を import しないこと
+- [x] アカウント登録・設定変更の既存ユースケース入口へ、`account_snapshot` の追記を追加する
+- [x] フォルダ属性が変化した際（`is_sync_target` 切替え等）に `folder_snapshot` を追記する
+- [x] 直前の snapshot と非秘密フィールドが完全一致する場合は追記を省略し、マニフェストの肥大化を防ぐ
+- [x] Phase 4 導入時の起動パスへ、既存アカウント・既存フォルダについて `account_snapshot` / `folder_snapshot` が一度も存在しない場合に現在の状態で遡及して一回だけ書く**バックフィル**を実装する（B-5の起動パスから呼ぶ。これが無いとPhase 3以前作成の既存アカウントは `reindex` で復元不能になる）
+- [x] `sqlite3` / PySide6 / infrastructure の具象を import しないこと
 
 ---
 

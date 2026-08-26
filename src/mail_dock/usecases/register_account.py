@@ -6,8 +6,9 @@ from collections.abc import Sequence
 
 from mail_dock.domain.accounts import validate_account_id
 from mail_dock.domain.errors import AuthenticationError
-from mail_dock.domain.ports import BaseCredentialStore
+from mail_dock.domain.ports import BaseCredentialStore, BaseManifestReader, BaseManifestWriter
 from mail_dock.domain.repository import BaseMessageRepository, MessageRecord
+from mail_dock.usecases.snapshots import record_account_snapshot
 
 
 def register_account(
@@ -20,22 +21,25 @@ def register_account(
     username: str,
     password: str,
     display_name: str | None,
+    manifest: BaseManifestWriter | None = None,
+    manifest_reader: BaseManifestReader | None = None,
 ) -> str:
     """Store credentials outside SQLite and register the connection details."""
 
     validate_account_id(account_id)
     credential_store.set_password(account_id, password)
-    repo.upsert_account(
-        {
-            "id": account_id,
-            "provider_type": "onamae_imap",
-            "display_name": display_name,
-            "host": host,
-            "port": port,
-            "username": username,
-            "is_enabled": 1,
-        }
-    )
+    account = {
+        "id": account_id,
+        "provider_type": "onamae_imap",
+        "display_name": display_name,
+        "host": host,
+        "port": port,
+        "username": username,
+        "is_enabled": 1,
+    }
+    if manifest is not None and manifest_reader is not None:
+        record_account_snapshot(manifest, manifest_reader, account)
+    repo.upsert_account(account)
     return account_id
 
 
@@ -50,6 +54,8 @@ def update_account(
     password: str | None,
     display_name: str | None,
     is_enabled: bool,
+    manifest: BaseManifestWriter | None = None,
+    manifest_reader: BaseManifestReader | None = None,
 ) -> str:
     """Update connection details for an existing account without renaming it.
 
@@ -62,17 +68,18 @@ def update_account(
     validate_account_id(account_id)
     if password:
         credential_store.set_password(account_id, password)
-    repo.upsert_account(
-        {
-            "id": account_id,
-            "provider_type": "onamae_imap",
-            "display_name": display_name,
-            "host": host,
-            "port": port,
-            "username": username,
-            "is_enabled": int(is_enabled),
-        }
-    )
+    account = {
+        "id": account_id,
+        "provider_type": "onamae_imap",
+        "display_name": display_name,
+        "host": host,
+        "port": port,
+        "username": username,
+        "is_enabled": int(is_enabled),
+    }
+    if manifest is not None and manifest_reader is not None:
+        record_account_snapshot(manifest, manifest_reader, account)
+    repo.upsert_account(account)
     return account_id
 
 

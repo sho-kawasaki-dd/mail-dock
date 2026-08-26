@@ -17,7 +17,12 @@ from typing import TYPE_CHECKING, Any, cast
 from mail_dock import config
 from mail_dock.domain.errors import ConfigError
 from mail_dock.domain.fetcher import BaseMailFetcher
-from mail_dock.domain.ports import BaseCredentialStore, BaseEmlStorage, BaseManifestWriter
+from mail_dock.domain.ports import (
+    BaseCredentialStore,
+    BaseEmlStorage,
+    BaseManifestReader,
+    BaseManifestWriter,
+)
 from mail_dock.domain.repository import MessageRecord
 from mail_dock.domain.search import BaseSearchRepository
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
@@ -34,7 +39,7 @@ from mail_dock.infrastructure.storage.capabilities import (
     storage_fingerprint,
 )
 from mail_dock.infrastructure.storage.eml_storage import EmlStorage
-from mail_dock.infrastructure.storage.manifest import ManifestWriter
+from mail_dock.infrastructure.storage.manifest import ManifestReader, ManifestWriter
 from mail_dock.usecases.register_account import load_credentials
 
 if TYPE_CHECKING:
@@ -119,6 +124,11 @@ class AppContext:
         """
 
         return ManifestWriter(self.storage_root, account_id)
+
+    def create_manifest_reader(self, account_id: str) -> BaseManifestReader:
+        """Create a read-only account-scoped manifest reader."""
+
+        return ManifestReader(self.storage_root, account_id)
 
     def create_fetcher(self, account: MessageRecord) -> BaseMailFetcher:
         """Create an authenticated fetcher for the calling worker thread."""

@@ -19,7 +19,7 @@ from types import TracebackType
 from typing import BinaryIO, cast
 
 from mail_dock.domain.errors import ManifestCorruptError
-from mail_dock.domain.ports import BaseManifestWriter, JSONValue
+from mail_dock.domain.ports import BaseManifestReader, BaseManifestWriter, JSONValue
 from mail_dock.infrastructure.storage.detach import storage_io
 
 _MANIFEST_EVENTS = frozenset(
@@ -207,8 +207,12 @@ def _validate_event(event: Mapping[str, JSONValue]) -> dict[str, JSONValue]:
     elif event_name == "account_snapshot":
         _require_fields(payload, _ACCOUNT_SNAPSHOT_FIELDS, event_name)
         _require_text(payload, "account_id", event_name)
-        for field in ("provider_type", "display_name", "host", "username"):
+        for field in ("provider_type", "host", "username"):
             _require_text(payload, field, event_name)
+        if payload["display_name"] is not None and not isinstance(payload["display_name"], str):
+            raise TypeError("account_snapshot event display_name must be a string or null")
+        if "is_enabled" in payload and not isinstance(payload["is_enabled"], (bool, int)):
+            raise TypeError("account_snapshot event is_enabled must be a boolean or integer")
         if not isinstance(payload["port"], int) or isinstance(payload["port"], bool):
             raise TypeError("account_snapshot event port must be an integer")
         secret_fields = [
@@ -228,6 +232,8 @@ def _validate_event(event: Mapping[str, JSONValue]) -> dict[str, JSONValue]:
             raise TypeError("folder_snapshot event uidvalidity must be an integer or null")
         if payload["delimiter"] is not None and not isinstance(payload["delimiter"], str):
             raise TypeError("folder_snapshot event delimiter must be a string or null")
+        if "is_sync_target" in payload and not isinstance(payload["is_sync_target"], (bool, int)):
+            raise TypeError("folder_snapshot event is_sync_target must be a boolean or integer")
     elif event_name in {"purge_intent", "purged"}:
         _require_fields(payload, _PURGE_FIELDS, event_name)
         for field in ("account_id", "source_item_key", "relative_path", "file_hash"):
@@ -383,6 +389,27 @@ class ManifestWriter(BaseManifestWriter):
     ) -> None:
         del exc_type, exc_value, traceback
         self.close()
+
+
+class ManifestReader(BaseManifestReader):
+    """Read an account manifest without owning writable file handles."""
+
+    def __init__(self, root: Path, account_id: str) -> None:
+        _validate_account_id(account_id)
+        self._root = root
+        self._account_id = account_id
+
+    def read_all_events(self) -> Iterator[Mapping[str, JSONValue]]:
+        return read_all_events(self._root, self._account_id)
+
+    def read_last_checkpoint(self) -> Mapping[str, JSONValue] | None:
+        return read_last_checkpoint(self._root, self._account_id)
+
+    def read_events_since_checkpoint(self) -> Iterator[Mapping[str, JSONValue]]:
+        return read_events_since_checkpoint(self._root, self._account_id)
+
+    def read_incomplete_intents(self) -> Iterator[Mapping[str, JSONValue]]:
+        return read_incomplete_intents(self._root, self._account_id)
 
 
 def read_events(path: Path) -> Iterator[Mapping[str, JSONValue]]:

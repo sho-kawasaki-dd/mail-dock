@@ -383,16 +383,22 @@ class SetupWizard(QWizard):
             self._account_status.setText(strings.ERROR_STARTUP_FAILED)
             return False
         try:
-            register_account(
-                self._context.create_message_repository(),
-                self._context.credential_store,
-                account_id=account_id,
-                host=host,
-                port=self._port_edit.value(),
-                username=username,
-                password=password,
-                display_name=_text(self._display_name_edit) or None,
-            )
+            manifest = self._context.create_manifest_writer(account_id)
+            try:
+                register_account(
+                    self._context.create_message_repository(),
+                    self._context.credential_store,
+                    account_id=account_id,
+                    host=host,
+                    port=self._port_edit.value(),
+                    username=username,
+                    password=password,
+                    display_name=_text(self._display_name_edit) or None,
+                    manifest=manifest,
+                    manifest_reader=self._context.create_manifest_reader(account_id),
+                )
+            finally:
+                manifest.close()
         except Exception as error:
             self._show_inline_error(self._account_status, error)
             return False
@@ -407,10 +413,22 @@ class SetupWizard(QWizard):
             return False
         try:
             repository = self._context.create_message_repository()
-            for folder, check in zip(self._folder_records, self._folder_checks, strict=True):
-                raw_name = folder.get("raw_name")
-                if isinstance(raw_name, str):
-                    set_sync_target(repository, self._account_id, raw_name, check.isChecked())
+            manifest = self._context.create_manifest_writer(self._account_id)
+            try:
+                reader = self._context.create_manifest_reader(self._account_id)
+                for folder, check in zip(self._folder_records, self._folder_checks, strict=True):
+                    raw_name = folder.get("raw_name")
+                    if isinstance(raw_name, str):
+                        set_sync_target(
+                            repository,
+                            self._account_id,
+                            raw_name,
+                            check.isChecked(),
+                            manifest=manifest,
+                            manifest_reader=reader,
+                        )
+            finally:
+                manifest.close()
         except Exception as error:
             self._show_inline_error(self._folders_status, error)
             return False
@@ -472,8 +490,18 @@ class SetupWizard(QWizard):
         if account is None:
             raise MailDockError(strings.WIZARD_STATUS_NO_ACCOUNT)
         fetcher = self._context.create_fetcher(account)
-        with fetcher:
-            refresh_folders(fetcher, repository, account_id)
+        manifest = self._context.create_manifest_writer(account_id)
+        try:
+            with fetcher:
+                refresh_folders(
+                    fetcher,
+                    repository,
+                    account_id,
+                    manifest=manifest,
+                    manifest_reader=self._context.create_manifest_reader(account_id),
+                )
+        finally:
+            manifest.close()
         return tuple(repository.list_folders(account_id))
 
     def _submit_operation(self, operation: str, callback: Callable[[], object]) -> CancelToken:
