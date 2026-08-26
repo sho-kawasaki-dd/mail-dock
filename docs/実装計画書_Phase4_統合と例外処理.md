@@ -197,10 +197,10 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **A-4. `migrations/005_phase4.sql` — 運用クエリ用インデックス**
 
-- [ ] `CREATE INDEX idx_audit_recent ON audit_log(occurred_at DESC)` を追加する（監査ログ表示画面用）
-- [ ] `CREATE INDEX idx_msg_purge ON messages(account_id, local_state, trashed_at)` を追加する（purge候補抽出用。既存の `idx_msg_trash` はアカウント横断のため、アカウント単位の抽出を補う）
-- [ ] `CREATE INDEX idx_msg_path ON messages(account_id, relative_path)` を追加する（共有EML参照チェック用。F-23 の判定が全表走査にならないようにする）
-- [ ] マイグレーション適用前の自動バックアップ（`metadata.db.bak.{version}`）が働くことを既存機構で確認する
+- [x] `CREATE INDEX idx_audit_recent ON audit_log(occurred_at DESC)` を追加する（監査ログ表示画面用）
+- [x] `CREATE INDEX idx_msg_purge ON messages(account_id, local_state, trashed_at)` を追加する（purge候補抽出用。既存の `idx_msg_trash` はアカウント横断のため、アカウント単位の抽出を補う）
+- [x] `CREATE INDEX idx_msg_path ON messages(account_id, relative_path)` を追加する（共有EML参照チェック用。F-23 の判定が全表走査にならないようにする）
+- [x] マイグレーション適用前の自動バックアップ（`metadata.db.bak.{version}`）が働くことを既存機構で確認する
 
 #### **A-5. リポジトリの監査・状態更新メソッド追加**
 

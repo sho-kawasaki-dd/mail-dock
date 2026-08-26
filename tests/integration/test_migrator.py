@@ -22,9 +22,62 @@ def test_empty_database_migrates_to_latest_version(
 ) -> None:
     db_path = tmp_path / "metadata.db"
 
-    assert migrate(db_conn, db_path) == 4
-    assert current_version(db_conn) == 4
+    assert migrate(db_conn, db_path) == 5
+    assert current_version(db_conn) == 5
     assert db_conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+
+    indexes = {
+        row[1]: db_conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+            (row[1],),
+        ).fetchone()[0]
+        for row in db_conn.execute("PRAGMA index_list(messages)")
+    }
+    indexes["idx_audit_recent"] = db_conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+        ("idx_audit_recent",),
+    ).fetchone()[0]
+    assert indexes["idx_audit_recent"] == (
+        "CREATE INDEX idx_audit_recent\nON audit_log(occurred_at DESC)"
+    )
+    assert indexes["idx_msg_purge"] == (
+        "CREATE INDEX idx_msg_purge\nON messages(account_id, local_state, trashed_at)"
+    )
+    assert indexes["idx_msg_path"] == (
+        "CREATE INDEX idx_msg_path\nON messages(account_id, relative_path)"
+    )
+
+
+def test_phase4_migration_backs_up_existing_v4_database(
+    db_conn: sqlite3.Connection,
+    tmp_path: Path,
+) -> None:
+    migration_dir = resources.files("mail_dock").joinpath("migrations")
+    for migration_name in (
+        "001_init.sql",
+        "002_sync_cursor.sql",
+        "003_timestamp_format.sql",
+        "004_flag_refresh.sql",
+    ):
+        migration = migration_dir.joinpath(migration_name)
+        db_conn.executescript(migration.read_text(encoding="utf-8"))
+    db_conn.execute("PRAGMA user_version = 4")
+    db_conn.execute(
+        "INSERT INTO accounts (id, provider_type) VALUES (?, ?)",
+        ("legacy", "imap"),
+    )
+    db_conn.commit()
+
+    assert migrate(db_conn, tmp_path / "metadata.db") == 5
+
+    backup_path = tmp_path / "metadata.db.bak.4"
+    assert backup_path.is_file()
+    backup = connect(backup_path, readonly=True)
+    try:
+        assert current_version(backup) == 4
+        assert backup.execute("SELECT id FROM accounts").fetchone() == ("legacy",)
+    finally:
+        backup.close()
 
 
 def test_nonempty_v0_database_is_backed_up_before_migration(tmp_path: Path) -> None:
@@ -34,7 +87,7 @@ def test_nonempty_v0_database_is_backed_up_before_migration(tmp_path: Path) -> N
         connection.execute("CREATE TABLE legacy (value TEXT)")
         connection.execute("INSERT INTO legacy VALUES ('old')")
         connection.commit()
-        assert migrate(connection, db_path) == 4
+        assert migrate(connection, db_path) == 5
     finally:
         connection.close()
 
@@ -49,7 +102,7 @@ def test_nonempty_v0_database_is_backed_up_before_migration(tmp_path: Path) -> N
 
     rerun = connect(db_path)
     try:
-        assert migrate(rerun, db_path) == 4
+        assert migrate(rerun, db_path) == 5
     finally:
         rerun.close()
     assert not (tmp_path / "metadata.db.bak.0.1").exists()
@@ -107,7 +160,7 @@ def test_timestamp_migration_normalizes_legacy_values_and_defaults(
     )
     db_conn.commit()
 
-    assert migrate(db_conn, tmp_path / "metadata.db") == 4
+    assert migrate(db_conn, tmp_path / "metadata.db") == 5
 
     values = db_conn.execute(
         """
