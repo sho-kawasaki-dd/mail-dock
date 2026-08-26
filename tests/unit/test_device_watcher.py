@@ -6,6 +6,7 @@ import ctypes
 import sys
 
 import pytest
+from PySide6.QtCore import QCoreApplication
 
 from mail_dock.domain.storage_state import StorageEvent
 from mail_dock.presentation.native import device_watcher
@@ -133,3 +134,57 @@ def test_native_filter_ignores_non_volume_broadcast(monkeypatch: pytest.MonkeyPa
         0,
     )
     assert received == []
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows ABI test")
+def test_windows_ctypes_structures_match_win32_layout() -> None:
+    assert ctypes.sizeof(device_watcher._DeviceBroadcastHeader) == 12
+    assert ctypes.sizeof(device_watcher._DeviceBroadcastVolume) == 20
+
+    if ctypes.sizeof(ctypes.c_void_p) == 8:
+        assert ctypes.sizeof(device_watcher._NativeMessage) == 48
+        assert device_watcher._NativeMessage.message.offset == 8
+        assert device_watcher._NativeMessage.w_param.offset == 16
+        assert device_watcher._NativeMessage.l_param.offset == 24
+        assert device_watcher._NativeMessage.time.offset == 32
+        assert device_watcher._NativeMessage.point.offset == 40
+    else:
+        assert ctypes.sizeof(device_watcher._NativeMessage) == 28
+        assert device_watcher._NativeMessage.message.offset == 4
+        assert device_watcher._NativeMessage.w_param.offset == 8
+        assert device_watcher._NativeMessage.l_param.offset == 12
+        assert device_watcher._NativeMessage.time.offset == 16
+        assert device_watcher._NativeMessage.point.offset == 20
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows native event test")
+def test_windows_native_filter_reads_real_ctypes_message() -> None:
+    watcher = DeviceWatcher()
+    received: list[device_watcher.DeviceChange] = []
+    watcher.event_detected.connect(received.append)
+
+    volume = device_watcher._DeviceBroadcastVolume()
+    volume.size = ctypes.sizeof(volume)
+    volume.device_type = DBT_DEVTYP_VOLUME
+    volume.unitmask = 1 << 4
+    message = device_watcher._NativeMessage()
+    message.message = WM_DEVICECHANGE
+    message.w_param = DBT_DEVICEREMOVECOMPLETE
+    message.l_param = ctypes.addressof(volume)
+
+    assert watcher.nativeEventFilter(b"windows_generic_MSG", ctypes.addressof(message)) == (
+        False,
+        0,
+    )
+    assert received == [device_watcher.DeviceChange(StorageEvent.DEVICE_REMOVED, ("E:",))]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows Qt integration test")
+def test_windows_watcher_registers_and_unregisters_with_qt() -> None:
+    application = QCoreApplication.instance() or QCoreApplication([])
+    watcher = DeviceWatcher()
+
+    watcher.install(application)
+    watcher.install(application)
+    watcher.uninstall(application)
+    watcher.uninstall(application)

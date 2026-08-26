@@ -533,7 +533,8 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
     - [ ] `VERIFYING` → `VERIFY_FAILED` → `DETACHED`
     - [ ] `RECONNECTING` → `IDENTITY_FOREIGN` → `DETACHED`（`FOREIGN` は書き込み禁止のまま）
     - [ ] `ATTACHED` 以外で `is_write_allowed()` と `is_remote_delete_allowed()` が偽であること
-- [ ] `tests/unit/test_device_watcher.py`: `dbcv_unitmask` からのドライブレター復元（純粋関数）
+- [x] `tests/unit/test_device_watcher.py`: `dbcv_unitmask` からのドライブレター復元（純粋関数）
+- [x] 同テストへWindows専用ケースを追加し、`ctypes` 構造体のABIレイアウト、ネイティブメッセージ解析、Qtへのイベントフィルタ登録・解除を `windows-latest` 上で検証する（非Windowsではskip）
 - [ ] `tests/unit/test_detach.py`（既存を拡張）: リプローブ回数と間隔の制御
 
 #### **H-3. マニフェストと再構築のテスト**
