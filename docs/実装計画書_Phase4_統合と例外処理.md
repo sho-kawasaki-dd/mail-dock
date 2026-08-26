@@ -338,10 +338,10 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **C-4. CLI 拡張（F-19 / D-3）**
 
-- [ ] `verify` サブコマンドへ `--mode quick|range|full|orphans|manifest`（既定 `quick`）を追加する
-- [ ] `reindex` サブコマンドを新設し、実行前に確認プロンプトを出す
-- [ ] `--account` による対象絞り込みを `full` / `orphans` / `reindex` で受け付ける
-- [ ] **削除系（サーバー削除・purge）のサブコマンドを追加しない**。追加されていないことを静的テストで固定する
+- [x] `verify` サブコマンドへ `--mode quick|range|full|orphans|manifest`（既定 `quick`）を追加する
+- [x] `reindex` サブコマンドを新設し、実行前に確認プロンプトを出す
+- [x] `--account` による対象絞り込みを `full` / `orphans` / `reindex` で受け付ける
+- [x] **削除系（サーバー削除・purge）のサブコマンドを追加しない**。追加されていないことを静的テストで固定する
 
 #### **C-5. GUI 配線**
 

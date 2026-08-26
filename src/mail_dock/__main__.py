@@ -10,7 +10,7 @@ import os
 import signal
 import sqlite3
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import replace
 from datetime import UTC, date, datetime, time
 from pathlib import Path
@@ -33,7 +33,7 @@ from mail_dock.domain.errors import (
     StorageUnsupportedError,
 )
 from mail_dock.domain.fetcher import CancelToken
-from mail_dock.domain.ports import BaseCredentialStore
+from mail_dock.domain.ports import BaseCredentialStore, BaseIntegrityStorage
 from mail_dock.domain.repository import MessageRecord
 from mail_dock.domain.search import MessageFilter, MessageSummary, PageCursor, SearchPage
 from mail_dock.infrastructure.database.connection import (
@@ -80,12 +80,26 @@ from mail_dock.usecases.register_account import (
     load_credentials,
     register_account,
 )
+from mail_dock.usecases.reindex import ReindexProgress, reindex
 from mail_dock.usecases.reparse import reparse_messages
 from mail_dock.usecases.search_messages import search_messages
 from mail_dock.usecases.search_query import parse_query
 from mail_dock.usecases.snapshots import backfill_snapshots, repair_manifest_tails
 from mail_dock.usecases.sync_folders import refresh_folders, set_sync_target
 from mail_dock.usecases.sync_mail import SyncOptions, SyncProgress, sync_account
+from mail_dock.usecases.verify import (
+    FullVerifyResult,
+    ManifestVerifyResult,
+    OrphanScanResult,
+    QuickVerifyResult,
+    RangeVerifyResult,
+    VerifyProgress,
+    full_verify,
+    orphan_scan,
+    quick_verify,
+    range_verify,
+    verify_manifest,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -138,11 +152,27 @@ def _build_parser() -> argparse.ArgumentParser:
         parents=[common],
         help="apply pending database migrations and exit",
     )
-    subparsers.add_parser(
+    verify_parser = subparsers.add_parser(
         "verify",
         parents=[common],
-        help="run read-only database integrity checks and exit",
+        help="run integrity verification and exit",
     )
+    verify_parser.add_argument(
+        "--mode",
+        choices=("quick", "range", "full", "orphans", "manifest"),
+        default="quick",
+        help="verification mode (default: quick)",
+    )
+    verify_parser.add_argument(
+        "--account",
+        help="limit full/orphan verification to an account",
+    )
+    reindex_parser = subparsers.add_parser(
+        "reindex",
+        parents=[common],
+        help="rebuild the metadata database from manifests and EML files",
+    )
+    reindex_parser.add_argument("--account", help="only rebuild this account")
     subparsers.add_parser(
         "gui",
         parents=[common],
@@ -1028,6 +1058,235 @@ def _run_reparse_command(
     return 130 if result.cancelled else 0
 
 
+class _AccountIntegrityStorage(BaseIntegrityStorage):
+    """Limit EML enumeration to one account for account-scoped CLI checks."""
+
+    def __init__(self, storage: BaseIntegrityStorage, account_id: str) -> None:
+        self._storage = storage
+        self._account_id = account_id
+
+    def stat(self, relative_path: str) -> os.stat_result:
+        return self._storage.stat(relative_path)
+
+    def iter_chunks(self, relative_path: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
+        yield from self._storage.iter_chunks(relative_path, chunk_size)
+
+    def iter_eml_paths(self, account_id: str | None = None) -> Iterator[str]:
+        del account_id
+        yield from self._storage.iter_eml_paths(self._account_id)
+
+    def quarantine(self, relative_path: str) -> None:
+        self._storage.quarantine(relative_path)
+
+
+def _manifest_account_ids(
+    storage_root: Path,
+    repo: SqliteMessageRepository,
+    requested_account_id: str | None = None,
+) -> tuple[str, ...]:
+    if requested_account_id is not None:
+        return (requested_account_id,)
+    manifest_root = storage_root / "manifests" / "imap"
+    account_ids = (
+        tuple(sorted(path.name for path in manifest_root.iterdir() if path.is_dir()))
+        if manifest_root.is_dir()
+        else ()
+    )
+    if account_ids:
+        return account_ids
+    return tuple(
+        account_id
+        for account in repo.list_accounts()
+        if (account_id := account.get("id")) is not None and isinstance(account_id, str)
+    )
+
+
+def _print_verify_progress(progress: VerifyProgress) -> None:
+    print(f"checked={progress.checked_count}/{progress.total_count}: {progress.current_path}")
+
+
+def _print_reindex_progress(progress: ReindexProgress) -> None:
+    print(f"reindex={progress.processed_count}/{progress.total_count}: {progress.relative_path}")
+
+
+def _print_verify_result(mode: str, result: object) -> None:
+    if mode == "quick" and isinstance(result, QuickVerifyResult):
+        print(
+            f"checked={result.checked_count}, missing={result.missing_count}, "
+            f"size_mismatch={result.size_mismatch_count}"
+        )
+    elif mode == "range" and isinstance(result, RangeVerifyResult):
+        print(
+            f"checked={result.checked_count}, issues={len(result.issues)}, "
+            f"repaired={result.repaired_count}, quarantined={result.quarantined_count}"
+        )
+        for issue in result.issues:
+            print(f"{issue.reason}: {issue.relative_path}", file=sys.stderr)
+    elif mode == "full" and isinstance(result, FullVerifyResult):
+        print(f"checked={result.checked_count}, issues={len(result.issues)}")
+        for issue in result.issues:
+            print(f"{issue.reason}: {issue.relative_path}", file=sys.stderr)
+    elif mode == "orphans" and isinstance(result, OrphanScanResult):
+        print(
+            f"checked={result.checked_count}, registerable={len(result.registerable)}, "
+            f"quarantined={len(result.quarantined_paths)}"
+        )
+        for path in result.quarantined_paths:
+            print(f"quarantined: {path}", file=sys.stderr)
+    elif mode == "manifest" and isinstance(result, ManifestVerifyResult):
+        print(
+            f"files={result.files_checked}, records={result.records_checked}, "
+            f"repaired_bytes={result.repaired_bytes}"
+        )
+
+
+def _combine_range_results(results: Sequence[RangeVerifyResult]) -> RangeVerifyResult:
+    return RangeVerifyResult(
+        sum(result.checked_count for result in results),
+        tuple(issue for result in results for issue in result.issues),
+        sum(result.repaired_count for result in results),
+        sum(result.quarantined_count for result in results),
+        any(result.cancelled for result in results),
+    )
+
+
+def _combine_orphan_results(results: Sequence[OrphanScanResult]) -> OrphanScanResult:
+    return OrphanScanResult(
+        sum(result.checked_count for result in results),
+        tuple(candidate for result in results for candidate in result.registerable),
+        tuple(path for result in results for path in result.quarantined_paths),
+        any(result.cancelled for result in results),
+    )
+
+
+def _run_verify_command(
+    args: argparse.Namespace,
+    repo: SqliteMessageRepository,
+    storage_root: Path,
+) -> int:
+    mode = args.mode
+    account_id = args.account
+    if account_id is not None and mode not in {"full", "orphans"}:
+        raise ConfigError("--account is supported only for full and orphans verification")
+
+    token = CancelToken()
+    previous_handler = _install_cancel_handler(token)
+    try:
+        storage = EmlStorage(storage_root)
+        if mode == "quick":
+            result: object = quick_verify(repo, storage, cancel=token)
+        elif mode == "range":
+            range_results = [
+                range_verify(
+                    repo,
+                    storage,
+                    ManifestReader(storage_root, current_account_id),
+                    cancel=token,
+                )
+                for current_account_id in _manifest_account_ids(storage_root, repo)
+            ]
+            result = _combine_range_results(range_results)
+        elif mode == "full":
+            scoped_storage: BaseIntegrityStorage = (
+                _AccountIntegrityStorage(storage, account_id) if account_id is not None else storage
+            )
+            result = full_verify(
+                repo,
+                scoped_storage,
+                cancel=token,
+                on_progress=_print_verify_progress,
+            )
+        elif mode == "orphans":
+            account_ids = _manifest_account_ids(storage_root, repo, account_id)
+            orphan_results = [
+                orphan_scan(
+                    repo,
+                    _AccountIntegrityStorage(storage, current_account_id),
+                    cancel=token,
+                    on_progress=_print_verify_progress,
+                    manifest_reader=ManifestReader(storage_root, current_account_id),
+                )
+                for current_account_id in account_ids
+            ]
+            if not orphan_results:
+                orphan_results = [
+                    orphan_scan(
+                        repo,
+                        storage,
+                        cancel=token,
+                        on_progress=_print_verify_progress,
+                    )
+                ]
+            result = _combine_orphan_results(orphan_results)
+        elif mode == "manifest":
+            result = verify_manifest(storage_root, cancel=token)
+        else:
+            raise ConfigError(f"Unknown verification mode: {mode}")
+    finally:
+        _restore_cancel_handler(previous_handler)
+
+    _print_verify_result(mode, result)
+    return 130 if getattr(result, "cancelled", False) else 0
+
+
+def _confirm_reindex() -> bool:
+    print(
+        "Reindex rebuilds the metadata database from manifests and stored EML files.",
+        file=sys.stderr,
+    )
+    print("Existing metadata-cache records may be replaced.", file=sys.stderr)
+    try:
+        answer = input("Type 'reindex' to continue: ")
+    except EOFError:
+        return False
+    if answer.strip().casefold() == "reindex":
+        return True
+    print("Reindex cancelled.", file=sys.stderr)
+    return False
+
+
+def _run_reindex_command(
+    args: argparse.Namespace,
+    repo: SqliteMessageRepository,
+    storage_root: Path,
+) -> int:
+    if not _confirm_reindex():
+        return 130
+
+    token = CancelToken()
+    previous_handler = _install_cancel_handler(token)
+    try:
+        storage = EmlStorage(storage_root)
+        results = [
+            reindex(
+                repo,
+                storage,
+                ManifestReader(storage_root, account_id),
+                cancel=token,
+                on_progress=_print_reindex_progress,
+            )
+            for account_id in _manifest_account_ids(storage_root, repo, args.account)
+        ]
+    finally:
+        _restore_cancel_handler(previous_handler)
+
+    if not results:
+        print("No account manifests found.", file=sys.stderr)
+        return 0
+    for result in results:
+        for warning in result.warnings:
+            print(f"warning: {warning}", file=sys.stderr)
+    print(
+        f"accounts={sum(result.account_count for result in results)}, "
+        f"folders={sum(result.folder_count for result in results)}, "
+        f"messages={sum(result.message_count for result in results)}, "
+        f"contents={sum(result.contents_count for result in results)}, "
+        f"purged={sum(result.purged_count for result in results)}, "
+        f"skipped={sum(result.skipped_count for result in results)}"
+    )
+    return 130 if any(result.cancelled for result in results) else 0
+
+
 def _run_application_command(
     args: argparse.Namespace,
     repo: SqliteMessageRepository,
@@ -1047,6 +1306,10 @@ def _run_application_command(
         return _run_sync_command(args, repo, credential_store, storage_root, settings)
     if command == "reparse":
         return _run_reparse_command(args, repo, storage_root)
+    if command == "verify":
+        return _run_verify_command(args, repo, storage_root)
+    if command == "reindex":
+        return _run_reindex_command(args, repo, storage_root)
     if command == "search":
         return _run_search_command(args, repo, search_repo)
     return 0
@@ -1058,24 +1321,26 @@ def _run_command(
     command: str | None,
     args: argparse.Namespace | None = None,
 ) -> int:
-    readonly = command == "verify"
+    verify_mode = getattr(args, "mode", "quick") if command == "verify" else None
+    readonly = command == "verify" and verify_mode in {"quick", "full"}
     result = 0
     with StorageSession(settings, requested_root, readonly=readonly) as session:
-        if command not in {None, "migrate", "verify"}:
+        if command not in {None, "migrate"}:
             if args is None:
                 raise ConfigError("Command arguments are missing")
             repository = SqliteMessageRepository(session.connection_manager)
             search_repository = SqliteSearchRepository(session.connection_manager)
-            backfill_snapshots(
-                repository,
-                lambda account_id: ManifestWriter(session.root, account_id),
-                lambda account_id: ManifestReader(session.root, account_id),
-            )
-            if session.was_unclean_shutdown:
-                repair_manifest_tails(
+            if command not in {"verify", "reindex"}:
+                backfill_snapshots(
                     repository,
+                    lambda account_id: ManifestWriter(session.root, account_id),
                     lambda account_id: ManifestReader(session.root, account_id),
                 )
+                if session.was_unclean_shutdown:
+                    repair_manifest_tails(
+                        repository,
+                        lambda account_id: ManifestReader(session.root, account_id),
+                    )
             result = _run_application_command(
                 args,
                 repository,

@@ -1,19 +1,28 @@
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 
 import mail_dock.__main__ as main
 from mail_dock import config
-from mail_dock.__main__ import StorageSession, _build_parser, _exit_code, _run_search_command
+from mail_dock.__main__ import (
+    StorageSession,
+    _build_parser,
+    _exit_code,
+    _run_reindex_command,
+    _run_search_command,
+    _run_verify_command,
+)
 from mail_dock.domain.errors import SearchQueryError, StorageUnsupportedError
 from mail_dock.domain.search import MessageSummary, PageCursor, SearchPage
 from mail_dock.infrastructure.security.keyring_store import KeyringBackendStatus
 from mail_dock.infrastructure.security.session_store import SessionCredentialStore
 from mail_dock.infrastructure.storage.capabilities import CapabilityLevel, StorageCapabilities
 from mail_dock.infrastructure.storage.storage_root import StorageLock
+from mail_dock.usecases.verify import QuickVerifyResult
 
 
 class FakeMessageRepository:
@@ -118,6 +127,30 @@ def test_parser_accepts_gui_command() -> None:
     assert args.command == "gui"
 
 
+def test_verify_parser_accepts_modes_and_account_scope() -> None:
+    default_args = _build_parser().parse_args(["verify"])
+    scoped_args = _build_parser().parse_args(
+        ["verify", "--mode", "orphans", "--account", "account-1"]
+    )
+
+    assert default_args.mode == "quick"
+    assert scoped_args.mode == "orphans"
+    assert scoped_args.account == "account-1"
+
+
+def test_reindex_parser_accepts_account_scope() -> None:
+    args = _build_parser().parse_args(["reindex", "--account", "account-1"])
+
+    assert args.command == "reindex"
+    assert args.account == "account-1"
+
+
+@pytest.mark.parametrize("command", ["purge", "delete-remote"])
+def test_cli_has_no_destructive_subcommand(command: str) -> None:
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args([command])
+
+
 def test_main_routes_gui_and_no_command_without_starting_storage_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -167,6 +200,77 @@ def test_main_keeps_existing_cli_commands_on_the_cli_route(
     assert main.main(["verify", "--storage-root", "/tmp/mail-dock-test"]) == 17
 
     assert [command for command, _ in calls] == ["migrate", "verify"]
+
+
+def test_verify_command_runs_selected_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: Any,
+) -> None:
+    args = _build_parser().parse_args(["verify", "--mode", "quick"])
+    calls: list[object] = []
+
+    def fake_quick_verify(repo: object, storage: object, *, cancel: object) -> object:
+        del repo, cancel
+        calls.append(storage)
+        return QuickVerifyResult(3, (), ("eml/a.eml",), False)
+
+    monkeypatch.setattr(main, "quick_verify", fake_quick_verify)
+
+    result = _run_verify_command(args, cast(Any, object()), tmp_path)
+
+    assert result == 0
+    assert len(calls) == 1
+    assert "checked=3, missing=0, size_mismatch=1" in capsys.readouterr().out
+
+
+def test_reindex_requires_confirmation_before_running(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    args = _build_parser().parse_args(["reindex", "--account", "account-1"])
+    calls: list[str] = []
+    monkeypatch.setattr("builtins.input", lambda prompt: "no")
+    monkeypatch.setattr(main, "reindex", lambda *args, **kwargs: calls.append("run"))
+
+    result = _run_reindex_command(args, cast(Any, object()), tmp_path)
+
+    assert result == 130
+    assert calls == []
+
+
+def test_reindex_runs_only_after_confirmation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: Any,
+) -> None:
+    args = _build_parser().parse_args(["reindex", "--account", "account-1"])
+    calls: list[tuple[object, object]] = []
+    monkeypatch.setattr("builtins.input", lambda prompt: "reindex")
+
+    def fake_reindex(
+        repo: object, storage: object, manifest_reader: object, **kwargs: Any
+    ) -> object:
+        del storage, kwargs
+        calls.append((repo, manifest_reader))
+        return SimpleNamespace(
+            account_count=1,
+            folder_count=2,
+            message_count=3,
+            contents_count=3,
+            purged_count=0,
+            skipped_count=0,
+            warnings=(),
+            cancelled=False,
+        )
+
+    monkeypatch.setattr(main, "reindex", fake_reindex)
+
+    result = _run_reindex_command(args, cast(Any, object()), tmp_path)
+
+    assert result == 0
+    assert len(calls) == 1
+    assert "accounts=1, folders=2, messages=3" in capsys.readouterr().out
 
 
 def test_storage_session_migrates_saves_settings_and_releases_lock(
