@@ -189,8 +189,10 @@ def test_storage_session_migrates_saves_settings_and_releases_lock(
             == 5
         )
 
-    assert saved[0].storage_root_candidates == (str(tmp_storage_root.resolve()),)
-    assert saved[0].storage_root_uuid is not None
+    # saved[0] is the capability-probe persist (normcased checked_path); the final
+    # _save_settings() call on __exit__ is last and preserves the resolved path's case.
+    assert saved[-1].storage_root_candidates == (str(tmp_storage_root.resolve()),)
+    assert saved[-1].storage_root_uuid is not None
     with StorageLock(tmp_storage_root) as lock:
         assert lock.held
 

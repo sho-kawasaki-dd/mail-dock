@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -174,8 +175,9 @@ def test_storage_fingerprint_includes_normalized_path(tmp_path: Path) -> None:
 
     fingerprint = storage_fingerprint(root)
 
-    assert str(root.resolve()) in fingerprint
-    assert fingerprint.startswith("posix:")
+    # storage_fingerprint() normcases the path, so compare case-insensitively on Windows.
+    assert os.path.normcase(str(root.resolve())) in os.path.normcase(fingerprint)
+    assert fingerprint.startswith("windows:" if os.name == "nt" else "posix:")
 
 
 def test_detached_error_is_not_swallowed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

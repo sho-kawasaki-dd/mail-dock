@@ -1,3 +1,4 @@
+import errno
 import hashlib
 from datetime import datetime
 from pathlib import Path
@@ -92,7 +93,15 @@ def test_export_eml_rejects_a_parent_that_changes_resolution(
     first_parent.mkdir()
     second_parent.mkdir()
     alias = tmp_path / "destination"
-    alias.symlink_to(first_parent, target_is_directory=True)
+    try:
+        alias.symlink_to(first_parent, target_is_directory=True)
+    except OSError as error:
+        if (
+            error.errno in {errno.EACCES, errno.EPERM, errno.ENOSYS}
+            or getattr(error, "winerror", None) == 1314
+        ):
+            pytest.skip("symlink creation is unavailable in this environment")
+        raise
     destination = alias / "mail.eml"
     storage = FakeStorage(b"export")
     expected_hash = hashlib.sha256(storage.raw).hexdigest()

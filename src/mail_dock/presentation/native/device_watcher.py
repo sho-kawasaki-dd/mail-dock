@@ -55,15 +55,21 @@ class _Point(ctypes.Structure):
     _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
 
 
+_NATIVE_MESSAGE_FIELDS: list[tuple[str, type]] = [
+    ("hwnd", ctypes.c_void_p),
+    ("message", ctypes.c_uint),
+    ("w_param", ctypes.c_size_t),
+    ("l_param", ctypes.c_ssize_t),
+    ("time", ctypes.c_uint32),
+]
+if ctypes.sizeof(ctypes.c_void_p) == 8:
+    # x64 MSVC pads MSG.pt to an 8-byte boundary; ctypes' natural layout omits that gap.
+    _NATIVE_MESSAGE_FIELDS.append(("_reserved", ctypes.c_uint32))
+_NATIVE_MESSAGE_FIELDS.append(("point", _Point))
+
+
 class _NativeMessage(ctypes.Structure):
-    _fields_ = [
-        ("hwnd", ctypes.c_void_p),
-        ("message", ctypes.c_uint),
-        ("w_param", ctypes.c_size_t),
-        ("l_param", ctypes.c_ssize_t),
-        ("time", ctypes.c_uint32),
-        ("point", _Point),
-    ]
+    _fields_ = _NATIVE_MESSAGE_FIELDS
 
 
 class _DeviceBroadcastHeader(ctypes.Structure):

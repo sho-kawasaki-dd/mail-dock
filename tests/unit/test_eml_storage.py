@@ -1,4 +1,7 @@
+import ctypes
 import hashlib
+import os
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
@@ -123,6 +126,111 @@ def test_read_verified_returns_bytes_only_for_a_matching_complete_hash(
         storage.read_verified(stored.relative_path, "0" * 64)
 
 
+def _open_with_share_delete(path: Path) -> BinaryIO:
+    """Open via CreateFileW with FILE_SHARE_DELETE so a concurrent replace can succeed."""
+    import msvcrt
+    from ctypes import wintypes
+
+    generic_read = 0x80000000
+    file_share_read = 0x00000001
+    file_share_write = 0x00000002
+    file_share_delete = 0x00000004
+    open_existing = 3
+    file_attribute_normal = 0x80
+    invalid_handle_value = wintypes.HANDLE(-1).value
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+
+    handle = kernel32.CreateFileW(
+        str(path),
+        generic_read,
+        file_share_read | file_share_write | file_share_delete,
+        None,
+        open_existing,
+        file_attribute_normal,
+        None,
+    )
+    if handle == invalid_handle_value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    fd = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+    return cast(BinaryIO, os.fdopen(fd, "rb"))
+
+
+def _replace_with_posix_semantics(source: Path, target: Path) -> None:
+    """Rename source onto target the way os.replace() cannot: while target has an open reader.
+
+    Plain os.replace()/MoveFileExW refuses to replace a file with any open handle on Windows,
+    regardless of share flags, so this uses SetFileInformationByHandle(FileRenameInfoEx) with
+    the POSIX-semantics flag (Windows 10 1709+), which only requires the target's existing
+    handle to have been opened with FILE_SHARE_DELETE.
+    """
+    import struct
+    from ctypes import wintypes
+
+    delete_access = 0x00010000
+    file_share_read = 0x00000001
+    file_share_write = 0x00000002
+    file_share_delete = 0x00000004
+    open_existing = 3
+    file_attribute_normal = 0x80
+    file_rename_info_ex = 22
+    replace_if_exists = 0x1
+    posix_semantics = 0x2
+    invalid_handle_value = wintypes.HANDLE(-1).value
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+    kernel32.SetFileInformationByHandle.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+    ]
+    kernel32.SetFileInformationByHandle.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+    handle = kernel32.CreateFileW(
+        str(source),
+        delete_access,
+        file_share_read | file_share_write | file_share_delete,
+        None,
+        open_existing,
+        file_attribute_normal,
+        None,
+    )
+    if handle == invalid_handle_value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        name = str(target).encode("utf-16-le")
+        flags = replace_if_exists | posix_semantics
+        buffer = struct.pack("<I4xQI", flags, 0, len(name)) + name
+        if not kernel32.SetFileInformationByHandle(
+            handle, file_rename_info_ex, buffer, len(buffer)
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def test_read_verified_rejects_path_replacement_during_read(
     tmp_storage_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -157,7 +265,10 @@ def test_read_verified_rejects_path_replacement_during_read(
             if not self._replaced:
                 replacement = target.with_suffix(".replacement")
                 replacement.write_bytes(b"replacement EML content")
-                replacement.replace(target)
+                if sys.platform == "win32":
+                    _replace_with_posix_semantics(replacement, target)
+                else:
+                    replacement.replace(target)
                 self._replaced = True
             return payload
 
@@ -165,8 +276,15 @@ def test_read_verified_rejects_path_replacement_during_read(
             return getattr(self._file, name)
 
     def open_with_replacement(path: Path, *args: Any, **kwargs: Any) -> BinaryIO | ReplacingReader:
-        file = original_open(path, *args, **kwargs)
-        return ReplacingReader(file) if path == target else file
+        if path != target:
+            return cast(BinaryIO, original_open(path, *args, **kwargs))
+        # Default open() lacks FILE_SHARE_DELETE on Windows, which would block the replace below.
+        file = (
+            _open_with_share_delete(path)
+            if sys.platform == "win32"
+            else original_open(path, *args, **kwargs)
+        )
+        return ReplacingReader(file)
 
     monkeypatch.setattr(Path, "open", open_with_replacement)
 

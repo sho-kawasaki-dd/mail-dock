@@ -331,8 +331,14 @@ def _windows_volume_serial(root: Path) -> int:
     filesystem_flags = ctypes.c_ulong()
     windll_name = "windll"
     windll = getattr(ctypes, windll_name)
+    get_last_error_name = "get_last_error"
+    get_last_error = getattr(ctypes, get_last_error_name)
+    # GetVolumeInformationW requires the volume's root path; an arbitrary subdirectory fails.
+    volume_root = ctypes.create_unicode_buffer(261)
+    if not windll.kernel32.GetVolumePathNameW(str(root), volume_root, len(volume_root)):
+        raise OSError(get_last_error(), "GetVolumePathNameW failed")
     succeeded = windll.kernel32.GetVolumeInformationW(
-        str(root),
+        volume_root.value,
         volume_name,
         len(volume_name),
         ctypes.byref(serial_number),
@@ -342,8 +348,6 @@ def _windows_volume_serial(root: Path) -> int:
         len(filesystem_name),
     )
     if not succeeded:
-        get_last_error_name = "get_last_error"
-        get_last_error = getattr(ctypes, get_last_error_name)
         raise OSError(get_last_error(), "GetVolumeInformationW failed")
     return serial_number.value
 
