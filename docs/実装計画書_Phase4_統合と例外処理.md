@@ -403,21 +403,21 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 - [x] 既存の `OnamaeImapFetcher.delete_remote_message()` が `UIDPLUS` 非対応時にフォルダ全体 `expunge()` へフォールバックしている現行実装を廃止し、非対応サーバーでは `expunge` を拒否するよう修正する（レビュー修正案 3.4）
 #### **E-2. `usecases/delete_remote.py` — 削除ユースケース**
 
-- [ ] `dry_run(repo, storage, *, message_ids, storage_state) -> DeleteDryRunResult` を実装する（F-29）
-    - [ ] 3つの事前条件を検証し、満たさないメールを**自動除外**して除外理由を返す（F-27 / D-12）
-    - [ ] 対象一覧（件名・日付・サイズ）と合計容量を返す
-- [ ] `execute(fetcher, repo, storage, manifest, *, plan, mode, storage_state) -> DeleteResult` を実装する。exactly-once を前提とせず、意図・成功確認・不確定状態を別イベントとして記録する（レビュー修正案 3.4）
-    - [ ] `storage_state.is_remote_delete_allowed()` が偽なら**入口で無条件拒否**する（F-28）
-    - [ ] `dry_run` の結果を再検証してから実行する（TOCTOU対策。実行直前にもハッシュを再計算する）
-    - [ ] `config.delete_batch_limit`（既定1,000）を超える要求を拒否する（F-31）
-    - [ ] 既定はゴミ箱へ MOVE（`mode="trash"`）、`mode="expunge"` は明示指定時のみ（D-11）
-    - [ ] `expunge` 指定時、サーバーが UID EXPUNGE（対象UIDのみを永久削除できる操作）に対応しない場合は実行を拒否し、通常のフォルダ全体 EXPUNGE へフォールバックしない（レビュー修正案 3.4）
-    - [ ] 1. マニフェストへ `remote_delete_intent` を追記し fsync してから IMAP MOVE/EXPUNGE を実行する
-    - [ ] 2. サーバー応答を確認し、成功が確認できた場合のみ `remote_delete_completed` を追記し fsync する
-    - [ ] 3. 応答不明・通信断の場合は `remote_delete_uncertain` を記録し、その場では `deleted` と表示しない
-    - [ ] 4. 状態確定後（再接続後の照合を含む）に `audit_log` へ記録し、`remote_state='deleted'` を更新する（F-33）
-- [ ] `reconcile_uncertain_deletes(fetcher, repo, manifest, *, storage_state) -> None` を実装する。再接続後に元フォルダ・UID・UIDVALIDITY・移動先を照合し、`remote_delete_uncertain` を `remote_delete_completed` または取り消しへ確定させる（レビュー修正案 3.4）
-- [ ] `sqlite3` / PySide6 / infrastructure の具象を import しないこと
+- [x] `dry_run(repo, storage, *, message_ids, storage_state) -> DeleteDryRunResult` を実装する（F-29）
+    - [x] 3つの事前条件を検証し、満たさないメールを**自動除外**して除外理由を返す（F-27 / D-12）
+    - [x] 対象一覧（件名・日付・サイズ）と合計容量を返す
+- [x] `execute(fetcher, repo, storage, manifest, *, plan, mode, storage_state) -> DeleteResult` を実装する。exactly-once を前提とせず、意図・成功確認・不確定状態を別イベントとして記録する（レビュー修正案 3.4）
+    - [x] `storage_state.is_remote_delete_allowed()` が偽なら**入口で無条件拒否**する（F-28）
+    - [x] `dry_run` の結果を再検証してから実行する（TOCTOU対策。実行直前にもハッシュを再計算する）
+    - [x] `config.delete_batch_limit`（既定1,000）を超える要求を拒否する（F-31）
+    - [x] 既定はゴミ箱へ MOVE（`mode="trash"`）、`mode="expunge"` は明示指定時のみ（D-11）
+    - [x] `expunge` 指定時、サーバーが UID EXPUNGE（対象UIDのみを永久削除できる操作）に対応しない場合は実行を拒否し、通常のフォルダ全体 EXPUNGE へフォールバックしない（レビュー修正案 3.4）
+    - [x] 1. マニフェストへ `remote_delete_intent` を追記し fsync してから IMAP MOVE/EXPUNGE を実行する
+    - [x] 2. サーバー応答を確認し、成功が確認できた場合のみ `remote_delete_completed` を追記し fsync する
+    - [x] 3. 応答不明・通信断の場合は `remote_delete_uncertain` を記録し、その場では `deleted` と表示しない
+    - [x] 4. 状態確定後（再接続後の照合を含む）に `audit_log` へ記録し、`remote_state='deleted'` を更新する（F-33）
+- [x] `reconcile_uncertain_deletes(fetcher, repo, manifest, *, storage_state) -> None` を実装する。再接続後に元フォルダ・UID・UIDVALIDITY・移動先を照合し、`remote_delete_uncertain` を `remote_delete_completed` または取り消しへ確定させる（レビュー修正案 3.4）
+- [x] `sqlite3` / PySide6 / infrastructure の具象を import しないこと
 
 #### **E-3. GUI 配線**
 
