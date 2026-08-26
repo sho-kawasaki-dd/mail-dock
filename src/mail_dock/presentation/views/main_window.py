@@ -33,6 +33,7 @@ from mail_dock import config
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.messages import AttachmentSavePlan, SavedFile
 from mail_dock.domain.search import MessageDetail
+from mail_dock.domain.storage_state import StorageState
 from mail_dock.presentation import strings
 from mail_dock.presentation.context import AppContext
 from mail_dock.presentation.models.folder_tree_model import (
@@ -496,9 +497,7 @@ class MainWindow(QMainWindow):
         self.sync_worker.folders_refreshed.connect(self._show_folder_refresh_result)
         self.sync_worker.folder_tree_updated.connect(self._update_folder_tree)
         self.sync_worker.error_reported.connect(self._show_sync_error)
-        self.sync_worker.storage_detached.connect(self._show_storage_detached)
         self.sync_worker.file_result.connect(self._show_file_result)
-        self.query_worker.storage_detached.connect(self._show_storage_detached)
 
         self._cancel_button.clicked.connect(self._cancel_current_operation)
         self.message_list_viewmodel.request_page()
@@ -801,6 +800,18 @@ class MainWindow(QMainWindow):
         self._storage_status_label.setText(strings.ERROR_STORAGE_DETACHED)
         self.sync_action.setEnabled(False)
         self.refresh_folders_action.setEnabled(False)
+
+    def set_storage_state(self, state: object) -> None:
+        """Reflect the monitor's lifecycle state in the main window."""
+
+        if state in {StorageState.DETACHED, StorageState.DETACHED_BY_USER}:
+            self._show_storage_detached(state)
+            return
+        if state is StorageState.ATTACHED:
+            self._storage_detached_banner.setVisible(False)
+            self._storage_status_label.setText(strings.STATUS_STORAGE_CONNECTED)
+            self.sync_action.setEnabled(self._sync_token is None)
+            self.refresh_folders_action.setEnabled(self._folder_refresh_token is None)
 
     def _show_settings(self) -> None:
         dialog = SettingsDialog(self.context, self)

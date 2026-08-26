@@ -45,6 +45,7 @@ from mail_dock.infrastructure.storage.storage_root import (
 )
 from mail_dock.presentation import strings
 from mail_dock.presentation.context import AppContext
+from mail_dock.presentation.storage_monitor import StorageMonitor
 from mail_dock.presentation.views.dialogs.confirmation_dialog import ConfirmationDialog
 from mail_dock.presentation.views.dialogs.error_dialog import show_error
 from mail_dock.presentation.views.setup_wizard import SetupWizard
@@ -304,6 +305,7 @@ class _GuiRuntime:
         self.session: StorageSession | None = None
         self.context: AppContext | None = None
         self.window: Any = None
+        self.storage_monitor: StorageMonitor | None = None
         self.verification_thread: QThread | None = None
         self.verification_result: dict[str, Any] = {"error": None, "window": None}
 
@@ -322,6 +324,33 @@ class _GuiRuntime:
 
     def _window_created(self, window: Any) -> None:
         self.window = window
+        if self.session is None or self.context is None:
+            return
+        workers = tuple(
+            worker
+            for worker in (
+                getattr(window, "query_worker", None),
+                getattr(window, "sync_worker", None),
+            )
+            if worker is not None
+        )
+        self.storage_monitor = StorageMonitor(
+            self.session.root,
+            self.session.root_uuid,
+            self.session.settings,
+            storage_lock=getattr(self.session, "storage_lock", None),
+            connection_manager=self.session.connection_manager,
+            workers=workers,
+            config_log_dir=config.config_dir(),
+            parent=window if isinstance(window, QObject) else None,
+        )
+        set_storage_state = getattr(window, "set_storage_state", None)
+        if callable(set_storage_state):
+            self.storage_monitor.storage_state_changed.connect(set_storage_state)
+        show_storage_detached = getattr(window, "_show_storage_detached", None)
+        if callable(show_storage_detached):
+            self.storage_monitor.storage_detached.connect(show_storage_detached)
+        self.storage_monitor.start()
 
     def verify_and_show(self) -> None:
         if self.session is None or self.context is None:
@@ -337,6 +366,9 @@ class _GuiRuntime:
         if self.verification_thread is not None and self.verification_thread.isRunning():
             self.verification_thread.quit()
             self.verification_thread.wait()
+        if self.storage_monitor is not None:
+            self.storage_monitor.stop()
+            self.storage_monitor = None
         if self.window is not None:
             _stop_window(self.window, self.context)
             # Prevent Qt's quitOnLastWindowClosed from ending app.exec() before

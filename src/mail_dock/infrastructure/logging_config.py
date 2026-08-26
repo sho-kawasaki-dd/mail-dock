@@ -65,6 +65,25 @@ def _new_file_handler(path: Path) -> logging.FileHandler:
     return handler
 
 
+def set_application_log_target(config_dir: Path) -> None:
+    """Attach the application log to the local configuration directory."""
+    global _app_handler
+
+    logger = _logger()
+    log_dir = config_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    _remove_handler(logger, _app_handler)
+    _app_handler = RotatingFileHandler(
+        log_dir / "app.log",
+        maxBytes=_APP_LOG_MAX_BYTES,
+        backupCount=_APP_LOG_BACKUP_COUNT,
+        encoding="utf-8",
+    )
+    _app_handler.setFormatter(_FORMATTER)
+    _app_handler.addFilter(MaskingFilter())
+    logger.addHandler(_app_handler)
+
+
 def _logger() -> logging.Logger:
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
@@ -81,22 +100,10 @@ def _remove_handler(logger: logging.Logger, handler: logging.Handler | None) -> 
 
 def setup_logging(config_dir: Path, *, debug: bool) -> None:
     """Configure mandatory application-file and optional console logging."""
-    global _app_handler, _console_handler
+    global _console_handler
 
     logger = _logger()
-    log_dir = config_dir / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-
-    _remove_handler(logger, _app_handler)
-    _app_handler = RotatingFileHandler(
-        log_dir / "app.log",
-        maxBytes=_APP_LOG_MAX_BYTES,
-        backupCount=_APP_LOG_BACKUP_COUNT,
-        encoding="utf-8",
-    )
-    _app_handler.setFormatter(_FORMATTER)
-    _app_handler.addFilter(MaskingFilter())
-    logger.addHandler(_app_handler)
+    set_application_log_target(config_dir)
 
     _remove_handler(logger, _console_handler)
     _console_handler = None

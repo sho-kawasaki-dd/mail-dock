@@ -247,21 +247,21 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 - [x] **非Windowsでは no-op 実装**とし、`install()` / `uninstall()` が安全に呼べること（D-21）
  - [x] ドライブレターの復元ロジックをQt非依存の純粋関数へ分離し、通常CIでテストする
 
-#### **B-3. `presentation/storage_monitor.py` — ハートビートと縮退制御**
+#### B-3. `presentation/storage_monitor.py` — ハートビートと縮退制御
 
-- [ ] `StorageMonitor(QObject)` を実装する
-- [ ] `config.heartbeat_interval_sec`（既定5秒）の `QTimer` で `storage_root.probe(root, root_uuid)` を実行し、`PROBE_OK` / `PROBE_MISSING` / `PROBE_FOREIGN` を状態機械へ渡す（レビュー修正案 3.7。定期ハートビートの結果であり、瞬断リプローブの `REPROBE_*` とは別イベントとして扱う）
-- [ ] `PROBE_OK` のときだけ `StorageLock.touch_heartbeat()` を呼ぶ
-- [ ] `PROBE_FOREIGN` 検出時は即座に全書き込みを禁止し、警告を表示する（D-9）
-- [ ] `QueryWorker` / `SyncWorker` / `VerifyWorker` の `storage_detached` Signal を集約し、`IO_ERROR` として状態機械へ渡す
-- [ ] 瞬断判定: `IO_ERROR` 受信後、500ms 間隔で `config.reprobe_attempts` 回リプローブする。UUID一致で復帰したら全接続を張り直して `ATTACHED` へ戻す（F-3）
-- [ ] `storage_state_changed` Signal で `MainWindow` へ通知する
-- [ ] `DETACHED` 遷移時の処理を実装する（F-4）
-    - [ ] 書き込みを一切試みない（死んだハンドルへの再書き込みを行わない）
-    - [ ] ワーカーを `CancelToken` で停止する。**停止処理自体がI/Oを伴わない**ことをコードで保証する
-    - [ ] 全SQLite接続を close し、プールに残さない
-    - [ ] `.lock` のハートビート更新を停止する
-    - [ ] ログ出力先を `{config_dir}/logs/app.log` へ切り替える（D-24）
+- [x] `StorageMonitor(QObject)` を実装する
+- [x] `config.heartbeat_interval_sec`（既定5秒）の `QTimer` で `storage_root.probe(root, root_uuid)` を実行し、`PROBE_OK` / `PROBE_MISSING` / `PROBE_FOREIGN` を状態機械へ渡す（レビュー修正案 3.7。定期ハートビートの結果であり、瞬断リプローブの `REPROBE_*` とは別イベントとして扱う）
+- [x] `PROBE_OK` のときだけ `StorageLock.touch_heartbeat()` を呼ぶ
+- [x] `PROBE_FOREIGN` 検出時は即座に全書き込みを禁止し、警告を表示する（D-9）
+- [x] `QueryWorker` / `SyncWorker` / `VerifyWorker` の `storage_detached` Signal を集約し、`IO_ERROR` として状態機械へ渡す
+- [x] 瞬断判定: `IO_ERROR` 受信後、500ms 間隔で `config.reprobe_attempts` 回リプローブする。UUID一致で復帰したら全接続を張り直して `ATTACHED` へ戻す（F-3）
+- [x] `storage_state_changed` Signal で `MainWindow` へ通知する
+- [x] `DETACHED` 遷移時の処理を実装する（F-4）
+    - [x] 書き込みを一切試みない（死んだハンドルへの再書き込みを行わない）
+    - [x] ワーカーを `CancelToken` で停止する。**停止処理自体がI/Oを伴わない**ことをコードで保証する
+    - [x] 全SQLite接続を close し、プールに残さない
+    - [x] `.lock` のハートビート更新を停止する
+    - [x] ログ出力先を `{config_dir}/logs/app.log` へ切り替える（D-24）
 
 #### **B-4. 「ストレージを安全に取り外す」メニュー（F-5）**
 
