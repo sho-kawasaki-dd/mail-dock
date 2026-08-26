@@ -278,10 +278,10 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **B-5. クリーンシャットダウンフラグと復帰（F-6 / F-7）**
 
-- [ ] `StorageSession` 開始時に `app_state.clean_shutdown` を読み、`0` なら「前回異常終了」と判定して結果を保持する
-- [ ] 起動直後に `clean_shutdown = 0` を書き、正常終了時に `1` を書く
+- [x] `StorageSession` 開始時に `app_state.clean_shutdown` を読み、`0` なら「前回異常終了」と判定して結果を保持する
+- [x] 起動直後に `clean_shutdown = 0` を書き、正常終了時に `1` を書く
 - [ ] 前回異常終了時は、起動パスで **①マニフェスト末尾修復 → ②範囲限定検証 → ③未完了 `purge_intent` / `remote_delete_intent` の回復** を自動実行する（グループC・D・E に依存。レビュー修正案 3.3 / 3.4）
-- [ ] 起動パスの最初に、A-6のアカウント/フォルダ snapshot バックフィルを実行する（レビュー修正案 9.1）
+- [x] 起動パスの最初に、A-6のアカウント/フォルダ snapshot バックフィルを実行する（レビュー修正案 9.1）
 - [ ] 復帰フローを実装する（D-6）
     - [ ] `DBT_DEVICEARRIVAL` または「再接続を試す」で `RECONNECTING` へ入る
     - [ ] `.maildock_root` のUUID照合 → `.lock` 再取得 → `PRAGMA user_version` 確認 → `PRAGMA quick_check`
@@ -289,7 +289,7 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
     - [ ] Phase 3.6 の共通ブートストラップ（旧セッション解放 → 新 `StorageSession` → `MainWindow` 差し替え）を再利用し、二重セッションを作らない
     - [ ] 検証失敗時は `DETACHED` へ戻し、ユーザー判断を求める
 - [ ] `DETACHED` 中は「再接続を試す／終了」のモーダルのみを表示し、読み取り専用モードを提供しない（F-8）
-- [ ] `cleanup_tmp()` が `tmp/pstimp/` を保護している区別を、コメントとテストで固定する（D-25）
+- [x] `cleanup_tmp()` が `tmp/pstimp/` を保護している区別を、コメントとテストで固定する（D-25）
 
 ---
 

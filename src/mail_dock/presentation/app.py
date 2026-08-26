@@ -50,7 +50,7 @@ from mail_dock.presentation.views.dialogs.confirmation_dialog import Confirmatio
 from mail_dock.presentation.views.dialogs.error_dialog import show_error
 from mail_dock.presentation.views.setup_wizard import SetupWizard
 from mail_dock.presentation.web.schemes import register_schemes
-from mail_dock.usecases.snapshots import backfill_snapshots
+from mail_dock.usecases.snapshots import backfill_snapshots, repair_manifest_tails
 
 LOGGER = logging.getLogger(__name__)
 
@@ -290,6 +290,11 @@ def _start_session(
             context.create_manifest_writer,
             context.create_manifest_reader,
         )
+        if getattr(session, "was_unclean_shutdown", False):
+            repair_manifest_tails(
+                context.create_message_repository(),
+                context.create_manifest_reader,
+            )
         return session, context
     except BaseException as error:
         session.__exit__(type(error), error, error.__traceback__)

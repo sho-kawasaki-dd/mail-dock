@@ -11,7 +11,7 @@ from mail_dock.domain.ports import (
     JSONValue,
 )
 from mail_dock.usecases.register_account import register_account, update_account
-from mail_dock.usecases.snapshots import backfill_snapshots
+from mail_dock.usecases.snapshots import backfill_snapshots, repair_manifest_tails
 from mail_dock.usecases.sync_folders import refresh_folders, set_sync_target
 from tests.support.fake_fetcher import FakeFetcher
 from tests.support.in_memory_repository import InMemoryMessageRepository
@@ -157,6 +157,20 @@ def test_backfill_records_each_existing_account_and_folder_once() -> None:
     assert first == (1, 1)
     assert second == (0, 0)
     assert len(manifests["account"].events) == 2
+
+
+def test_repair_manifest_tails_reads_each_existing_account_manifest() -> None:
+    repository = InMemoryMessageRepository()
+    repository.upsert_account({"id": "account"})
+    manifest = MemoryManifest()
+    manifest.events.append(
+        {
+            "event": "account_snapshot",
+            "account_id": "account",
+        }
+    )
+
+    assert repair_manifest_tails(repository, lambda _account_id: manifest) == 1
 
 
 class _Credentials(BaseCredentialStore):

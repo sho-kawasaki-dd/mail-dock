@@ -83,7 +83,7 @@ from mail_dock.usecases.register_account import (
 from mail_dock.usecases.reparse import reparse_messages
 from mail_dock.usecases.search_messages import search_messages
 from mail_dock.usecases.search_query import parse_query
-from mail_dock.usecases.snapshots import backfill_snapshots
+from mail_dock.usecases.snapshots import backfill_snapshots, repair_manifest_tails
 from mail_dock.usecases.sync_folders import refresh_folders, set_sync_target
 from mail_dock.usecases.sync_mail import SyncOptions, SyncProgress, sync_account
 
@@ -360,6 +360,8 @@ class StorageSession:
         self.credential_store: BaseCredentialStore | None = None
         self.manager: ConnectionManager | None = None
         self._lock: StorageLock | None = None
+        self.previous_clean_shutdown: bool | None = None
+        self._clean_shutdown_written = False
         self._storage_logging_enabled = False
         self._entered = False
         self._closed = False
@@ -415,6 +417,7 @@ class StorageSession:
             )
             connection = self.manager.get_connection()
             if self.readonly:
+                self.previous_clean_shutdown = self._read_clean_shutdown(connection)
                 _verify_database(connection)
                 self.manager.close_current_thread()
                 _verify_fts_database(
@@ -425,6 +428,8 @@ class StorageSession:
             else:
                 version = migrate(connection, root / "metadata.db")
                 LOGGER.info("Database migration complete at schema version %d", version)
+                self.previous_clean_shutdown = self._read_clean_shutdown(connection)
+                self._write_clean_shutdown(connection, False)
             self._entered = True
             return self
         except BaseException:
@@ -436,8 +441,45 @@ class StorageSession:
         try:
             if exc_type is None:
                 self._save_settings()
+                if not self.readonly and not self._clean_shutdown_written:
+                    self._write_clean_shutdown(self.connection_manager.get_connection(), True)
         finally:
             self._cleanup()
+
+    @property
+    def was_unclean_shutdown(self) -> bool:
+        """Whether the previous writable session did not reach normal exit."""
+
+        return self.previous_clean_shutdown is False
+
+    @staticmethod
+    def _read_clean_shutdown(connection: sqlite3.Connection) -> bool | None:
+        try:
+            row = connection.execute(
+                "SELECT value FROM app_state WHERE key = ?",
+                ("clean_shutdown",),
+            ).fetchone()
+        except sqlite3.Error as error:
+            raise DatabaseError("Could not read clean shutdown state") from error
+        if row is None:
+            return None
+        if row[0] == "1":
+            return True
+        if row[0] == "0":
+            return False
+        raise DatabaseError("Clean shutdown state is invalid")
+
+    @staticmethod
+    def _write_clean_shutdown(connection: sqlite3.Connection, clean: bool) -> None:
+        try:
+            connection.execute(
+                "INSERT INTO app_state (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                ("clean_shutdown", "1" if clean else "0"),
+            )
+            connection.commit()
+        except sqlite3.Error as error:
+            raise DatabaseError("Could not write clean shutdown state") from error
 
     def checkpoint_for_detach(self) -> None:
         """Flush the WAL and close this thread's connection before root release."""
@@ -448,6 +490,8 @@ class StorageSession:
         connection = manager.get_connection()
         try:
             checkpoint_truncate(connection)
+            self._write_clean_shutdown(connection, True)
+            self._clean_shutdown_written = True
         finally:
             manager.request_close_all()
             manager.close_current_thread()
@@ -1027,6 +1071,11 @@ def _run_command(
                 lambda account_id: ManifestWriter(session.root, account_id),
                 lambda account_id: ManifestReader(session.root, account_id),
             )
+            if session.was_unclean_shutdown:
+                repair_manifest_tails(
+                    repository,
+                    lambda account_id: ManifestReader(session.root, account_id),
+                )
             result = _run_application_command(
                 args,
                 repository,

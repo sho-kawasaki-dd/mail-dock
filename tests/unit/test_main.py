@@ -197,6 +197,44 @@ def test_storage_session_migrates_saves_settings_and_releases_lock(
         assert lock.held
 
 
+def test_storage_session_marks_shutdown_unclean_until_normal_exit(
+    tmp_storage_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(main, "check_free_space", lambda path: None)
+
+    with StorageSession(config.AppConfig(), tmp_storage_root) as session:
+        assert session.previous_clean_shutdown is None
+        assert (
+            session.connection_manager.get_connection()
+            .execute("SELECT value FROM app_state WHERE key = 'clean_shutdown'")
+            .fetchone()
+            == ("0",)
+        )
+
+    with StorageSession(config.AppConfig(), tmp_storage_root) as session:
+        assert session.previous_clean_shutdown is True
+        assert (
+            session.connection_manager.get_connection()
+            .execute("SELECT value FROM app_state WHERE key = 'clean_shutdown'")
+            .fetchone()
+            == ("0",)
+        )
+
+
+def test_storage_session_retains_unclean_shutdown_after_exception(
+    tmp_storage_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(main, "check_free_space", lambda path: None)
+
+    with pytest.raises(RuntimeError), StorageSession(config.AppConfig(), tmp_storage_root):
+        raise RuntimeError("simulated crash")
+
+    with StorageSession(config.AppConfig(), tmp_storage_root) as session:
+        assert session.previous_clean_shutdown is False
+
+
 def test_storage_session_persists_unsupported_probe_before_raising(
     tmp_storage_root: Path,
     monkeypatch: pytest.MonkeyPatch,

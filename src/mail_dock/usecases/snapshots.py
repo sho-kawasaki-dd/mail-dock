@@ -160,3 +160,23 @@ def backfill_snapshots(
         finally:
             writer.close()
     return account_count, folder_count
+
+
+def repair_manifest_tails(
+    repo: BaseMessageRepository,
+    manifest_reader_factory: Callable[[str], BaseManifestReader],
+) -> int:
+    """Consume each account manifest so a torn final record is repaired."""
+
+    repaired_manifests = 0
+    for account in repo.list_accounts():
+        account_id = str(account.get("id", account.get("account_id", "")))
+        if not account_id:
+            continue
+        reader = manifest_reader_factory(account_id)
+        had_events = False
+        for _event in reader.read_all_events():
+            had_events = True
+        if had_events:
+            repaired_manifests += 1
+    return repaired_manifests
