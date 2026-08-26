@@ -101,6 +101,19 @@ class FakeFetcher(BaseMailFetcher):
     def list_folders(self) -> list[RemoteFolder]:
         return list(self._folders.values())
 
+    def find_trash_folder(self) -> RemoteFolder | None:
+        return next(
+            (
+                folder
+                for folder in self._folders.values()
+                if any(attribute.casefold() == r"\trash" for attribute in folder.special_use)
+            ),
+            None,
+        )
+
+    def supports_uid_expunge(self) -> bool:
+        return False
+
     def select_folder(self, raw_name: str) -> int:
         if raw_name not in self._folders:
             raise PermanentError(f"unknown folder: {raw_name}")

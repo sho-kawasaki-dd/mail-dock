@@ -152,6 +152,34 @@ class OnamaeImapFetcher(BaseMailFetcher):
             item for item in self._response_items(data) if isinstance(item, (bytes, str))
         )
 
+    def find_trash_folder(self) -> RemoteFolder | None:
+        """Resolve the trash folder using SPECIAL-USE, candidates, then configuration."""
+
+        folders = self.list_folders()
+        for folder in folders:
+            if any(attribute.casefold() == r"\trash" for attribute in folder.special_use):
+                return folder
+
+        normalized = {
+            value.casefold(): folder
+            for folder in folders
+            for value in (folder.raw_name, folder.display_name)
+        }
+        for candidate in _TRASH_CANDIDATES:
+            candidate_folder = normalized.get(candidate.casefold())
+            if candidate_folder is not None:
+                return candidate_folder
+
+        configured = self._remote_trash_folder
+        if configured:
+            return normalized.get(configured.casefold()) or RemoteFolder(configured, configured)
+        return None
+
+    def supports_uid_expunge(self) -> bool:
+        """Return whether this connection can expunge only the requested UID."""
+
+        return "UIDPLUS" in self._capabilities
+
     def select_folder(self, raw_name: str) -> int:
         """Select a folder read-only and return its current UIDVALIDITY."""
 
@@ -318,9 +346,10 @@ class OnamaeImapFetcher(BaseMailFetcher):
     def delete_remote_message(self, raw_name: str, uid: int, *, mode: str = "trash") -> None:
         """Move or expunge one message.
 
-        Phase 1 does not call this method from a use-case or CLI. The safety
-        guards for remote deletion belong to Phase 4 and must be added before
-        exposing this operation to users.
+        Phase 4 callers must perform their safety checks before invoking this
+        low-level provider operation. In particular, ``expunge`` is rejected
+        unless UIDPLUS is advertised; a folder-wide EXPUNGE is never used as a
+        fallback.
         """
 
         if mode not in {"trash", "expunge"}:
@@ -330,18 +359,21 @@ class OnamaeImapFetcher(BaseMailFetcher):
             status, data = connection.select(raw_name)
             self._ensure_ok(status, data, "SELECT")
         if mode == "trash":
-            trash_folder = self._find_trash_folder()
+            trash_folder = self.find_trash_folder()
+            if trash_folder is None:
+                raise PermanentError("could not identify the remote trash folder")
             if "MOVE" in self._capabilities:
-                self._uid_command("MOVE", str(uid), trash_folder)
+                self._uid_command("MOVE", str(uid), trash_folder.raw_name)
                 return
-            self._uid_command("COPY", str(uid), trash_folder)
+            if not self.supports_uid_expunge():
+                raise PermanentError(
+                    "UID EXPUNGE is required when MOVE is not supported by this IMAP server"
+                )
+            self._uid_command("COPY", str(uid), trash_folder.raw_name)
+        elif not self.supports_uid_expunge():
+            raise PermanentError("UID EXPUNGE is not supported by this IMAP server")
         self._uid_command("STORE", str(uid), "+FLAGS.SILENT", r"(\Deleted)")
-        if "UIDPLUS" in self._capabilities:
-            self._uid_command("EXPUNGE", str(uid))
-        else:
-            with wrap_imap_errors("EXPUNGE"):
-                status, data = connection.expunge()
-                self._ensure_ok(status, data, "EXPUNGE")
+        self._uid_command("EXPUNGE", str(uid))
 
     def _require_connection(self) -> imaplib.IMAP4_SSL:
         if self._connection is None:
@@ -355,27 +387,6 @@ class OnamaeImapFetcher(BaseMailFetcher):
             status, data = connection.uid(command, *imap_args)
             self._ensure_ok(status, data, f"UID {command}")
         return self._response_items(data)
-
-    def _find_trash_folder(self) -> str:
-        folders = self.list_folders()
-        for folder in folders:
-            if any(attribute.casefold() == r"\trash" for attribute in folder.special_use):
-                return folder.raw_name
-
-        normalized = {
-            value.casefold(): value
-            for folder in folders
-            for value in (folder.raw_name, folder.display_name)
-        }
-        for candidate in _TRASH_CANDIDATES:
-            raw_name = normalized.get(candidate.casefold())
-            if raw_name is not None:
-                return raw_name
-        if self._remote_trash_folder is not None:
-            configured = normalized.get(self._remote_trash_folder.casefold())
-            if configured is not None:
-                return configured
-        raise PermanentError("could not identify the remote trash folder")
 
     @staticmethod
     def _ensure_ok(status: object, data: object, operation: str) -> None:

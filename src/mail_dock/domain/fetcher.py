@@ -89,6 +89,14 @@ class BaseMailFetcher(ABC):
         """List folders without exposing provider-specific response objects."""
 
     @abstractmethod
+    def find_trash_folder(self) -> RemoteFolder | None:
+        """Return the resolved remote trash folder, or ``None`` if unknown."""
+
+    @abstractmethod
+    def supports_uid_expunge(self) -> bool:
+        """Return whether UID EXPUNGE is available for safe targeted deletion."""
+
+    @abstractmethod
     def select_folder(self, raw_name: str) -> int:
         """Select a folder and return its current UIDVALIDITY."""
 

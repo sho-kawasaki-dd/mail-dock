@@ -475,6 +475,17 @@ class SettingsDialog(QDialog):
         self._purge_mode_warning.setObjectName("purgeModeWarningLabel")
         self._purge_mode_warning.setWordWrap(True)
         self._update_purge_warning()
+        self._remote_trash_folder = QLineEdit(settings_group)
+        self._remote_trash_folder.setObjectName("remoteTrashFolderLineEdit")
+        self._remote_trash_folder.setPlaceholderText(
+            strings.SETTINGS_PLACEHOLDER_REMOTE_TRASH_FOLDER
+        )
+        if self._settings.remote_trash_folder:
+            self._remote_trash_folder.setText(self._settings.remote_trash_folder)
+        self._remote_trash_status = QLabel(settings_group)
+        self._remote_trash_status.setObjectName("remoteTrashFolderStatusLabel")
+        self._remote_trash_status.setWordWrap(True)
+        self._set_remote_trash_status(None)
         self._encryption_combo = QComboBox(settings_group)
         self._encryption_combo.setObjectName("encryptionDeclarationComboBox")
         self._encryption_combo.addItem(strings.WIZARD_ENCRYPTION_ENCRYPTED, "encrypted")
@@ -536,6 +547,8 @@ class SettingsDialog(QDialog):
         settings_form.addRow(strings.SETTINGS_LABEL_PURGE_MODE, self._purge_mode)
         settings_form.addRow(strings.SETTINGS_LABEL_TRASH_GRACE_DAYS, self._trash_grace_days)
         settings_form.addRow(self._purge_mode_warning)
+        settings_form.addRow(strings.SETTINGS_LABEL_REMOTE_TRASH_FOLDER, self._remote_trash_folder)
+        settings_form.addRow(self._remote_trash_status)
         settings_form.addRow(strings.SETTINGS_LABEL_ENCRYPTION, self._encryption_combo)
         capability_controls = QHBoxLayout()
         capability_controls.addWidget(self._capability_label, 1)
@@ -660,7 +673,7 @@ class SettingsDialog(QDialog):
         self,
         account: MessageRecord,
         account_id: str,
-    ) -> tuple[MessageRecord, ...]:
+    ) -> tuple[tuple[MessageRecord, ...], str | None]:
         repository = self._context.create_message_repository()
         fetcher = self._context.create_fetcher(account)
         manifest = self._context.create_manifest_writer(account_id)
@@ -673,9 +686,13 @@ class SettingsDialog(QDialog):
                     manifest=manifest,
                     manifest_reader=self._context.create_manifest_reader(account_id),
                 )
+                detected_trash_folder = fetcher.find_trash_folder()
         finally:
             manifest.close()
-        return tuple(repository.list_folders(account_id))
+        return (
+            tuple(repository.list_folders(account_id)),
+            detected_trash_folder.raw_name if detected_trash_folder is not None else None,
+        )
 
     def _save_folders(self) -> None:
         account_id = self._selected_account_id
@@ -779,8 +796,22 @@ class SettingsDialog(QDialog):
             else:
                 self._folder_status.setText(strings.SETTINGS_STATUS_NO_ACCOUNT)
         elif value.operation == "folders":
-            records = value.value if isinstance(value.value, tuple) else ()
-            self._set_folder_items(tuple(record for record in records if isinstance(record, dict)))
+            if (
+                isinstance(value.value, tuple)
+                and len(value.value) == 2
+                and isinstance(value.value[1], (str, type(None)))
+            ):
+                records_value, detected_trash = value.value
+                records = records_value if isinstance(records_value, tuple) else ()
+                self._set_folder_items(
+                    tuple(record for record in records if isinstance(record, dict))
+                )
+                self._set_remote_trash_status(detected_trash)
+            else:
+                records = value.value if isinstance(value.value, tuple) else ()
+                self._set_folder_items(
+                    tuple(record for record in records if isinstance(record, dict))
+                )
         elif value.operation == "save_folders":
             self._folder_status.setText(strings.SETTINGS_STATUS_FOLDER_SAVED)
 
@@ -798,6 +829,13 @@ class SettingsDialog(QDialog):
                 else Qt.CheckState.Unchecked
             )
         self._folder_status.setText("" if records else strings.SETTINGS_STATUS_NO_FOLDERS)
+
+    def _set_remote_trash_status(self, raw_name: str | None) -> None:
+        self._remote_trash_status.setText(
+            strings.SETTINGS_STATUS_REMOTE_TRASH_DETECTED.format(folder=raw_name)
+            if raw_name
+            else strings.SETTINGS_STATUS_REMOTE_TRASH_NOT_FOUND
+        )
 
     def _operation_failed(self, error: object) -> None:
         self._operation = None
@@ -851,6 +889,7 @@ class SettingsDialog(QDialog):
             startup_verification=startup_verification,
             purge_mode=cast(str, self._purge_mode.currentData()),
             trash_grace_days=self._trash_grace_days.value(),
+            remote_trash_folder=self._remote_trash_folder.text().strip() or None,
             storage_profiles=storage_profiles,
             credential_storage=self._credential_storage_mode(),
         )

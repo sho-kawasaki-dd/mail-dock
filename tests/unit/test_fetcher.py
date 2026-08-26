@@ -23,6 +23,12 @@ class MinimalFetcher(BaseMailFetcher):
     def list_folders(self) -> list[RemoteFolder]:
         return []
 
+    def find_trash_folder(self) -> RemoteFolder | None:
+        return None
+
+    def supports_uid_expunge(self) -> bool:
+        return False
+
     def select_folder(self, raw_name: str) -> int:
         return 1
 

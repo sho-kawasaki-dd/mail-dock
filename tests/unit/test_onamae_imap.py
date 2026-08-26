@@ -7,8 +7,8 @@ from typing import ClassVar, cast
 
 import pytest
 
-from mail_dock.domain.errors import AuthenticationError, OperationCancelledError
-from mail_dock.domain.fetcher import CancelToken
+from mail_dock.domain.errors import AuthenticationError, OperationCancelledError, PermanentError
+from mail_dock.domain.fetcher import CancelToken, RemoteFolder
 from mail_dock.infrastructure.fetchers.onamae_imap import OnamaeImapFetcher
 
 
@@ -260,6 +260,84 @@ def test_delete_uses_move_when_server_supports_it(fake_imap: None) -> None:
     commands = FakeImap.instances[0].commands
     assert ("MOVE", ("7", "Trash")) in commands
     assert not any(command[0] == "STORE" for command in commands)
+
+
+def test_trash_detection_prefers_special_use_over_candidates_and_configuration(
+    fake_imap: None,
+) -> None:
+    fetcher = OnamaeImapFetcher(
+        "imap.example.test",
+        "user",
+        "password",
+        remote_trash_folder="ConfiguredTrash",
+    )
+    fetcher.connect()
+    folders = [
+        RemoteFolder("ConfiguredTrash", "ConfiguredTrash"),
+        RemoteFolder("Trash", "Trash"),
+        RemoteFolder("SpecialTrash", "SpecialTrash", special_use=frozenset({r"\Trash"})),
+    ]
+    fetcher.list_folders = lambda: folders  # type: ignore[method-assign]
+
+    assert fetcher.find_trash_folder() == folders[2]
+
+    fetcher.list_folders = lambda: folders[:2]  # type: ignore[method-assign]
+    assert fetcher.find_trash_folder() == folders[1]
+
+    fetcher.list_folders = lambda: [folders[0]]  # type: ignore[method-assign]
+    assert fetcher.find_trash_folder() == folders[0]
+
+
+def test_trash_detection_returns_none_when_unresolved(fake_imap: None) -> None:
+    fetcher = OnamaeImapFetcher("imap.example.test", "user", "password")
+    fetcher.connect()
+    fetcher.list_folders = lambda: [RemoteFolder("Archive", "Archive")]  # type: ignore[method-assign]
+
+    assert fetcher.find_trash_folder() is None
+
+
+def test_manual_trash_folder_can_override_an_unlisted_folder(fake_imap: None) -> None:
+    fetcher = OnamaeImapFetcher(
+        "imap.example.test",
+        "user",
+        "password",
+        remote_trash_folder="UserTrash",
+    )
+    fetcher.connect()
+    fetcher.list_folders = lambda: [RemoteFolder("Archive", "Archive")]  # type: ignore[method-assign]
+
+    assert fetcher.find_trash_folder() == RemoteFolder("UserTrash", "UserTrash")
+
+
+def test_copy_trash_path_uses_uid_expunge(fake_imap: None) -> None:
+    FakeImap.capability_response = b"CAPABILITY IMAP4rev1 UIDPLUS SPECIAL-USE"
+    fetcher = OnamaeImapFetcher(
+        "imap.example.test",
+        "user",
+        "password",
+        remote_trash_folder="Trash",
+    )
+    fetcher.connect()
+
+    fetcher.delete_remote_message("INBOX", 7, mode="trash")
+
+    commands = FakeImap.instances[0].commands
+    assert ("COPY", ("7", "Trash")) in commands
+    assert ("STORE", ("7", "+FLAGS.SILENT", r"(\Deleted)")) in commands
+    assert ("EXPUNGE", ("7",)) in commands
+
+
+def test_expunge_is_rejected_without_uidplus(fake_imap: None) -> None:
+    FakeImap.capability_response = b"CAPABILITY IMAP4rev1 SPECIAL-USE"
+    fetcher = OnamaeImapFetcher("imap.example.test", "user", "password")
+    fetcher.connect()
+
+    assert not fetcher.supports_uid_expunge()
+    with pytest.raises(PermanentError, match="UID EXPUNGE"):
+        fetcher.delete_remote_message("INBOX", 7, mode="expunge")
+
+    commands = FakeImap.instances[0].commands
+    assert not any(command[0] in {"STORE", "EXPUNGE"} for command in commands)
 
 
 def test_authentication_failure_is_translated(fake_imap: None) -> None:

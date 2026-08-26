@@ -179,6 +179,7 @@ def test_active_settings_are_saved_with_purge_controls(qtbot: Any) -> None:
     dialog._startup_verification.setCurrentIndex(dialog._startup_verification.findData("full"))
     dialog._purge_mode.setCurrentIndex(dialog._purge_mode.findData("immediate"))
     dialog._trash_grace_days.setValue(45)
+    dialog._remote_trash_folder.setText("INBOX.Trash")
 
     assert dialog._save_settings()
     assert context.saved[-1].max_message_bytes == 12 * 1024 * 1024
@@ -187,6 +188,7 @@ def test_active_settings_are_saved_with_purge_controls(qtbot: Any) -> None:
     assert context.saved[-1].startup_verification == "full"
     assert context.saved[-1].purge_mode == "immediate"
     assert context.saved[-1].trash_grace_days == 45
+    assert context.saved[-1].remote_trash_folder == "INBOX.Trash"
     assert dialog._purge_mode_warning.text() == strings.SETTINGS_WARNING_PURGE_IMMEDIATE
     dialog._stop_worker()
 
@@ -247,4 +249,15 @@ def test_storage_reprobe_button_uses_injected_context_callback(qtbot: Any) -> No
 
     assert context.reprobe_calls == 1
     assert "DEGRADED" in dialog._capability_label.text()
+    dialog._stop_worker()
+
+
+def test_remote_trash_detection_status_is_displayed(qtbot: Any) -> None:
+    dialog = SettingsDialog(_Context())
+    qtbot.addWidget(dialog)
+
+    dialog._set_remote_trash_status("INBOX.Trash")
+
+    expected = strings.SETTINGS_STATUS_REMOTE_TRASH_DETECTED.format(folder="INBOX.Trash")
+    assert dialog._remote_trash_status.text() == expected
     dialog._stop_worker()

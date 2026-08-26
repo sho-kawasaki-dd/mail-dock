@@ -394,12 +394,13 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **E-1. ゴミ箱フォルダの特定（F-32）**
 
-- [ ] `OnamaeImapFetcher` の `LIST` 応答から **SPECIAL-USE（RFC 6154）の `\Trash` 属性**を解釈する
-- [ ] 見つからない場合、一般的な候補名（`Trash` / `ゴミ箱` / `Deleted Items` / `INBOX.Trash` 等）を自動探索する
-- [ ] それでも特定できない場合は `config.remote_trash_folder` による手動指定を要求し、**未指定の間は削除機能を無効化**する
-- [ ] 自動検出結果を設定画面に表示し、ユーザーが上書きできるようにする
-- [ ] 既存の `_find_trash_folder()` を上記の3段階へ拡張し、`BaseMailFetcher` の契約として整理する- [ ] フォルダのUID EXPUNGE対応可否（`UIDPLUS` 拡張等）を判定し、`BaseMailFetcher` の契約として公開する（レビュー修正案 3.4）
-- [ ] 既存の `OnamaeImapFetcher.delete_remote_message()` が `UIDPLUS` 非対応時にフォルダ全体 `expunge()` へフォールバックしている現行実装を廃止し、非対応サーバーでは `expunge` を拒否するよう修正する（レビュー修正案 3.4）
+- [x] `OnamaeImapFetcher` の `LIST` 応答から **SPECIAL-USE（RFC 6154）の `\Trash` 属性**を解釈する
+- [x] 見つからない場合、一般的な候補名（`Trash` / `ゴミ箱` / `Deleted Items` / `INBOX.Trash` 等）を自動探索する
+- [x] それでも特定できない場合は `config.remote_trash_folder` による手動指定を要求し、**未指定の間は削除機能を無効化**する
+- [x] 自動検出結果を設定画面に表示し、ユーザーが上書きできるようにする
+- [x] 既存の `_find_trash_folder()` を上記の3段階へ拡張し、`BaseMailFetcher` の契約として整理する
+- [x] フォルダのUID EXPUNGE対応可否（`UIDPLUS` 拡張等）を判定し、`BaseMailFetcher` の契約として公開する（レビュー修正案 3.4）
+- [x] 既存の `OnamaeImapFetcher.delete_remote_message()` が `UIDPLUS` 非対応時にフォルダ全体 `expunge()` へフォールバックしている現行実装を廃止し、非対応サーバーでは `expunge` を拒否するよう修正する（レビュー修正案 3.4）
 #### **E-2. `usecases/delete_remote.py` — 削除ユースケース**
 
 - [ ] `dry_run(repo, storage, *, message_ids, storage_state) -> DeleteDryRunResult` を実装する（F-29）
