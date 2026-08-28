@@ -442,11 +442,11 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **F-2. `usecases/export_attachments.py`**
 
-- [ ] `export_attachments(storage, renderer, *, messages, dest_dir, cancel, on_progress) -> ExportAttachmentsResult` を実装する（F-35）
-- [ ] 既存 `save_attachment.py` の `sanitize_attachment_name()` と `resolve_within()` を必ず経由する
-- [ ] インラインパート（`Content-ID` 付き）を抽出対象から除外する
-- [ ] 同名衝突は連番で回避し、既存ファイルを無確認で上書きしない
-- [ ] 実行可能拡張子は結果に警告として含め、UIで提示する
+- [x] `export_attachments(storage, renderer, *, messages, dest_dir, cancel, on_progress) -> ExportAttachmentsResult` を実装する（F-35）
+- [x] 既存 `save_attachment.py` の `sanitize_attachment_name()` と `resolve_within()` を必ず経由する
+- [x] インラインパート（`Content-ID` 付き）を抽出対象から除外する
+- [x] 同名衝突は連番で回避し、既存ファイルを無確認で上書きしない
+- [x] 実行可能拡張子は結果に警告として含め、UIで提示する
 
 #### **F-3. GUI 配線**
 
