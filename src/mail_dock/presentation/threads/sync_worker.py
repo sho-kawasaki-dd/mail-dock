@@ -74,6 +74,7 @@ SyncOperation = Literal[
     "remote_delete_dry_run",
     "remote_delete",
     "failures_for_review",
+    "audit_log",
     "force_fetch",
     "reparse",
 ]
@@ -149,6 +150,7 @@ class SyncWorker(Worker):
     remote_delete_result = Signal(object)
     failures_for_review_result = Signal(object)
     failure_action_result = Signal(object)
+    audit_log_result = Signal(object)
 
     def __init__(
         self,
@@ -291,6 +293,15 @@ class SyncWorker(Worker):
             return _SyncTaskResult("failures_for_review", failures)
 
         return self._submit_operation("failures_for_review", operation)
+
+    def list_audit_log(self, limit: int, offset: int) -> CancelToken:
+        """Load one page of the read-only audit log on the database worker."""
+
+        def operation(_token: CancelToken) -> _SyncTaskResult:
+            entries = tuple(self._repository_factory().list_audit_log(limit, offset))
+            return _SyncTaskResult("audit_log", entries)
+
+        return self._submit_operation("audit_log", operation)
 
     def force_fetch_message(self, failure: MessageRecord) -> CancelToken:
         """Fetch one reviewed oversized message without the configured limit."""
@@ -703,6 +714,8 @@ class SyncWorker(Worker):
             self.remote_delete_result.emit(value.value)
         elif value.operation == "failures_for_review":
             self.failures_for_review_result.emit(value.value)
+        elif value.operation == "audit_log":
+            self.audit_log_result.emit(value.value)
         elif value.operation in {"force_fetch", "reparse"}:
             self.failure_action_result.emit(value.value)
         elif isinstance(value.value, _FolderRefreshTaskResult):

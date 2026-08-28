@@ -15,12 +15,10 @@ from datetime import date
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from mail_dock.domain.masking import mask_emails, mask_subject
+
 _APP_LOG_MAX_BYTES = 5 * 1024 * 1024
 _APP_LOG_BACKUP_COUNT = 5
-_EMAIL_RE = re.compile(
-    r"(?<![A-Za-z0-9_])(?P<local>[A-Za-z0-9.!#$%&'*+/?^_`{|}~-]+)@(?P<domain>"
-    r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,})"
-)
 _SENSITIVE_VALUE_RE = re.compile(r"(?i)(\b(?:password|token|secret)[\w.-]*\s*[:=]\s*)[^\s,;}\]]+")
 _SENSITIVE_KEY_PARTS = ("password", "token", "secret")
 _FORMATTER = logging.Formatter(
@@ -32,16 +30,12 @@ _app_handler: RotatingFileHandler | None = None
 _storage_handler: logging.FileHandler | None = None
 _console_handler: logging.Handler | None = None
 
-
-def _mask_email(match: re.Match[str]) -> str:
-    local = match.group("local")
-    masked_local = f"{local[:2]}***" if len(local) > 1 else f"{local}***"
-    return f"{masked_local}@{match.group('domain')}"
+__all__ = ["MaskingFilter", "mask_subject", "purge_old_logs", "setup_logging"]
 
 
 def _mask_text(value: str) -> str:
     masked = _SENSITIVE_VALUE_RE.sub(r"\1***", value)
-    return _EMAIL_RE.sub(_mask_email, masked)
+    return mask_emails(masked)
 
 
 class MaskingFilter(logging.Filter):
@@ -128,13 +122,6 @@ def set_storage_log_target(path: Path | None) -> None:
     path.mkdir(parents=True, exist_ok=True)
     _storage_handler = _new_file_handler(path / f"sync-{date.today().isoformat()}.log")
     logger.addHandler(_storage_handler)
-
-
-def mask_subject(subject: str) -> str:
-    """Return a subject limited to 20 characters, with an omission marker."""
-    if len(subject) <= 20:
-        return subject
-    return f"{subject[:20]}..."
 
 
 def purge_old_logs(log_dir: Path, days: int = 90) -> int:

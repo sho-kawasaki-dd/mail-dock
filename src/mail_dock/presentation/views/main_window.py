@@ -67,6 +67,7 @@ from mail_dock.presentation.threads.sync_worker import (
 from mail_dock.presentation.threads.verify_worker import VerifyWorker
 from mail_dock.presentation.viewmodels.message_list_viewmodel import MessageListViewModel
 from mail_dock.presentation.views.detail_view import AttachmentSaveRequest, DetailView
+from mail_dock.presentation.views.dialogs.audit_log_dialog import AuditLogDialog
 from mail_dock.presentation.views.dialogs.confirmation_dialog import (
     ConfirmationDialog,
     confirm_overwrite,
@@ -137,6 +138,7 @@ class MainWindow(QMainWindow):
         self._query_busy = False
         self._verify_dialog: IntegrityDialog | None = None
         self._failure_review_dialog: FailureReviewDialog | None = None
+        self._audit_log_dialog: AuditLogDialog | None = None
         self._operation_gate = Lock()
         self._storage_write_gate = _StorageWriteGate()
         self._ui_settings = QSettings("mail-dock", "mail-dock")
@@ -306,6 +308,7 @@ class MainWindow(QMainWindow):
         self.thread_view_action = QAction(strings.MAIN_MENU_THREAD_VIEW, self)
         self.integrity_action = QAction(strings.MAIN_MENU_INTEGRITY, self)
         self.failure_review_action = QAction(strings.FAILURE_REVIEW_TITLE, self)
+        self.audit_log_action = QAction(strings.MAIN_MENU_AUDIT_LOG, self)
         self.exit_action = QAction(strings.MAIN_MENU_EXIT, self)
         self.open_log_folder_action = QAction(strings.MAIN_MENU_OPEN_LOG_FOLDER, self)
         self.storage_info_action = QAction(strings.MAIN_MENU_STORAGE_INFO, self)
@@ -342,6 +345,7 @@ class MainWindow(QMainWindow):
         tools_menu = self.menuBar().addMenu(strings.MAIN_MENU_TOOLS)
         tools_menu.addAction(self.integrity_action)
         tools_menu.addAction(self.failure_review_action)
+        tools_menu.addAction(self.audit_log_action)
         storage_menu = self.menuBar().addMenu(strings.MAIN_MENU_STORAGE)
         storage_menu.addAction(self.storage_info_action)
         storage_menu.addAction(self.storage_switch_action)
@@ -367,6 +371,7 @@ class MainWindow(QMainWindow):
         self.settings_requested.connect(self._show_settings)
         self.integrity_action.triggered.connect(self._show_integrity_dialog)
         self.failure_review_action.triggered.connect(self._show_failure_review)
+        self.audit_log_action.triggered.connect(self._show_audit_log)
         self.open_log_folder_action.triggered.connect(self._open_log_folder)
         self.encryption_help_action.triggered.connect(self._open_encryption_guide)
         self.storage_info_action.triggered.connect(self._show_storage_root)
@@ -1132,6 +1137,19 @@ class MainWindow(QMainWindow):
 
     def _failure_review_dialog_closed(self, _result: int) -> None:
         self._failure_review_dialog = None
+
+    def _show_audit_log(self) -> None:
+        if self._audit_log_dialog is not None:
+            self._audit_log_dialog.raise_()
+            self._audit_log_dialog.activateWindow()
+            return
+        dialog = AuditLogDialog(self.sync_worker, parent=self)
+        dialog.finished.connect(self._audit_log_dialog_closed)
+        self._audit_log_dialog = dialog
+        dialog.show()
+
+    def _audit_log_dialog_closed(self, _result: int) -> None:
+        self._audit_log_dialog = None
 
     def _force_fetch_failure(self, failure: object) -> None:
         if not isinstance(failure, Mapping):
