@@ -53,7 +53,8 @@ def _fsync_directory(path: Path) -> None:
 
 
 def _fsync_file(path: Path) -> None:
-    file_fd = os.open(path, os.O_RDONLY)
+    # O_RDONLY handles can't be flushed via FlushFileBuffers on Windows.
+    file_fd = os.open(path, os.O_RDWR)
     try:
         os.fsync(file_fd)
     finally:
