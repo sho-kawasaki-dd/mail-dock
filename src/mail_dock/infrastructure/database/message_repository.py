@@ -661,6 +661,33 @@ class SqliteMessageRepository(BaseMessageRepository):
                 )
             )
 
+    def list_failures_for_review(
+        self, account_id: str | None = None, minimum_attempt_count: int = 10
+    ) -> Sequence[MessageRecord]:
+        if minimum_attempt_count < 0:
+            raise ValueError("minimum_attempt_count must be non-negative")
+        parameters: list[Any] = [minimum_attempt_count]
+        account_filter = ""
+        if account_id is not None:
+            account_filter = " AND sf.account_id = ?"
+            parameters.append(account_id)
+        with self._db_io("list failures for review"):
+            cursor = self._conn().execute(
+                "SELECT sf.*, m.id AS message_id, m.subject, m.size_bytes, "
+                "m.relative_path, m.file_hash, f.raw_name AS folder_raw_name, "
+                "f.display_name AS folder_display_name "
+                "FROM sync_failures AS sf "
+                "LEFT JOIN messages AS m ON m.account_id = sf.account_id "
+                "AND m.folder_id = sf.folder_id AND m.uidvalidity = sf.uidvalidity "
+                "AND m.uid = sf.uid "
+                "LEFT JOIN folders AS f ON f.id = sf.folder_id "
+                "WHERE sf.attempt_count >= ?"
+                f"{account_filter} "
+                "ORDER BY sf.last_failed_at DESC, sf.id DESC",
+                tuple(parameters),
+            )
+            return self._rows(cursor)
+
     def clear_failure(self, account_id: str, folder_id: Any, uidvalidity: int, uid: int) -> None:
         columns = self._columns("sync_failures")
         has_uidvalidity = "uidvalidity" in columns

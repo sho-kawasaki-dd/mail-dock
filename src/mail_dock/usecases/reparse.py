@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -77,6 +77,7 @@ def reparse_messages(
     *,
     account_id: str | None = None,
     only_failed: bool = True,
+    message_ids: Sequence[int] | None = None,
     cancel: CancelToken | None = None,
 ) -> ReparseResult:
     """Rebuild searchable contents from integrity-checked stored EML files.
@@ -95,7 +96,11 @@ def reparse_messages(
     parse_failed_count = 0
     cancelled = False
 
-    for record in repo.list_reparse_targets(account_id, only_failed):
+    selected_ids = set(message_ids) if message_ids is not None else None
+    records = repo.list_reparse_targets(account_id, only_failed)
+    if selected_ids is not None:
+        records = tuple(record for record in records if record.get("id") in selected_ids)
+    for record in records:
         try:
             token.raise_if_cancelled()
         except OperationCancelledError:

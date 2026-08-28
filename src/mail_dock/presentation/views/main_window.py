@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -76,6 +76,7 @@ from mail_dock.presentation.views.dialogs.delete_remote_dialog import (
     DeleteConfirmationDialog,
     DeleteDryRunDialog,
 )
+from mail_dock.presentation.views.dialogs.failure_review_dialog import FailureReviewDialog
 from mail_dock.presentation.views.dialogs.integrity_dialog import IntegrityDialog
 from mail_dock.presentation.views.dialogs.settings_dialog import SettingsDialog
 from mail_dock.presentation.views.message_list import MessageListSearchBar, MessageListView
@@ -135,6 +136,7 @@ class MainWindow(QMainWindow):
         self._pending_attachment_plan: AttachmentSavePlan | None = None
         self._query_busy = False
         self._verify_dialog: IntegrityDialog | None = None
+        self._failure_review_dialog: FailureReviewDialog | None = None
         self._operation_gate = Lock()
         self._storage_write_gate = _StorageWriteGate()
         self._ui_settings = QSettings("mail-dock", "mail-dock")
@@ -303,6 +305,7 @@ class MainWindow(QMainWindow):
         self.purge_trash_action.setEnabled(False)
         self.thread_view_action = QAction(strings.MAIN_MENU_THREAD_VIEW, self)
         self.integrity_action = QAction(strings.MAIN_MENU_INTEGRITY, self)
+        self.failure_review_action = QAction(strings.FAILURE_REVIEW_TITLE, self)
         self.exit_action = QAction(strings.MAIN_MENU_EXIT, self)
         self.open_log_folder_action = QAction(strings.MAIN_MENU_OPEN_LOG_FOLDER, self)
         self.storage_info_action = QAction(strings.MAIN_MENU_STORAGE_INFO, self)
@@ -338,6 +341,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.thread_view_action)
         tools_menu = self.menuBar().addMenu(strings.MAIN_MENU_TOOLS)
         tools_menu.addAction(self.integrity_action)
+        tools_menu.addAction(self.failure_review_action)
         storage_menu = self.menuBar().addMenu(strings.MAIN_MENU_STORAGE)
         storage_menu.addAction(self.storage_info_action)
         storage_menu.addAction(self.storage_switch_action)
@@ -362,6 +366,7 @@ class MainWindow(QMainWindow):
         self.exit_action.triggered.connect(self._request_exit)
         self.settings_requested.connect(self._show_settings)
         self.integrity_action.triggered.connect(self._show_integrity_dialog)
+        self.failure_review_action.triggered.connect(self._show_failure_review)
         self.open_log_folder_action.triggered.connect(self._open_log_folder)
         self.encryption_help_action.triggered.connect(self._open_encryption_guide)
         self.storage_info_action.triggered.connect(self._show_storage_root)
@@ -627,6 +632,8 @@ class MainWindow(QMainWindow):
         self.sync_worker.purge_result.connect(self._show_purge_result)
         self.sync_worker.delete_dry_run_result.connect(self._show_delete_dry_run_result)
         self.sync_worker.remote_delete_result.connect(self._show_remote_delete_result)
+        self.sync_worker.failures_for_review_result.connect(self._show_failure_review_result)
+        self.sync_worker.failure_action_result.connect(self._show_failure_action_result)
         self.verify_worker.verify_result.connect(self._refresh_after_integrity_result)
 
         self._cancel_button.clicked.connect(self._cancel_current_operation)
@@ -1068,6 +1075,9 @@ class MainWindow(QMainWindow):
             self._file_token = None
             self._status_label.setText(notification.message)
             self._update_message_actions()
+        elif notification.operation in {"failures_for_review", "force_fetch", "reparse"}:
+            self._file_token = None
+            self._status_label.setText(notification.message)
 
     def _build_verify_worker(self) -> VerifyWorker:
         manifest_reader_factory = getattr(self.context, "create_manifest_reader_all", None)
@@ -1096,6 +1106,62 @@ class MainWindow(QMainWindow):
         dialog.finished.connect(self._integrity_dialog_closed)
         self._verify_dialog = dialog
         dialog.show()
+
+    def _show_failure_review(self) -> None:
+        if self._failure_review_dialog is not None:
+            self._failure_review_dialog.raise_()
+            self._failure_review_dialog.activateWindow()
+            return
+        if self._file_token is not None:
+            return
+        self._file_token = self.sync_worker.list_failures_for_review()
+        self._status_label.setText(strings.FAILURE_REVIEW_STATUS_LOADING)
+
+    def _show_failure_review_result(self, failures: object) -> None:
+        self._file_token = None
+        if not isinstance(failures, (tuple, list)):
+            return
+        if not failures:
+            self._status_label.setText(strings.FAILURE_REVIEW_STATUS_NONE)
+        dialog = FailureReviewDialog(failures, self)
+        dialog.fetch_requested.connect(self._force_fetch_failure)
+        dialog.reparse_requested.connect(self._reparse_failure)
+        dialog.finished.connect(self._failure_review_dialog_closed)
+        self._failure_review_dialog = dialog
+        dialog.show()
+
+    def _failure_review_dialog_closed(self, _result: int) -> None:
+        self._failure_review_dialog = None
+
+    def _force_fetch_failure(self, failure: object) -> None:
+        if not isinstance(failure, Mapping):
+            self._status_label.setText(strings.FAILURE_REVIEW_INVALID_MESSAGE)
+            return
+        if self._failure_review_dialog is not None:
+            self._failure_review_dialog.close()
+        self._file_token = self.sync_worker.force_fetch_message(failure)
+        self._status_label.setText(strings.FAILURE_REVIEW_STATUS_FETCHING)
+
+    def _reparse_failure(self, failure: object) -> None:
+        if not isinstance(failure, Mapping) or type(failure.get("message_id")) is not int:
+            self._status_label.setText(strings.FAILURE_REVIEW_INVALID_MESSAGE)
+            return
+        if self._failure_review_dialog is not None:
+            self._failure_review_dialog.close()
+        account_id = failure.get("account_id")
+        self._file_token = self.sync_worker.reparse_messages(
+            account_id=account_id if isinstance(account_id, str) else None,
+            message_ids=(failure["message_id"],),
+        )
+        self._status_label.setText(strings.FAILURE_REVIEW_STATUS_REPARSING)
+
+    def _show_failure_action_result(self, result: object) -> None:
+        self._file_token = None
+        if isinstance(result, SyncResult):
+            self._status_label.setText(strings.FAILURE_REVIEW_STATUS_FETCH_COMPLETE)
+        else:
+            self._status_label.setText(strings.FAILURE_REVIEW_STATUS_REPARSE_COMPLETE)
+        self.message_table_model.reload()
 
     def _integrity_finished(self) -> None:
         if self._verify_dialog is not None and not self._verify_dialog.isVisible():

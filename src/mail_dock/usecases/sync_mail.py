@@ -15,6 +15,7 @@ from mail_dock.domain.errors import (
     AuthenticationError,
     FetchError,
     OperationCancelledError,
+    PermanentError,
     StorageError,
     TransientError,
 )
@@ -1041,3 +1042,93 @@ def sync_account(
         stats.failed_count,
         False,
     )
+
+
+def force_fetch_message(
+    fetcher: BaseMailFetcher,
+    repo: BaseMessageRepository,
+    storage: BaseEmlStorage,
+    manifest: BaseManifestWriter,
+    *,
+    account_id: str,
+    folder_raw_name: str,
+    folder_id: Any,
+    uidvalidity: int,
+    uid: int,
+    cancel: CancelToken | None = None,
+) -> SyncResult:
+    """Fetch one message while deliberately bypassing the normal size limit.
+
+    This operation is only exposed through the review UI. It keeps the normal
+    durable ordering and clears the matching failure after the message has
+    been committed successfully.
+    """
+
+    token = cancel or CancelToken()
+    token.raise_if_cancelled()
+    current_uidvalidity = fetcher.select_folder(folder_raw_name)
+    if current_uidvalidity != uidvalidity:
+        raise PermanentError("message UIDVALIDITY has changed; run synchronization again")
+    ref = next(
+        iter(
+            fetcher.iter_message_refs(
+                folder_raw_name,
+                min_uid=uid,
+                max_uid=uid,
+                descending=True,
+                cancel=token,
+            )
+        ),
+        None,
+    )
+    if ref is None:
+        raise PermanentError("message no longer exists on the server")
+    raw = with_retry(lambda: fetcher.download_eml_bytes(folder_raw_name, uid), cancel=token)
+    token.raise_if_cancelled()
+    file_hash = hashlib.sha256(raw).hexdigest()
+    existing = repo.find_stored_eml(account_id, file_hash)
+    stored = storage.reuse(existing.relative_path, file_hash) if existing is not None else None
+    if stored is None:
+        stored = storage.save(account_id, ref.internal_date, raw)
+    parsed = parse_eml(raw, ref.internal_date)
+    record = _record_for_message(
+        account_id=account_id,
+        folder_id=folder_id,
+        uidvalidity=uidvalidity,
+        ref=ref,
+        parsed=parsed,
+        stored=stored,
+        size_bytes=len(raw),
+    )
+    parse_failed = parsed.parse_error is not None
+    event = _fetch_event(
+        account_id=account_id,
+        folder_raw_name=folder_raw_name,
+        folder_id=folder_id,
+        uidvalidity=uidvalidity,
+        ref=ref,
+        parsed=parsed,
+        stored=stored,
+    )
+    manifest.append(event)
+    manifest.flush_and_sync()
+    repo.begin_batch()
+    try:
+        repo.add_message(record, _message_contents(parsed, empty=parse_failed))
+        if parse_failed:
+            repo.record_failure(
+                account_id,
+                folder_id,
+                uidvalidity,
+                uid,
+                "parse",
+                parsed.parse_error or "message parsing failed",
+            )
+        else:
+            repo.clear_failure(account_id, folder_id, uidvalidity, uid)
+        repo.commit_batch()
+    except Exception:
+        raise
+    checkpoint_sequence = manifest.last_checkpoint_sequence or 0
+    manifest.checkpoint(checkpoint_sequence + 1, uuid4().hex)
+    return SyncResult(1, len(raw), 0, int(parse_failed), False)

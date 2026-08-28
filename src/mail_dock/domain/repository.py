@@ -170,6 +170,11 @@ class BaseMessageRepository(ABC):
     ) -> Sequence[MessageRecord]: ...
 
     @abstractmethod
+    def list_failures_for_review(
+        self, account_id: str | None = None, minimum_attempt_count: int = 10
+    ) -> Sequence[MessageRecord]: ...
+
+    @abstractmethod
     def clear_failure(
         self, account_id: str, folder_id: Any, uidvalidity: int, uid: int
     ) -> None: ...

@@ -15,7 +15,7 @@ from mail_dock.domain.errors import (
 from mail_dock.domain.fetcher import CancelToken, RemoteFolder, RemoteMessageRef
 from mail_dock.domain.messages import ParsedMessage, StoredEml
 from mail_dock.domain.ports import BaseEmlStorage, BaseManifestWriter, JSONValue
-from mail_dock.usecases.sync_mail import SyncOptions, sync_account
+from mail_dock.usecases.sync_mail import SyncOptions, SyncResult, force_fetch_message, sync_account
 from tests.support.fake_fetcher import FakeFetcher, FakeMessage
 from tests.support.in_memory_repository import InMemoryMessageRepository
 
@@ -327,6 +327,72 @@ def test_initial_sync_processes_newest_first_and_initializes_cursors() -> None:
     }
     assert len(repo.messages) == 3
     assert manifest.sync_count >= 1
+
+
+def test_failure_review_lists_exhausted_failures_with_message_metadata() -> None:
+    repo, folder_id = _repository()
+    repo.add_message(
+        {
+            "account_id": "account",
+            "folder_id": folder_id,
+            "uid": 7,
+            "uidvalidity": 41,
+            "subject": "oversized subject",
+            "size_bytes": 60 * 1024 * 1024,
+        }
+    )
+    for _ in range(10):
+        repo.record_failure("account", folder_id, 41, 7, "oversize", "too large")
+
+    failures = repo.list_failures_for_review()
+
+    assert len(failures) == 1
+    assert failures[0]["error_class"] == "oversize"
+    assert failures[0]["attempt_count"] == 10
+    assert failures[0]["subject"] == "oversized subject"
+    assert failures[0]["message_id"] == 1
+    assert failures[0]["folder_raw_name"] == "INBOX"
+
+
+def test_force_fetch_message_ignores_size_limit_and_clears_failure() -> None:
+    repo, folder_id = _repository()
+    raw = _eml(7)
+    repo.record_failure("account", folder_id, 41, 7, "oversize", "too large")
+    fetcher = TrackingFetcher(
+        folders=[RemoteFolder("INBOX", "Inbox", uidvalidity=41)],
+        messages={
+            "INBOX": [
+                RemoteMessageRef(
+                    uid=7,
+                    internal_date=datetime(2026, 7, 30, tzinfo=UTC),
+                    size_bytes=60,
+                )
+            ]
+        },
+        eml_bytes={("INBOX", 7): raw},
+    )
+    storage = MemoryStorage()
+    manifest = MemoryManifest()
+
+    result = force_fetch_message(
+        fetcher,
+        repo,
+        storage,
+        manifest,
+        account_id="account",
+        folder_raw_name="INBOX",
+        folder_id=folder_id,
+        uidvalidity=41,
+        uid=7,
+    )
+
+    assert result == SyncResult(1, len(raw), 0, 0, False)
+    assert fetcher.full_downloads == [7]
+    assert repo.failures == {}
+    message = repo.get_message_by_uid("account", folder_id, 41, 7)
+    assert message is not None
+    assert message["relative_path"] is not None
+    assert [event["event"] for event in manifest.events] == ["fetch", "checkpoint"]
 
 
 def test_manifest_checkpoint_follows_db_commit() -> None:

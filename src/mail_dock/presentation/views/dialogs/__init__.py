@@ -7,12 +7,14 @@ from .confirmation_dialog import (
     confirm_save_executable,
 )
 from .error_dialog import ErrorDialog, show_error
+from .failure_review_dialog import FailureReviewDialog
 from .integrity_dialog import IntegrityDialog
 from .progress_dialog import ProgressDialog
 
 __all__ = [
     "ConfirmationDialog",
     "ErrorDialog",
+    "FailureReviewDialog",
     "IntegrityDialog",
     "ProgressDialog",
     "confirm_external_link",

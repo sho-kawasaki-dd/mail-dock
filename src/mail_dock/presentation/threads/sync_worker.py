@@ -41,12 +41,19 @@ from mail_dock.usecases.export_attachments import (
 )
 from mail_dock.usecases.export_mbox import ExportMboxProgress, export_mbox
 from mail_dock.usecases.export_message import export_eml
+from mail_dock.usecases.reparse import ReparseResult, reparse_messages
 from mail_dock.usecases.save_attachment import (
     commit_attachment_save,
     prepare_attachment_save,
 )
 from mail_dock.usecases.sync_folders import FolderRefreshResult, refresh_folders
-from mail_dock.usecases.sync_mail import SyncOptions, SyncProgress, SyncResult, sync_account
+from mail_dock.usecases.sync_mail import (
+    SyncOptions,
+    SyncProgress,
+    SyncResult,
+    force_fetch_message,
+    sync_account,
+)
 from mail_dock.usecases.trash import (
     PurgeResult,
     TrashResult,
@@ -66,6 +73,9 @@ SyncOperation = Literal[
     "purge",
     "remote_delete_dry_run",
     "remote_delete",
+    "failures_for_review",
+    "force_fetch",
+    "reparse",
 ]
 RepositoryFactory = Callable[[], BaseMessageRepository]
 FetcherFactory = Callable[[MessageRecord], BaseMailFetcher]
@@ -115,6 +125,8 @@ class _SyncTaskResult:
         | PurgeResult
         | DeleteDryRunResult
         | DeleteResult
+        | tuple[MessageRecord, ...]
+        | ReparseResult
     )
 
 
@@ -135,6 +147,8 @@ class SyncWorker(Worker):
     purge_result = Signal(object)
     delete_dry_run_result = Signal(object)
     remote_delete_result = Signal(object)
+    failures_for_review_result = Signal(object)
+    failure_action_result = Signal(object)
 
     def __init__(
         self,
@@ -262,6 +276,73 @@ class SyncWorker(Worker):
         return self._submit_operation("refresh_folders", operation)
 
     request_refresh_folders = refresh_folders
+
+    def list_failures_for_review(
+        self, account_id: str | None = None, minimum_attempt_count: int = 10
+    ) -> CancelToken:
+        """Load failures requiring manual review on the database worker."""
+
+        def operation(_token: CancelToken) -> _SyncTaskResult:
+            failures = tuple(
+                self._repository_factory().list_failures_for_review(
+                    account_id, minimum_attempt_count
+                )
+            )
+            return _SyncTaskResult("failures_for_review", failures)
+
+        return self._submit_operation("failures_for_review", operation)
+
+    def force_fetch_message(self, failure: MessageRecord) -> CancelToken:
+        """Fetch one reviewed oversized message without the configured limit."""
+
+        def operation(token: CancelToken) -> _SyncTaskResult:
+            account_id = _required_string(failure, "account_id")
+            folder_raw_name = _required_string(failure, "folder_raw_name")
+            folder_id = failure.get("folder_id")
+            uidvalidity = _required_int(failure, "uidvalidity")
+            uid = _required_int(failure, "uid")
+            repository = self._repository_factory()
+            fetcher = self._fetcher_factory(_find_account(repository, account_id))
+            manifest = self._manifest_factory(account_id)
+            try:
+                with fetcher:
+                    result = force_fetch_message(
+                        fetcher,
+                        repository,
+                        self._storage_factory(),
+                        manifest,
+                        account_id=account_id,
+                        folder_raw_name=folder_raw_name,
+                        folder_id=folder_id,
+                        uidvalidity=uidvalidity,
+                        uid=uid,
+                        cancel=token,
+                    )
+            finally:
+                _close_manifest(manifest)
+            return _SyncTaskResult("force_fetch", result)
+
+        return self._submit_operation("force_fetch", operation)
+
+    def reparse_messages(
+        self, *, account_id: str | None = None, message_ids: tuple[int, ...] | None = None
+    ) -> CancelToken:
+        """Reparse reviewed parse failures on the database worker."""
+
+        def operation(token: CancelToken) -> _SyncTaskResult:
+            return _SyncTaskResult(
+                "reparse",
+                reparse_messages(
+                    self._repository_factory(),
+                    self._storage_factory(),
+                    account_id=account_id,
+                    only_failed=True,
+                    message_ids=message_ids,
+                    cancel=token,
+                ),
+            )
+
+        return self._submit_operation("reparse", operation)
 
     def load_folder_tree(self) -> CancelToken:
         """Load the current account and folder tree on the sync worker."""
@@ -620,6 +701,10 @@ class SyncWorker(Worker):
             self.delete_dry_run_result.emit(value.value)
         elif value.operation == "remote_delete":
             self.remote_delete_result.emit(value.value)
+        elif value.operation == "failures_for_review":
+            self.failures_for_review_result.emit(value.value)
+        elif value.operation in {"force_fetch", "reparse"}:
+            self.failure_action_result.emit(value.value)
         elif isinstance(value.value, _FolderRefreshTaskResult):
             self.folders_refreshed.emit(value.value.result)
             self.folder_tree_updated.emit(value.value.snapshot)
@@ -719,3 +804,17 @@ def _folder_tree_snapshot(repository: BaseMessageRepository) -> FolderTreeSnapsh
         for folder in repository.list_folders(account_id)
     )
     return FolderTreeSnapshot(accounts=accounts, folders=folders)
+
+
+def _required_string(record: MessageRecord, key: str) -> str:
+    value = record.get(key)
+    if not isinstance(value, str) or not value:
+        raise DatabaseError(f"Failure record has no {key}")
+    return value
+
+
+def _required_int(record: MessageRecord, key: str) -> int:
+    value = record.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise DatabaseError(f"Failure record has no valid {key}")
+    return value

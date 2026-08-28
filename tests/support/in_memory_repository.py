@@ -403,6 +403,50 @@ class InMemoryMessageRepository(BaseMessageRepository):
             and int(record["attempt_count"]) < 10
         ]
 
+    def list_failures_for_review(
+        self, account_id: str | None = None, minimum_attempt_count: int = 10
+    ) -> Sequence[MessageRecord]:
+        if minimum_attempt_count < 0:
+            raise ValueError("minimum_attempt_count must be non-negative")
+        rows: list[dict[str, Any]] = []
+        for failure in self.failures.values():
+            if int(failure["attempt_count"]) < minimum_attempt_count:
+                continue
+            if account_id is not None and failure["account_id"] != account_id:
+                continue
+            row = self._copy(failure)
+            message = next(
+                (
+                    item
+                    for item in self.messages.values()
+                    if item.get("account_id") == failure["account_id"]
+                    and item.get("folder_id") == failure["folder_id"]
+                    and item.get("uidvalidity") == failure["uidvalidity"]
+                    and item.get("uid") == failure["uid"]
+                ),
+                None,
+            )
+            if message is not None:
+                row.update(
+                    {
+                        "message_id": message.get("id"),
+                        "subject": message.get("subject"),
+                        "size_bytes": message.get("size_bytes"),
+                        "relative_path": message.get("relative_path"),
+                        "file_hash": message.get("file_hash"),
+                    }
+                )
+            folder = self.folders.get(int(failure["folder_id"]))
+            if folder is not None:
+                row["folder_raw_name"] = folder.get("raw_name")
+                row["folder_display_name"] = folder.get("display_name")
+            rows.append(row)
+        return sorted(
+            rows,
+            key=lambda item: (str(item.get("last_failed_at", "")), int(item.get("uid", 0))),
+            reverse=True,
+        )
+
     def clear_failure(self, account_id: str, folder_id: Any, uidvalidity: int, uid: int) -> None:
         self.failures.pop((account_id, int(folder_id), uidvalidity, uid), None)
 
