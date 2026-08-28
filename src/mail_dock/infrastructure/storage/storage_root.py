@@ -189,7 +189,13 @@ def probe(path: Path, expected_uuid: str | None) -> RootProbe:
         return RootProbe.MISSING
 
     marker_path = path / MARKER_FILENAME
-    if not marker_path.is_file():
+    try:
+        if not marker_path.is_file():
+            return RootProbe.MISSING
+    except OSError as error:
+        classified = classify_os_error(error)
+        if classified is not error:
+            raise classified from error
         return RootProbe.MISSING
     try:
         marker = _read_marker(marker_path)

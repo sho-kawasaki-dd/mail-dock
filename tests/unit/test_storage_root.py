@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from mail_dock.domain.errors import InsufficientSpaceError
+from mail_dock.domain.errors import InsufficientSpaceError, StorageDetachedError
 from mail_dock.infrastructure.storage import storage_root
 from mail_dock.infrastructure.storage.storage_root import (
     MINIMUM_FREE_BYTES,
@@ -28,6 +28,21 @@ def test_probe_reports_ok_missing_and_foreign(
     assert probe(tmp_path / "missing", None) is RootProbe.MISSING
     assert probe(foreign_root, marker.root_uuid) is RootProbe.FOREIGN
     assert foreign_marker.root_uuid != marker.root_uuid
+
+
+def test_probe_classifies_detached_error_while_checking_marker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_storage_root: Path,
+) -> None:
+    initialize_root(tmp_storage_root)
+
+    def raise_detached(_path: Path) -> bool:
+        raise OSError(5, "detached")
+
+    monkeypatch.setattr(Path, "is_file", raise_detached)
+
+    with pytest.raises(StorageDetachedError):
+        probe(tmp_storage_root, "root-uuid")
 
 
 def test_resolve_root_follows_matching_candidate(tmp_path: Path, tmp_storage_root: Path) -> None:
