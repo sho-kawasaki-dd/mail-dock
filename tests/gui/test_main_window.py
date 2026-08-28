@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -22,6 +23,7 @@ from mail_dock.domain.storage_state import StorageState
 from mail_dock.presentation import strings
 from mail_dock.presentation.views.main_window import MainWindow
 from mail_dock.usecases.delete_remote import DeleteResult
+from mail_dock.usecases.export_mbox import ExportMboxProgress
 
 pytestmark = pytest.mark.gui
 
@@ -280,6 +282,76 @@ def test_remote_delete_result_reloads_message_list(
         uncertain=0,
         skipped=0,
     )
+    window.stop_workers()
+
+
+def test_mbox_export_dispatches_selected_messages_and_reports_count(
+    qtbot: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = MainWindow(cast(Any, _Context()))
+    qtbot.addWidget(window)
+    monkeypatch.setattr(window, "_choose_export_message_ids", lambda: (7, 8))
+    monkeypatch.setattr(
+        "mail_dock.presentation.views.main_window.QFileDialog.getSaveFileName",
+        lambda *_args, **_kwargs: ("/tmp/messages.mbox", ""),
+    )
+    calls: list[tuple[tuple[int, ...], Path]] = []
+
+    def export_mbox(*, message_ids: tuple[int, ...], dest_path: Path) -> CancelToken:
+        calls.append((message_ids, dest_path))
+        return CancelToken()
+
+    cast(Any, window.sync_worker).export_mbox = export_mbox
+
+    window._export_mbox()
+    window._show_sync_progress(ExportMboxProgress(2, 2, 2, 0, 8))
+    window._show_file_result(Path("/tmp/messages.mbox"))
+
+    assert calls == [((7, 8), Path("/tmp/messages.mbox"))]
+    assert window._status_label.text() == strings.EXPORT_STATUS_MBOX_COMPLETE.format(count=2)
+    window.stop_workers()
+
+
+def test_export_current_list_loads_all_messages_before_dispatch(
+    qtbot: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = MainWindow(cast(Any, _Context()))
+    qtbot.addWidget(window)
+    monkeypatch.setattr(window, "_choose_export_message_ids", lambda: ())
+    monkeypatch.setattr(
+        "mail_dock.presentation.views.main_window.QFileDialog.getSaveFileName",
+        lambda *_args, **_kwargs: ("/tmp/messages.mbox", ""),
+    )
+    list_calls: list[dict[str, object]] = []
+    export_calls: list[tuple[int, ...]] = []
+
+    def list_all_messages(**kwargs: object) -> SimpleNamespace:
+        list_calls.append(kwargs)
+        return SimpleNamespace(token=CancelToken())
+
+    def export_mbox(*, message_ids: tuple[int, ...], dest_path: Path) -> CancelToken:
+        del dest_path
+        export_calls.append(message_ids)
+        return CancelToken()
+
+    cast(Any, window.query_worker).list_all_messages = list_all_messages
+    cast(Any, window.sync_worker).export_mbox = export_mbox
+
+    window._begin_export("mbox")
+    window._show_export_list_result(
+        SimpleNamespace(channel="export/list", value=(_summary(3), _summary(4)))
+    )
+
+    assert list_calls == [
+        {
+            "query": window.message_list_viewmodel.query,
+            "mode": window.message_list_viewmodel.mode,
+            "filters": window.message_list_viewmodel.filters,
+        }
+    ]
+    assert export_calls == [(3, 4)]
     window.stop_workers()
 
 

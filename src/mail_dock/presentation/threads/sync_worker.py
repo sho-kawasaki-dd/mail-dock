@@ -34,6 +34,12 @@ from mail_dock.usecases.delete_remote import (
     dry_run,
     execute,
 )
+from mail_dock.usecases.export_attachments import (
+    ExportAttachmentsProgress,
+    ExportAttachmentsResult,
+    export_attachments,
+)
+from mail_dock.usecases.export_mbox import ExportMboxProgress, export_mbox
 from mail_dock.usecases.export_message import export_eml
 from mail_dock.usecases.save_attachment import (
     commit_attachment_save,
@@ -54,6 +60,8 @@ SyncOperation = Literal[
     "prepare_attachment",
     "save_attachment",
     "export_eml",
+    "export_mbox",
+    "export_attachments",
     "restore_from_trash",
     "purge",
     "remote_delete_dry_run",
@@ -102,6 +110,7 @@ class _SyncTaskResult:
         | AttachmentSavePlan
         | SavedFile
         | Path
+        | ExportAttachmentsResult
         | TrashResult
         | PurgeResult
         | DeleteDryRunResult
@@ -338,6 +347,58 @@ class SyncWorker(Worker):
 
         return self._submit_operation("export_eml", operation)
 
+    def export_mbox(
+        self,
+        *,
+        message_ids: tuple[int, ...],
+        dest_path: Path,
+    ) -> CancelToken:
+        """Export selected message IDs to mbox on the write worker."""
+
+        def operation(token: CancelToken) -> _SyncTaskResult:
+            return _SyncTaskResult(
+                "export_mbox",
+                export_mbox(
+                    self._repository_factory(),
+                    self._storage_factory(),
+                    message_ids=message_ids,
+                    dest_path=dest_path,
+                    cancel=token,
+                    on_progress=self._forward_export_progress(),
+                ),
+            )
+
+        return self._submit_operation("export_mbox", operation)
+
+    def export_attachments(
+        self,
+        *,
+        message_ids: tuple[int, ...],
+        dest_dir: Path,
+    ) -> CancelToken:
+        """Extract attachments for selected message IDs on the write worker."""
+
+        def operation(token: CancelToken) -> _SyncTaskResult:
+            repository = self._repository_factory()
+            messages = tuple(
+                message
+                for message_id in message_ids
+                if (message := repository.get_message(message_id)) is not None
+            )
+            return _SyncTaskResult(
+                "export_attachments",
+                export_attachments(
+                    self._storage_factory(),
+                    self._message_renderer(),
+                    messages=messages,
+                    dest_dir=dest_dir,
+                    cancel=token,
+                    on_progress=self._forward_export_progress(),
+                ),
+            )
+
+        return self._submit_operation("export_attachments", operation)
+
     def restore_from_trash(self, message_ids: tuple[int, ...]) -> CancelToken:
         """Restore selected messages on the single database writer thread."""
 
@@ -520,13 +581,36 @@ class SyncWorker(Worker):
 
         return forward
 
+    def _forward_export_progress(
+        self,
+    ) -> Callable[[ExportMboxProgress | ExportAttachmentsProgress], None]:
+        """Relay export progress using the same 100ms throttling contract."""
+
+        last_emitted: float | None = None
+
+        def forward(progress: ExportMboxProgress | ExportAttachmentsProgress) -> None:
+            nonlocal last_emitted
+            now = self._clock()
+            if last_emitted is not None and now - last_emitted < 0.1:
+                return
+            last_emitted = now
+            self.progress.emit(progress)
+
+        return forward
+
     def _emit_task_result(self, task: _Task, value: object) -> None:
         if not isinstance(value, _SyncTaskResult):
             super()._emit_task_result(task, value)
             return
         if value.operation == "sync":
             self.sync_result.emit(value.value)
-        elif value.operation in {"prepare_attachment", "save_attachment", "export_eml"}:
+        elif value.operation in {
+            "prepare_attachment",
+            "save_attachment",
+            "export_eml",
+            "export_mbox",
+            "export_attachments",
+        }:
             self.file_result.emit(value.value)
         elif value.operation == "restore_from_trash":
             self.trash_result.emit(value.value)

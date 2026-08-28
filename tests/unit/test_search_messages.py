@@ -12,6 +12,7 @@ from mail_dock.domain.search import (
 from mail_dock.usecases.search_messages import (
     count_messages,
     get_message,
+    list_all_messages,
     list_messages,
     list_thread,
     search_messages,
@@ -104,3 +105,17 @@ def test_count_messages_parses_optional_query(search_repo: Mock) -> None:
         expected_plan,
         cancel=None,
     )
+
+
+def test_list_all_messages_reads_each_page_until_exhausted(search_repo: Mock) -> None:
+    first_cursor = PageCursor("2026-07-31", 1)
+    search_repo.list_messages.side_effect = (
+        SearchPage((), first_cursor, False),
+        SearchPage((), None, True),
+    )
+    cancel = CancelToken()
+
+    assert list_all_messages(search_repo, cancel=cancel) == ()
+
+    assert search_repo.list_messages.call_count == 2
+    assert search_repo.list_messages.call_args_list[1].kwargs["cursor"] == first_cursor

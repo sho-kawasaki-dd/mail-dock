@@ -82,6 +82,54 @@ def list_thread(
     return search_repo.list_thread(thread_key, filters or MessageFilter(), cancel=cancel)
 
 
+def list_all_messages(
+    search_repo: BaseSearchRepository,
+    *,
+    query: str = "",
+    mode: Literal["and", "or"] = "and",
+    filters: MessageFilter | None = None,
+    cancel: CancelToken | None = None,
+) -> tuple[MessageSummary, ...]:
+    """Read every message matching the current list/search state.
+
+    The read remains paginated so the repository can keep its normal bounded
+    query behavior, while the cancellation token can stop a large export
+    before the next page is requested.
+    """
+
+    results: list[MessageSummary] = []
+    cursor: PageCursor | None = None
+    current_filters = filters or MessageFilter()
+    while True:
+        if cancel is not None:
+            cancel.raise_if_cancelled()
+        page = (
+            search_messages(
+                search_repo,
+                query=query,
+                mode=mode,
+                filters=current_filters,
+                cursor=cursor,
+                limit=200,
+                cancel=cancel,
+            )
+            if query
+            else list_messages(
+                search_repo,
+                filters=current_filters,
+                cursor=cursor,
+                limit=200,
+                cancel=cancel,
+            )
+        )
+        results.extend(page.items)
+        if page.exhausted:
+            return tuple(results)
+        cursor = page.next_cursor
+        if cursor is None:
+            return tuple(results)
+
+
 def count_messages(
     search_repo: BaseSearchRepository,
     *,

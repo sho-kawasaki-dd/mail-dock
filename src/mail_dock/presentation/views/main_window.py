@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMenu,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QSplitter,
@@ -39,6 +40,7 @@ from mail_dock.domain.search import MessageDetail
 from mail_dock.domain.storage_state import StorageState
 from mail_dock.presentation import strings
 from mail_dock.presentation.context import AppContext
+from mail_dock.presentation.errors import user_message
 from mail_dock.presentation.models.folder_tree_model import (
     FolderTreeModel,
     build_mail_account_roots,
@@ -66,6 +68,8 @@ from mail_dock.presentation.views.dialogs.integrity_dialog import IntegrityDialo
 from mail_dock.presentation.views.dialogs.settings_dialog import SettingsDialog
 from mail_dock.presentation.views.message_list import MessageListSearchBar, MessageListView
 from mail_dock.usecases.delete_remote import DeleteDryRunResult, DeleteResult
+from mail_dock.usecases.export_attachments import ExportAttachmentsProgress, ExportAttachmentsResult
+from mail_dock.usecases.export_mbox import ExportMboxProgress
 from mail_dock.usecases.reindex import ReindexResult
 from mail_dock.usecases.sync_folders import FolderRefreshResult
 from mail_dock.usecases.sync_mail import SyncOptions, SyncProgress, SyncResult
@@ -110,6 +114,11 @@ class MainWindow(QMainWindow):
         self._sync_token: CancelToken | None = None
         self._folder_refresh_token: CancelToken | None = None
         self._file_token: CancelToken | None = None
+        self._export_list_token: CancelToken | None = None
+        self._pending_export_kind: str | None = None
+        self._pending_export_destination: Path | None = None
+        self._active_export_kind: str | None = None
+        self._active_export_count = 0
         self._pending_attachment_request: AttachmentSaveRequest | None = None
         self._pending_attachment_plan: AttachmentSavePlan | None = None
         self._query_busy = False
@@ -250,6 +259,8 @@ class MainWindow(QMainWindow):
         self.refresh_folders_action = QAction(strings.MAIN_TOOLBAR_REFRESH_FOLDERS, self)
         self.settings_action = QAction(strings.MAIN_TOOLBAR_SETTINGS, self)
         self.export_eml_action = QAction(strings.MAIN_MENU_EXPORT_EML, self)
+        self.export_mbox_action = QAction(strings.MAIN_MENU_EXPORT_MBOX, self)
+        self.export_attachments_action = QAction(strings.MAIN_MENU_EXPORT_ATTACHMENTS, self)
         self.delete_remote_action = QAction(strings.MAIN_MENU_DELETE_REMOTE, self)
         self.delete_remote_action.setEnabled(False)
         self.restore_trash_action = QAction(strings.MAIN_MENU_RESTORE_TRASH, self)
@@ -282,6 +293,8 @@ class MainWindow(QMainWindow):
 
         file_menu = self.menuBar().addMenu(strings.MAIN_MENU_FILE)
         file_menu.addAction(self.export_eml_action)
+        file_menu.addAction(self.export_mbox_action)
+        file_menu.addAction(self.export_attachments_action)
         file_menu.addAction(self.delete_remote_action)
         file_menu.addAction(self.restore_trash_action)
         file_menu.addAction(self.purge_trash_action)
@@ -306,6 +319,8 @@ class MainWindow(QMainWindow):
         self.refresh_folders_action.triggered.connect(self._refresh_selected_account)
         self.settings_action.triggered.connect(self.settings_requested)
         self.export_eml_action.triggered.connect(self._export_current_message)
+        self.export_mbox_action.triggered.connect(self._export_mbox)
+        self.export_attachments_action.triggered.connect(self._export_attachments)
         self.delete_remote_action.triggered.connect(self._start_remote_delete)
         self.restore_trash_action.triggered.connect(self._restore_selected_from_trash)
         self.purge_trash_action.triggered.connect(self._purge_selected_from_trash)
@@ -370,6 +385,7 @@ class MainWindow(QMainWindow):
                 self._sync_token is not None,
                 self._folder_refresh_token is not None,
                 self._file_token is not None,
+                self._export_list_token is not None,
                 self._query_busy,
                 bool(self.verify_worker.active_tokens),
             )
@@ -570,6 +586,9 @@ class MainWindow(QMainWindow):
         self.sync_worker.folder_tree_updated.connect(self._update_folder_tree)
         self.sync_worker.error_reported.connect(self._show_sync_error)
         self.sync_worker.file_result.connect(self._show_file_result)
+        self.query_worker.result.connect(self._show_export_list_result)
+        self.query_worker.request_failed.connect(self._show_export_list_failure)
+        self.query_worker.request_cancelled.connect(self._show_export_list_cancelled)
         self.sync_worker.trash_result.connect(self._show_trash_result)
         self.sync_worker.purge_result.connect(self._show_purge_result)
         self.sync_worker.delete_dry_run_result.connect(self._show_delete_dry_run_result)
@@ -791,6 +810,17 @@ class MainWindow(QMainWindow):
         return account_id if isinstance(account_id, str) else None
 
     def _show_sync_progress(self, progress: object) -> None:
+        if isinstance(progress, (ExportMboxProgress, ExportAttachmentsProgress)):
+            self._active_export_count = progress.exported_count
+            total = progress.total_count
+            processed = progress.processed_count
+            self._progress_bar.setValue(
+                min(100, int(processed * 100 / total)) if total else 100
+            )
+            self._status_label.setText(
+                f"{strings.EXPORT_STATUS_RUNNING} {processed} / {total}"
+            )
+            return
         if not isinstance(progress, SyncProgress):
             return
         if progress.total_bytes_estimate > 0:
@@ -908,10 +938,14 @@ class MainWindow(QMainWindow):
             "prepare_attachment",
             "save_attachment",
             "export_eml",
+            "export_mbox",
+            "export_attachments",
         }:
             self._file_token = None
             self._pending_attachment_request = None
             self._pending_attachment_plan = None
+            self._active_export_kind = None
+            self._active_export_count = 0
             self._status_label.setText(notification.message)
         elif notification.operation in {
             "restore_from_trash",
@@ -988,8 +1022,27 @@ class MainWindow(QMainWindow):
             self._pending_attachment_plan = None
             self._status_label.setText(strings.SAVE_SUCCESS.format(filename=result.path.name))
         elif isinstance(result, Path):
+            export_kind = self._active_export_kind
+            export_count = self._active_export_count
             self._file_token = None
-            self._status_label.setText(strings.SAVE_SUCCESS.format(filename=result.name))
+            self._status_label.setText(
+                strings.EXPORT_STATUS_MBOX_COMPLETE.format(count=export_count)
+                if export_kind == "mbox"
+                else strings.SAVE_SUCCESS.format(filename=result.name)
+            )
+            self._active_export_kind = None
+            self._active_export_count = 0
+            self._cancel_button.setEnabled(False)
+        elif isinstance(result, ExportAttachmentsResult):
+            self._file_token = None
+            self._active_export_kind = None
+            self._cancel_button.setEnabled(False)
+            self._status_label.setText(
+                strings.EXPORT_STATUS_ATTACHMENTS_COMPLETE.format(
+                    count=result.exported_count,
+                    skipped=result.skipped_count,
+                )
+            )
 
     def _show_trash_result(self, result: object) -> None:
         from mail_dock.usecases.trash import TrashResult
@@ -1114,6 +1167,128 @@ class MainWindow(QMainWindow):
         )
         self._status_label.setText(strings.STATUS_LOADING)
 
+    def _export_mbox(self) -> None:
+        self._begin_export("mbox")
+
+    def _export_attachments(self) -> None:
+        self._begin_export("attachments")
+
+    def _begin_export(self, kind: str) -> None:
+        if self._file_token is not None or self._export_list_token is not None:
+            return
+        message_ids = self._choose_export_message_ids()
+        if message_ids is None:
+            return
+        if kind == "mbox":
+            selected, _filter = QFileDialog.getSaveFileName(
+                self,
+                strings.EXPORT_MBOX_DIALOG_TITLE,
+                strings.EXPORT_MBOX_DEFAULT_FILENAME,
+                "mbox files (*.mbox);;All files (*)",
+            )
+            destination = Path(selected) if selected else None
+        else:
+            selected = QFileDialog.getExistingDirectory(
+                self,
+                strings.EXPORT_ATTACHMENTS_DIALOG_TITLE,
+            )
+            destination = Path(selected) if selected else None
+        if destination is None:
+            return
+        self._pending_export_kind = kind
+        self._pending_export_destination = destination
+        if message_ids:
+            self._start_export(kind, destination, message_ids)
+            return
+        handle = self.query_worker.list_all_messages(
+            query=self.message_list_viewmodel.query,
+            mode=self.message_list_viewmodel.mode,
+            filters=self.message_list_viewmodel.filters,
+        )
+        self._export_list_token = handle.token
+        self._cancel_button.setEnabled(True)
+        self._status_label.setText(strings.EXPORT_STATUS_LOADING_LIST)
+
+    def _choose_export_message_ids(self) -> tuple[int, ...] | None:
+        selected = self._selected_message_ids()
+        if not selected:
+            return ()
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle(strings.EXPORT_SOURCE_TITLE)
+        dialog.setText(strings.EXPORT_SOURCE_TITLE)
+        selected_button = dialog.addButton(
+            strings.EXPORT_SOURCE_SELECTED,
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        current_button = dialog.addButton(
+            strings.EXPORT_SOURCE_CURRENT_LIST,
+            QMessageBox.ButtonRole.DestructiveRole,
+        )
+        dialog.addButton(QMessageBox.StandardButton.Cancel)
+        dialog.exec()
+        if dialog.clickedButton() is selected_button:
+            return selected
+        if dialog.clickedButton() is current_button:
+            return ()
+        return None
+
+    def _start_export(self, kind: str, destination: Path, message_ids: tuple[int, ...]) -> None:
+        if not message_ids:
+            self._clear_pending_export()
+            self._status_label.setText(strings.EXPORT_STATUS_NO_MESSAGES)
+            return
+        self._active_export_kind = kind
+        self._active_export_count = 0
+        if kind == "mbox":
+            self._file_token = self.sync_worker.export_mbox(
+                message_ids=message_ids,
+                dest_path=destination,
+            )
+        else:
+            self._file_token = self.sync_worker.export_attachments(
+                message_ids=message_ids,
+                dest_dir=destination,
+            )
+        self._cancel_button.setEnabled(True)
+        self._status_label.setText(strings.EXPORT_STATUS_RUNNING)
+
+    def _show_export_list_result(self, result: object) -> None:
+        if getattr(result, "channel", None) != "export/list":
+            return
+        if self._export_list_token is None:
+            return
+        self._export_list_token = None
+        value = getattr(result, "value", ())
+        message_ids = tuple(
+            item.id for item in value if hasattr(item, "id") and type(item.id) is int
+        )
+        kind = self._pending_export_kind
+        destination = self._pending_export_destination
+        self._clear_pending_export()
+        if kind is not None and destination is not None:
+            self._start_export(kind, destination, message_ids)
+
+    def _show_export_list_failure(self, failure: object) -> None:
+        if getattr(failure, "channel", None) != "export/list":
+            return
+        self._export_list_token = None
+        self._clear_pending_export()
+        self._cancel_button.setEnabled(False)
+        self._status_label.setText(
+            user_message(cast(BaseException, getattr(failure, "error", failure)))
+        )
+
+    def _show_export_list_cancelled(self, cancelled: object) -> None:
+        if getattr(cancelled, "channel", None) != "export/list":
+            return
+        self._export_list_token = None
+        self._clear_pending_export()
+        self._cancel_button.setEnabled(False)
+
+    def _clear_pending_export(self) -> None:
+        self._pending_export_kind = None
+        self._pending_export_destination = None
+
     def _show_storage_detached(self, _error: object) -> None:
         """Show the detached banner; recovery state handling remains Phase 4."""
 
@@ -1201,6 +1376,10 @@ class MainWindow(QMainWindow):
     def _cancel_current_operation(self) -> None:
         if self._sync_token is not None:
             self._sync_token.cancel()
+        if self._file_token is not None:
+            self._file_token.cancel()
+        if self._export_list_token is not None:
+            self._export_list_token.cancel()
 
     def _restore_ui_state(self) -> None:
         geometry = self._ui_settings.value("geometry")

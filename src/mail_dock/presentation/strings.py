@@ -87,6 +87,8 @@ WIZARD_HELP_FOLDER_SYNC_TARGET = "新規フォルダは既定で同期対象に�
 MAIN_WINDOW_TITLE = APP_TITLE
 MAIN_MENU_FILE = "ファイル"
 MAIN_MENU_EXPORT_EML = ".eml として保存"
+MAIN_MENU_EXPORT_MBOX = "mbox としてエクスポート"
+MAIN_MENU_EXPORT_ATTACHMENTS = "添付ファイルを一括抽出"
 MAIN_MENU_DELETE_REMOTE = "サーバーから削除"
 MAIN_MENU_EXIT = "終了"
 MAIN_MENU_VIEW = "表示"
@@ -415,3 +417,16 @@ SAVE_ATTACHMENT_SANITIZED = "ファイル名が変更されました: {original}
 SAVE_SUCCESS = "{filename} を保存しました。"
 EXPORT_FILENAME_PATTERN = "{subject}_{date}.eml"
 EXPORT_DEFAULT_FILENAME = "message.eml"
+EXPORT_MBOX_DEFAULT_FILENAME = "messages.mbox"
+EXPORT_MBOX_DIALOG_TITLE = "mbox の保存先を選択"
+EXPORT_ATTACHMENTS_DIALOG_TITLE = "添付ファイルの保存先を選択"
+EXPORT_SOURCE_TITLE = "エクスポート対象"
+EXPORT_SOURCE_SELECTED = "選択したメール"
+EXPORT_SOURCE_CURRENT_LIST = "現在の一覧全体"
+EXPORT_STATUS_LOADING_LIST = "エクスポート対象を読み込んでいます..."
+EXPORT_STATUS_RUNNING = "エクスポート中..."
+EXPORT_STATUS_MBOX_COMPLETE = "mbox を保存しました: {count} 件"
+EXPORT_STATUS_ATTACHMENTS_COMPLETE = (
+    "添付ファイルを抽出しました: {count} 件 / スキップ {skipped} 件"
+)
+EXPORT_STATUS_NO_MESSAGES = "エクスポート対象のメールがありません。"

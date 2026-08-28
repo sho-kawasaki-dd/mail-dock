@@ -21,6 +21,7 @@ from mail_dock.presentation.threads.worker import Worker, _Task
 from mail_dock.usecases.search_messages import (
     count_messages,
     get_message,
+    list_all_messages,
     list_messages,
     list_thread,
     search_messages,
@@ -209,6 +210,28 @@ class QueryWorker(Worker):
         )
 
     request_list_thread = list_thread
+
+    def list_all_messages(
+        self,
+        *,
+        query: str = "",
+        mode: SearchMode = "and",
+        filters: MessageFilter | None = None,
+    ) -> RequestHandle:
+        """Queue a cancellable full result-set read for an export operation."""
+
+        return self._queue(
+            "export/list",
+            lambda repository, token: list_all_messages(
+                repository,
+                query=query,
+                mode=mode,
+                filters=filters,
+                cancel=token,
+            ),
+        )
+
+    request_list_all_messages = list_all_messages
 
     def get_message(self, *, message_id: int) -> RequestHandle:
         """Queue a message-detail lookup."""

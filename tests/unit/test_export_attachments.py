@@ -3,12 +3,15 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.messages import MessagePart, RenderedMessage, StoredEml
 from mail_dock.domain.ports import BaseEmlStorage, BaseMessageRenderer
+from mail_dock.domain.search import MessageDetail
 from mail_dock.usecases.export_attachments import ExportAttachmentsProgress, export_attachments
 
 
@@ -67,6 +70,16 @@ def test_exports_regular_attachments_and_excludes_content_id_parts(tmp_path: Pat
     assert (tmp_path / "invoice.pdf").read_bytes() == b"pdf"
     assert not (tmp_path / "inline.png").exists()
     assert not (tmp_path / "inline-2.jpg").exists()
+
+
+def test_accepts_message_detail_objects_returned_by_repository(tmp_path: Path) -> None:
+    storage = FakeStorage(b"eml")
+    renderer = FakeRenderer((MessagePart(None, "text/plain", "note.txt", b"note", False),))
+    message = cast(MessageDetail, SimpleNamespace(**_message()))
+
+    result = export_attachments(storage, renderer, messages=(message,), dest_dir=tmp_path)
+
+    assert result.files == (tmp_path / "note.txt",)
 
 
 def test_uses_numbered_names_and_reports_executable_warning(tmp_path: Path) -> None:

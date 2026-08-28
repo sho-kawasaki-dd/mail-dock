@@ -8,7 +8,7 @@ from typing import Final, Literal
 
 from mail_dock.domain.fetcher import CancelToken
 
-type RequestChannel = Literal["list/search", "detail/open", "count/thread"]
+type RequestChannel = Literal["list/search", "detail/open", "count/thread", "export/list"]
 
 
 @dataclass(frozen=True)
@@ -32,6 +32,7 @@ class RequestState:
         "list/search",
         "detail/open",
         "count/thread",
+        "export/list",
     )
 
     def __init__(self) -> None:

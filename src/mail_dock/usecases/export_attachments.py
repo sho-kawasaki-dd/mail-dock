@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
@@ -16,6 +16,7 @@ from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.messages import MessagePart
 from mail_dock.domain.ports import BaseEmlStorage, BaseMessageRenderer
 from mail_dock.domain.repository import MessageRecord
+from mail_dock.domain.search import MessageDetail
 
 
 @dataclass(frozen=True)
@@ -80,11 +81,17 @@ def _resolve_destination_dir(dest_dir: Path) -> Path:
     return resolved
 
 
-def _message_storage(message: MessageRecord) -> tuple[str, str] | None:
-    if message.get("local_state") == "purged":
+def _message_value(message: MessageRecord | MessageDetail, key: str) -> object:
+    if isinstance(message, Mapping):
+        return message.get(key)
+    return getattr(message, key, None)
+
+
+def _message_storage(message: MessageRecord | MessageDetail) -> tuple[str, str] | None:
+    if _message_value(message, "local_state") == "purged":
         return None
-    relative_path = message.get("relative_path")
-    file_hash = message.get("file_hash")
+    relative_path = _message_value(message, "relative_path")
+    file_hash = _message_value(message, "file_hash")
     if not isinstance(relative_path, str) or not relative_path:
         raise StorageError("Message has no stored EML path")
     if not isinstance(file_hash, str) or not file_hash:
@@ -172,7 +179,7 @@ def export_attachments(
     storage: BaseEmlStorage,
     renderer: BaseMessageRenderer,
     *,
-    messages: Iterable[MessageRecord],
+    messages: Iterable[MessageRecord | MessageDetail],
     dest_dir: Path,
     cancel: CancelToken | None = None,
     on_progress: Callable[[ExportAttachmentsProgress], None] | None = None,
@@ -196,7 +203,7 @@ def export_attachments(
 
     for message in requested_messages:
         token.raise_if_cancelled()
-        message_id = message.get("id")
+        message_id = _message_value(message, "id")
         metadata = _message_storage(message)
         if metadata is None:
             skipped_count += 1
