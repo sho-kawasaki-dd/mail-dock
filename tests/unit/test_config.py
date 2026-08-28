@@ -84,6 +84,16 @@ def test_load_rejects_invalid_values(config_path: Path, field_name: str, value: 
         config_module.load()
 
 
+def test_load_migrates_legacy_permanent_remote_delete_mode(config_path: Path) -> None:
+    config_path.write_text(json.dumps({"remote_delete_mode": "permanent"}), encoding="utf-8")
+
+    loaded = config_module.load()
+
+    assert loaded.remote_delete_mode == "expunge"
+    config_module.save(loaded)
+    assert json.loads(config_path.read_text(encoding="utf-8"))["remote_delete_mode"] == "expunge"
+
+
 def test_load_rejects_invalid_json(config_path: Path) -> None:
     config_path.write_text("not-json", encoding="utf-8")
 

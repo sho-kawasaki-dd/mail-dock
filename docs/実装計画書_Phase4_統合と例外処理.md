@@ -495,14 +495,14 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **G-5. 設定画面の拡張（F-43）**
 
-- [ ] purge 実行モード（`manual` / `grace` / `immediate`）と警告表示
-- [ ] ゴミ箱の猶予日数（`trash_grace_days`）
-- [ ] サーバー削除モード（`remote_delete_mode`）とゴミ箱フォルダ（`remote_trash_folder`、自動検出結果の表示と上書き）
-- [ ] 1回の削除上限（`delete_batch_limit`）
-- [ ] ハートビート間隔（`heartbeat_interval_sec`）— **0による無効化を許可しない**（N-1）
-- [ ] 定期同期間隔（`sync_interval_minutes`）
-- [ ] 同期ログ保持日数（`sync_log_retention_days`）
-- [ ] `db_backup_to_local_disk`（既定OFF、警告付き）
+- [x] purge 実行モード（`manual` / `grace` / `immediate`）と警告表示
+- [x] ゴミ箱の猶予日数（`trash_grace_days`）
+- [x] サーバー削除モード（`remote_delete_mode`）とゴミ箱フォルダ（`remote_trash_folder`、自動検出結果の表示と上書き）
+- [x] 1回の削除上限（`delete_batch_limit`）
+- [x] ハートビート間隔（`heartbeat_interval_sec`）— **0による無効化を許可しない**（N-1）
+- [x] 定期同期間隔（`sync_interval_minutes`）
+- [x] 同期ログ保持日数（`sync_log_retention_days`）
+- [x] `db_backup_to_local_disk`（既定OFF、警告付き）
 - [ ] Phase 4.5 の設定項目（PST取込設定）は**表示しない**
 
 ---

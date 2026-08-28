@@ -176,20 +176,33 @@ def test_active_settings_are_saved_with_purge_controls(qtbot: Any) -> None:
     dialog._max_message_size.setValue(12)
     dialog._block_remote_images.setChecked(False)
     dialog._sync_on_startup.setChecked(False)
+    dialog._sync_interval_minutes.setValue(15)
     dialog._startup_verification.setCurrentIndex(dialog._startup_verification.findData("full"))
     dialog._purge_mode.setCurrentIndex(dialog._purge_mode.findData("immediate"))
     dialog._trash_grace_days.setValue(45)
+    dialog._remote_delete_mode.setCurrentIndex(dialog._remote_delete_mode.findData("expunge"))
     dialog._remote_trash_folder.setText("INBOX.Trash")
+    dialog._delete_batch_limit.setValue(250)
+    dialog._heartbeat_interval_sec.setValue(7)
+    dialog._sync_log_retention_days.setValue(120)
+    dialog._db_backup_to_local_disk.setChecked(True)
 
     assert dialog._save_settings()
     assert context.saved[-1].max_message_bytes == 12 * 1024 * 1024
     assert not context.saved[-1].block_remote_images
     assert not context.saved[-1].sync_on_startup
+    assert context.saved[-1].sync_interval_minutes == 15
     assert context.saved[-1].startup_verification == "full"
     assert context.saved[-1].purge_mode == "immediate"
     assert context.saved[-1].trash_grace_days == 45
+    assert context.saved[-1].remote_delete_mode == "expunge"
     assert context.saved[-1].remote_trash_folder == "INBOX.Trash"
+    assert context.saved[-1].delete_batch_limit == 250
+    assert context.saved[-1].heartbeat_interval_sec == 7
+    assert context.saved[-1].sync_log_retention_days == 120
+    assert context.saved[-1].db_backup_to_local_disk
     assert dialog._purge_mode_warning.text() == strings.SETTINGS_WARNING_PURGE_IMMEDIATE
+    assert dialog._db_backup_warning.text() == strings.SETTINGS_WARNING_DB_BACKUP_TO_LOCAL_DISK
     dialog._stop_worker()
 
 

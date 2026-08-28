@@ -22,7 +22,7 @@ from mail_dock.domain.errors import ConfigError, ConfigVersionTooNewError
 CURRENT_SCHEMA_VERSION = 2
 CONFIG_FILENAME = "config.json"
 
-REMOTE_DELETE_MODES = frozenset({"trash", "permanent"})
+REMOTE_DELETE_MODES = frozenset({"trash", "expunge"})
 PURGE_MODES = frozenset({"manual", "grace", "immediate"})
 STARTUP_VERIFICATION_MODES = frozenset({"quick", "full"})
 ENCRYPTION_DECLARATIONS = frozenset({"encrypted", "unencrypted", "unknown"})
@@ -304,6 +304,8 @@ def _upgrade(data: dict[str, JSONValue]) -> dict[str, JSONValue]:
             raise _config_error(f"no upgrade path exists from schema {version}")
         upgraded = upgrader(upgraded)
         version = _require_int(upgraded.get("schema_version"), "schema_version")
+    if upgraded.get("remote_delete_mode") == "permanent":
+        upgraded["remote_delete_mode"] = "expunge"
     return upgraded
 
 

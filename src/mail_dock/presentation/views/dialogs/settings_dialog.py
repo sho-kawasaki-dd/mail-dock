@@ -452,6 +452,11 @@ class SettingsDialog(QDialog):
         self._sync_on_startup = QCheckBox(settings_group)
         self._sync_on_startup.setObjectName("syncOnStartupCheckBox")
         self._sync_on_startup.setChecked(self._settings.sync_on_startup)
+        self._sync_interval_minutes = QSpinBox(settings_group)
+        self._sync_interval_minutes.setObjectName("syncIntervalMinutesSpinBox")
+        self._sync_interval_minutes.setRange(0, 10_080)
+        self._sync_interval_minutes.setSuffix(" 分")
+        self._sync_interval_minutes.setValue(self._settings.sync_interval_minutes)
         self._startup_verification = QComboBox(settings_group)
         self._startup_verification.setObjectName("startupVerificationComboBox")
         self._startup_verification.addItem(strings.SETTINGS_VERIFICATION_QUICK, "quick")
@@ -475,6 +480,14 @@ class SettingsDialog(QDialog):
         self._purge_mode_warning.setObjectName("purgeModeWarningLabel")
         self._purge_mode_warning.setWordWrap(True)
         self._update_purge_warning()
+        self._remote_delete_mode = QComboBox(settings_group)
+        self._remote_delete_mode.setObjectName("remoteDeleteModeComboBox")
+        self._remote_delete_mode.addItem(strings.SETTINGS_REMOTE_DELETE_MODE_TRASH, "trash")
+        self._remote_delete_mode.addItem(strings.SETTINGS_REMOTE_DELETE_MODE_EXPUNGE, "expunge")
+        remote_delete_index = self._remote_delete_mode.findData(self._settings.remote_delete_mode)
+        if remote_delete_index < 0 and self._settings.remote_delete_mode == "permanent":
+            remote_delete_index = self._remote_delete_mode.findData("expunge")
+        self._remote_delete_mode.setCurrentIndex(max(0, remote_delete_index))
         self._remote_trash_folder = QLineEdit(settings_group)
         self._remote_trash_folder.setObjectName("remoteTrashFolderLineEdit")
         self._remote_trash_folder.setPlaceholderText(
@@ -486,6 +499,29 @@ class SettingsDialog(QDialog):
         self._remote_trash_status.setObjectName("remoteTrashFolderStatusLabel")
         self._remote_trash_status.setWordWrap(True)
         self._set_remote_trash_status(None)
+        self._delete_batch_limit = QSpinBox(settings_group)
+        self._delete_batch_limit.setObjectName("deleteBatchLimitSpinBox")
+        self._delete_batch_limit.setRange(1, 1_000_000)
+        self._delete_batch_limit.setSuffix(" 通")
+        self._delete_batch_limit.setValue(self._settings.delete_batch_limit)
+        self._heartbeat_interval_sec = QSpinBox(settings_group)
+        self._heartbeat_interval_sec.setObjectName("heartbeatIntervalSecSpinBox")
+        self._heartbeat_interval_sec.setRange(1, 86_400)
+        self._heartbeat_interval_sec.setSuffix(" 秒")
+        self._heartbeat_interval_sec.setValue(self._settings.heartbeat_interval_sec)
+        self._sync_log_retention_days = QSpinBox(settings_group)
+        self._sync_log_retention_days.setObjectName("syncLogRetentionDaysSpinBox")
+        self._sync_log_retention_days.setRange(0, 3_650)
+        self._sync_log_retention_days.setSuffix(" 日")
+        self._sync_log_retention_days.setValue(self._settings.sync_log_retention_days)
+        self._db_backup_to_local_disk = QCheckBox(settings_group)
+        self._db_backup_to_local_disk.setObjectName("dbBackupToLocalDiskCheckBox")
+        self._db_backup_to_local_disk.setChecked(self._settings.db_backup_to_local_disk)
+        self._db_backup_warning = QLabel(settings_group)
+        self._db_backup_warning.setObjectName("dbBackupWarningLabel")
+        self._db_backup_warning.setWordWrap(True)
+        self._db_backup_to_local_disk.stateChanged.connect(self._update_db_backup_warning)
+        self._update_db_backup_warning()
         self._encryption_combo = QComboBox(settings_group)
         self._encryption_combo.setObjectName("encryptionDeclarationComboBox")
         self._encryption_combo.addItem(strings.WIZARD_ENCRYPTION_ENCRYPTED, "encrypted")
@@ -540,6 +576,7 @@ class SettingsDialog(QDialog):
         settings_form.addRow(strings.SETTINGS_LABEL_MAX_MESSAGE_SIZE, self._max_message_size)
         settings_form.addRow(strings.SETTINGS_LABEL_BLOCK_REMOTE_IMAGES, self._block_remote_images)
         settings_form.addRow(strings.SETTINGS_LABEL_SYNC_ON_STARTUP, self._sync_on_startup)
+        settings_form.addRow(strings.SETTINGS_LABEL_SYNC_INTERVAL, self._sync_interval_minutes)
         settings_form.addRow(
             strings.SETTINGS_LABEL_STARTUP_VERIFICATION,
             self._startup_verification,
@@ -547,8 +584,23 @@ class SettingsDialog(QDialog):
         settings_form.addRow(strings.SETTINGS_LABEL_PURGE_MODE, self._purge_mode)
         settings_form.addRow(strings.SETTINGS_LABEL_TRASH_GRACE_DAYS, self._trash_grace_days)
         settings_form.addRow(self._purge_mode_warning)
+        settings_form.addRow(strings.SETTINGS_LABEL_REMOTE_DELETE_MODE, self._remote_delete_mode)
         settings_form.addRow(strings.SETTINGS_LABEL_REMOTE_TRASH_FOLDER, self._remote_trash_folder)
         settings_form.addRow(self._remote_trash_status)
+        settings_form.addRow(strings.SETTINGS_LABEL_DELETE_BATCH_LIMIT, self._delete_batch_limit)
+        settings_form.addRow(
+            strings.SETTINGS_LABEL_HEARTBEAT_INTERVAL,
+            self._heartbeat_interval_sec,
+        )
+        settings_form.addRow(
+            strings.SETTINGS_LABEL_SYNC_LOG_RETENTION,
+            self._sync_log_retention_days,
+        )
+        settings_form.addRow(
+            strings.SETTINGS_LABEL_DB_BACKUP_TO_LOCAL_DISK,
+            self._db_backup_to_local_disk,
+        )
+        settings_form.addRow(self._db_backup_warning)
         settings_form.addRow(strings.SETTINGS_LABEL_ENCRYPTION, self._encryption_combo)
         capability_controls = QHBoxLayout()
         capability_controls.addWidget(self._capability_label, 1)
@@ -625,6 +677,13 @@ class SettingsDialog(QDialog):
         is_immediate = self._purge_mode.currentData() == "immediate"
         self._purge_mode_warning.setText(
             strings.SETTINGS_WARNING_PURGE_IMMEDIATE if is_immediate else ""
+        )
+
+    def _update_db_backup_warning(self, *_args: object) -> None:
+        self._db_backup_warning.setText(
+            strings.SETTINGS_WARNING_DB_BACKUP_TO_LOCAL_DISK
+            if self._db_backup_to_local_disk.isChecked()
+            else ""
         )
 
     def _load_accounts(self) -> None:
@@ -886,10 +945,16 @@ class SettingsDialog(QDialog):
             max_message_bytes=self._max_message_size.value() * _MEGABYTE,
             block_remote_images=self._block_remote_images.isChecked(),
             sync_on_startup=self._sync_on_startup.isChecked(),
+            sync_interval_minutes=self._sync_interval_minutes.value(),
             startup_verification=startup_verification,
             purge_mode=cast(str, self._purge_mode.currentData()),
             trash_grace_days=self._trash_grace_days.value(),
+            remote_delete_mode=cast(str, self._remote_delete_mode.currentData()),
             remote_trash_folder=self._remote_trash_folder.text().strip() or None,
+            delete_batch_limit=self._delete_batch_limit.value(),
+            heartbeat_interval_sec=self._heartbeat_interval_sec.value(),
+            sync_log_retention_days=self._sync_log_retention_days.value(),
+            db_backup_to_local_disk=self._db_backup_to_local_disk.isChecked(),
             storage_profiles=storage_profiles,
             credential_storage=self._credential_storage_mode(),
         )
