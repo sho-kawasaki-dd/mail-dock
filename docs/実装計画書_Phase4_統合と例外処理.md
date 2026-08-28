@@ -434,11 +434,11 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **F-1. `usecases/export_mbox.py`**
 
-- [ ] `export_mbox(repo, storage, *, message_ids, dest_path, cancel, on_progress) -> Path` を実装する（F-34）
-- [ ] 標準ライブラリ `mailbox.mbox` を使用し、EMLを1通ずつ追記する（全体をメモリへ載せない）
-- [ ] 書き出し前に各EMLの `file_hash` を検証する（`read_verified()` を使う）
-- [ ] 一時ファイルは `dest_path.parent` に作成し、`flush()` + `fsync()` 後に同一ボリューム上で `os.replace` する（既存 `export_message.py` の作法を踏襲）
-- [ ] `purged` のメッセージはスキップし、スキップ件数を結果に含める
+- [x] `export_mbox(repo, storage, *, message_ids, dest_path, cancel, on_progress) -> Path` を実装する（F-34）
+- [x] 標準ライブラリ `mailbox.mbox` を使用し、EMLを1通ずつ追記する（全体をメモリへ載せない）
+- [x] 書き出し前に各EMLの `file_hash` を検証する（`read_verified()` を使う）
+- [x] 一時ファイルは `dest_path.parent` に作成し、`flush()` + `fsync()` 後に同一ボリューム上で `os.replace` する（既存 `export_message.py` の作法を踏襲）
+- [x] `purged` のメッセージはスキップし、スキップ件数を結果に含める
 
 #### **F-2. `usecases/export_attachments.py`**
 
