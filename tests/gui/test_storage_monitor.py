@@ -159,6 +159,39 @@ def test_missing_root_after_reprobe_attempts_detaches_and_closes_resources(
     assert log_targets == [None]
 
 
+def test_missing_root_detaches_only_after_three_reprobe_attempts(
+    qtbot: Any,
+    tmp_storage_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del qtbot
+    monkeypatch.setattr(
+        "mail_dock.presentation.storage_monitor.set_storage_log_target",
+        lambda _target: None,
+    )
+    monitor, _lock, _manager, _worker = _monitor(
+        tmp_storage_root,
+        lambda _root, _uuid: RootProbe.MISSING,
+        settings=config.AppConfig(reprobe_attempts=3),
+    )
+
+    monitor.heartbeat()
+    assert monitor.state is StorageState.DEGRADED
+
+    monitor._reprobe()
+    assert monitor.state is StorageState.DEGRADED
+    assert monitor.reprobe_count == 1
+
+    monitor._reprobe()
+    assert monitor.state is StorageState.DEGRADED
+    assert monitor.reprobe_count == 2
+
+    monitor._reprobe()
+
+    assert monitor.state is StorageState.DETACHED
+    assert monitor.reprobe_count == 3
+
+
 def test_foreign_root_detaches_without_reprobe(
     qtbot: Any,
     tmp_storage_root: Path,

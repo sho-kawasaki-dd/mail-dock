@@ -527,7 +527,7 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 - [x] `tests/unit/test_storage_state.py`: 開発計画書 5.7.1-3 の状態機械遷移を検証する
     - [x] `ATTACHED` → I/Oエラー → `DEGRADED` → リプローブ成功 → `ATTACHED`
-    - [ ] `DEGRADED` → リプローブ3回失敗 → `DETACHED`
+    - [x] `DEGRADED` → （監視側でリプローブ3回失敗）→ `DETACHED`
     - [x] `DEGRADED` → `DEVICE_REMOVED` → `DETACHED`（リプローブを待たない）
     - [x] `ATTACHED` → `USER_DETACH` → `DETACHED_BY_USER`
     - [x] `DETACHED` → `DEVICE_ARRIVED` → `RECONNECTING` → `IDENTITY_OK` → `VERIFYING` → `VERIFY_OK` → `ATTACHED`
@@ -536,7 +536,7 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
     - [x] `ATTACHED` 以外で `is_write_allowed()` と `is_remote_delete_allowed()` が偽であること
 - [x] `tests/unit/test_device_watcher.py`: `dbcv_unitmask` からのドライブレター復元（純粋関数）
 - [x] 同テストへWindows専用ケースを追加し、`ctypes` 構造体のABIレイアウト、ネイティブメッセージ解析、Qtへのイベントフィルタ登録・解除を `windows-latest` 上で検証する（非Windowsではskip）
-- [ ] `tests/unit/test_detach.py`（既存を拡張）: リプローブ回数と間隔の制御
+- [x] `tests/gui/test_storage_monitor.py`: リプローブ回数と間隔（500ms）の制御（`tests/unit/test_detach.py` は既存のI/O例外分類を検証）
 
 #### **H-3. マニフェストと再構築のテスト**
 
