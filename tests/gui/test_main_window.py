@@ -440,3 +440,104 @@ def test_session_only_password_cancel_does_not_queue_sync(
     assert queued == []
     assert window._status_label.text() == strings.STATUS_CREDENTIAL_REQUIRED
     window.stop_workers()
+
+
+@pytest.mark.parametrize(
+    ("interval_minutes", "expected_interval", "expected_active"),
+    ((0, 0, False), (15, 15 * 60 * 1000, True)),
+)
+def test_sync_timer_uses_configured_interval(
+    qtbot: Any,
+    interval_minutes: int,
+    expected_interval: int,
+    expected_active: bool,
+) -> None:
+    context = _Context()
+    context.settings = config.AppConfig(sync_interval_minutes=interval_minutes)
+    window = MainWindow(cast(Any, context))
+    qtbot.addWidget(window)
+
+    assert window.sync_timer.interval() == expected_interval
+    assert window.sync_timer.isActive() is expected_active
+    window.stop_workers()
+
+
+def test_scheduled_sync_skips_detached_and_running_operations(qtbot: Any) -> None:
+    context = _Context()
+    context.settings = config.AppConfig(sync_interval_minutes=0)
+    window = MainWindow(cast(Any, context))
+    qtbot.addWidget(window)
+    calls: list[bool] = []
+
+    def queue_sync() -> CancelToken:
+        calls.append(True)
+        return CancelToken()
+
+    cast(Any, window.sync_worker).sync_all_accounts = queue_sync
+
+    window._start_scheduled_sync()
+    window._sync_token = None
+    window._storage_write_gate.state = StorageState.DETACHED
+    window._start_scheduled_sync()
+    window._storage_write_gate.state = StorageState.ATTACHED
+    window._sync_token = CancelToken()
+    window._start_scheduled_sync()
+
+    assert calls == [True]
+    window.stop_workers()
+
+
+def test_tray_menu_and_close_behavior(qtbot: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from PySide6.QtWidgets import QSystemTrayIcon
+
+    monkeypatch.setattr(QSystemTrayIcon, "isSystemTrayAvailable", staticmethod(lambda: True))
+    context = _Context()
+    context.settings = config.AppConfig(sync_interval_minutes=0)
+    window = MainWindow(cast(Any, context))
+    qtbot.addWidget(window)
+    window.show()
+
+    assert window._tray_icon is not None
+    tray_actions = window._tray_icon.contextMenu().actions()
+    assert [action.text() for action in tray_actions if not action.isSeparator()] == [
+        strings.TRAY_OPEN,
+        strings.TRAY_SYNC,
+        strings.TRAY_QUIT,
+    ]
+
+    window.close()
+    assert not window._workers_stopped
+    assert window._tray_icon.isVisible()
+
+    window._request_exit()
+    assert window._workers_stopped
+
+
+def test_tray_unavailable_falls_back_to_closing(
+    qtbot: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from PySide6.QtWidgets import QSystemTrayIcon
+
+    monkeypatch.setattr(QSystemTrayIcon, "isSystemTrayAvailable", staticmethod(lambda: False))
+    window = MainWindow(cast(Any, _Context()))
+    qtbot.addWidget(window)
+
+    window.close()
+
+    assert window._workers_stopped
+
+
+def test_settings_change_reconfigures_sync_timer(qtbot: Any) -> None:
+    context = _Context()
+    context.settings = config.AppConfig(sync_interval_minutes=0)
+    window = MainWindow(cast(Any, context))
+    qtbot.addWidget(window)
+
+    window._settings_changed(config.AppConfig(sync_interval_minutes=20))
+    assert window.sync_timer.interval() == 20 * 60 * 1000
+    assert window.sync_timer.isActive()
+
+    window._settings_changed(config.AppConfig(sync_interval_minutes=0))
+    assert not window.sync_timer.isActive()
+    window.stop_workers()

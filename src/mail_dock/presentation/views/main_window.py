@@ -9,9 +9,19 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, cast
 
-from PySide6.QtCore import QItemSelectionModel, QModelIndex, QPoint, QSettings, Qt, QUrl, Signal
+from PySide6.QtCore import (
+    QItemSelectionModel,
+    QModelIndex,
+    QPoint,
+    QSettings,
+    Qt,
+    QTimer,
+    QUrl,
+    Signal,
+)
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -26,6 +36,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSplitter,
     QStatusBar,
+    QStyle,
+    QSystemTrayIcon,
     QToolBar,
     QTreeView,
     QVBoxLayout,
@@ -126,6 +138,13 @@ class MainWindow(QMainWindow):
         self._operation_gate = Lock()
         self._storage_write_gate = _StorageWriteGate()
         self._ui_settings = QSettings("mail-dock", "mail-dock")
+        self._exit_requested = False
+        self._close_handled = False
+        self._tray_icon: QSystemTrayIcon | None = None
+        self._tray_sync_action: QAction | None = None
+        self.sync_timer = QTimer(self)
+        self.sync_timer.setInterval(context.settings.sync_interval_minutes * 60 * 1000)
+        self.sync_timer.timeout.connect(self._start_scheduled_sync)
 
         self.query_worker = QueryWorker(
             context.create_search_repository,
@@ -189,6 +208,9 @@ class MainWindow(QMainWindow):
         self.set_storage_capability(getattr(context, "capability_level", None))
         self._set_credential_storage_status(getattr(context, "credential_storage", None))
         self._connect_presentation()
+        self._setup_tray()
+        if context.settings.sync_interval_minutes > 0:
+            self.sync_timer.start()
         self._restore_ui_state()
 
     def start_startup_sync(self) -> None:
@@ -220,9 +242,21 @@ class MainWindow(QMainWindow):
         self.context.stop_workers()
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
-        """Persist the UI shell and stop workers before the window closes."""
+        """Hide to the tray, or persist the UI shell before an explicit exit."""
 
+        if not self._exit_requested and not self._workers_stopped and self._tray_icon is not None:
+            self.hide()
+            event.ignore()
+            return
+        if self._close_handled:
+            event.accept()
+            return
+
+        self._close_handled = True
         self._save_ui_state()
+        self.sync_timer.stop()
+        if self._tray_icon is not None:
+            self._tray_icon.hide()
         self.detail_view.close()
         self.stop_workers()
         super().closeEvent(event)
@@ -325,7 +359,7 @@ class MainWindow(QMainWindow):
         self.restore_trash_action.triggered.connect(self._restore_selected_from_trash)
         self.purge_trash_action.triggered.connect(self._purge_selected_from_trash)
         self.thread_view_action.triggered.connect(self.detail_view.request_thread)
-        self.exit_action.triggered.connect(self.close)
+        self.exit_action.triggered.connect(self._request_exit)
         self.settings_requested.connect(self._show_settings)
         self.integrity_action.triggered.connect(self._show_integrity_dialog)
         self.open_log_folder_action.triggered.connect(self._open_log_folder)
@@ -602,6 +636,67 @@ class MainWindow(QMainWindow):
             load_folder_tree()
         self._update_message_actions()
 
+    def _setup_tray(self) -> None:
+        """Create the tray menu when the desktop environment supports it."""
+
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        tray = QSystemTrayIcon(self)
+        tray.setIcon(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon))
+        tray.setToolTip(f"{strings.APP_NAME}: {strings.TRAY_STATUS_WAITING}")
+        tray_menu = QMenu(self)
+        open_action = tray_menu.addAction(strings.TRAY_OPEN)
+        self._tray_sync_action = tray_menu.addAction(strings.TRAY_SYNC)
+        tray_menu.addSeparator()
+        quit_action = tray_menu.addAction(strings.TRAY_QUIT)
+        open_action.triggered.connect(self._show_from_tray)
+        self._tray_sync_action.triggered.connect(self._sync_selected_account)
+        quit_action.triggered.connect(self._request_exit)
+        tray.setContextMenu(tray_menu)
+        tray.activated.connect(self._tray_activated)
+        tray.show()
+        self._tray_icon = tray
+
+    def _show_from_tray(self) -> None:
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason in {
+            QSystemTrayIcon.ActivationReason.Trigger,
+            QSystemTrayIcon.ActivationReason.DoubleClick,
+        }:
+            self._show_from_tray()
+
+    def _request_exit(self) -> None:
+        self._exit_requested = True
+        self.close()
+
+    def _set_tray_status(self, status: str, pixmap: QStyle.StandardPixmap) -> None:
+        if self._tray_icon is None:
+            return
+        self._tray_icon.setIcon(QApplication.style().standardIcon(pixmap))
+        self._tray_icon.setToolTip(f"{strings.APP_NAME}: {status}")
+
+    def _start_scheduled_sync(self) -> None:
+        if (
+            self._storage_write_gate.state is not StorageState.ATTACHED
+            or self._sync_token is not None
+            or self._folder_refresh_token is not None
+            or self.verify_worker.active_tokens
+        ):
+            return
+        self.start_startup_sync()
+
+    def _configure_sync_timer(self, settings: config.AppConfig) -> None:
+        self.sync_timer.setInterval(settings.sync_interval_minutes * 60 * 1000)
+        if settings.sync_interval_minutes > 0:
+            if not self.sync_timer.isActive():
+                self.sync_timer.start()
+        else:
+            self.sync_timer.stop()
+
     def _update_message_count(self, *_args: object) -> None:
         self._count_label.setText(
             strings.STATUS_MESSAGE_COUNT.format(count=self.message_table_model.rowCount())
@@ -800,8 +895,11 @@ class MainWindow(QMainWindow):
     def _start_sync(self, token: CancelToken) -> None:
         self._sync_token = token
         self.sync_action.setEnabled(False)
+        if self._tray_sync_action is not None:
+            self._tray_sync_action.setEnabled(False)
         self._cancel_button.setEnabled(True)
         self._status_label.setText(strings.STATUS_SYNCING)
+        self._set_tray_status(strings.TRAY_STATUS_SYNCING, QStyle.StandardPixmap.SP_ArrowRight)
 
     def _selected_account_id(self) -> str | None:
         current = self.folder_tree_view.currentIndex()
@@ -814,12 +912,8 @@ class MainWindow(QMainWindow):
             self._active_export_count = progress.exported_count
             total = progress.total_count
             processed = progress.processed_count
-            self._progress_bar.setValue(
-                min(100, int(processed * 100 / total)) if total else 100
-            )
-            self._status_label.setText(
-                f"{strings.EXPORT_STATUS_RUNNING} {processed} / {total}"
-            )
+            self._progress_bar.setValue(min(100, int(processed * 100 / total)) if total else 100)
+            self._status_label.setText(f"{strings.EXPORT_STATUS_RUNNING} {processed} / {total}")
             return
         if not isinstance(progress, SyncProgress):
             return
@@ -846,6 +940,8 @@ class MainWindow(QMainWindow):
         if isinstance(result, SyncResult):
             self._sync_token = None
             self.sync_action.setEnabled(True)
+            if self._tray_sync_action is not None:
+                self._tray_sync_action.setEnabled(True)
             self._cancel_button.setEnabled(False)
             self.message_list_viewmodel.cancel_search()
             self._status_label.setText(
@@ -860,6 +956,10 @@ class MainWindow(QMainWindow):
                 )
             )
             self._progress_bar.setValue(0)
+            self._set_tray_status(
+                strings.TRAY_STATUS_WAITING,
+                QStyle.StandardPixmap.SP_ComputerIcon,
+            )
             self.message_table_model.reload()
 
     def _show_folder_refresh_result(self, _result: object) -> None:
@@ -929,6 +1029,18 @@ class MainWindow(QMainWindow):
 
     def _show_sync_error(self, notification: object) -> None:
         if not isinstance(notification, SyncErrorNotification):
+            return
+        if notification.operation == "sync":
+            self._sync_token = None
+            self.sync_action.setEnabled(True)
+            if self._tray_sync_action is not None:
+                self._tray_sync_action.setEnabled(True)
+            self._cancel_button.setEnabled(False)
+            self._set_tray_status(
+                strings.TRAY_STATUS_ERROR,
+                QStyle.StandardPixmap.SP_MessageBoxWarning,
+            )
+            self._status_label.setText(notification.message)
             return
         if notification.operation == "refresh_folders":
             self._folder_refresh_token = None
@@ -1296,6 +1408,15 @@ class MainWindow(QMainWindow):
         self._storage_detached_banner.setVisible(True)
         self._storage_status_label.setText(strings.ERROR_STORAGE_DETACHED)
         self.sync_action.setEnabled(False)
+        tray_sync_action = getattr(self, "_tray_sync_action", None)
+        if tray_sync_action is not None:
+            tray_sync_action.setEnabled(False)
+        set_tray_status = getattr(self, "_set_tray_status", None)
+        if callable(set_tray_status):
+            set_tray_status(
+                strings.TRAY_STATUS_DETACHED,
+                QStyle.StandardPixmap.SP_MessageBoxCritical,
+            )
         self.refresh_folders_action.setEnabled(False)
         storage_detach_action = getattr(self, "storage_detach_action", None)
         if storage_detach_action is not None:
@@ -1306,6 +1427,15 @@ class MainWindow(QMainWindow):
         self._storage_detached_banner.setVisible(True)
         self._storage_status_label.setText(strings.STATUS_STORAGE_DETACHED_BY_USER)
         self.sync_action.setEnabled(False)
+        tray_sync_action = getattr(self, "_tray_sync_action", None)
+        if tray_sync_action is not None:
+            tray_sync_action.setEnabled(False)
+        set_tray_status = getattr(self, "_set_tray_status", None)
+        if callable(set_tray_status):
+            set_tray_status(
+                strings.TRAY_STATUS_DETACHED,
+                QStyle.StandardPixmap.SP_MessageBoxCritical,
+            )
         self.refresh_folders_action.setEnabled(False)
         storage_detach_action = getattr(self, "storage_detach_action", None)
         if storage_detach_action is not None:
@@ -1328,7 +1458,13 @@ class MainWindow(QMainWindow):
             self._storage_detached_banner.setVisible(False)
             self._storage_status_label.setText(strings.STATUS_STORAGE_CONNECTED)
             self.sync_action.setEnabled(self._sync_token is None)
+            if self._tray_sync_action is not None:
+                self._tray_sync_action.setEnabled(self._sync_token is None)
             self.refresh_folders_action.setEnabled(self._folder_refresh_token is None)
+            self._set_tray_status(
+                strings.TRAY_STATUS_WAITING,
+                QStyle.StandardPixmap.SP_ComputerIcon,
+            )
             self.storage_detach_action.setEnabled(self._on_storage_detach is not None)
 
     def _show_settings(self) -> None:
@@ -1351,6 +1487,7 @@ class MainWindow(QMainWindow):
         )
         self.detail_view.set_block_remote_images(settings.block_remote_images)
         self.message_table_model.set_trash_grace_days(settings.trash_grace_days)
+        self._configure_sync_timer(settings)
         root_uuid = getattr(self.context, "root_uuid", None)
         raw_profile = (
             settings.storage_profiles.get(root_uuid) if isinstance(root_uuid, str) else None
