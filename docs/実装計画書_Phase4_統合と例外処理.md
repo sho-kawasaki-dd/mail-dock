@@ -525,15 +525,15 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **H-2. 状態機械・切断検知のテスト（*Qt非依存・通常CI*）**
 
-- [ ] `tests/unit/test_storage_state.py`: 開発計画書 5.7.1-3 の遷移表を網羅する
-    - [ ] `ATTACHED` → I/Oエラー → `DEGRADED` → リプローブ成功 → `ATTACHED`
+- [x] `tests/unit/test_storage_state.py`: 開発計画書 5.7.1-3 の状態機械遷移を検証する
+    - [x] `ATTACHED` → I/Oエラー → `DEGRADED` → リプローブ成功 → `ATTACHED`
     - [ ] `DEGRADED` → リプローブ3回失敗 → `DETACHED`
-    - [ ] `DEGRADED` → `DEVICE_REMOVED` → `DETACHED`（リプローブを待たない）
-    - [ ] `ATTACHED` → `USER_DETACH` → `DETACHED_BY_USER`
-    - [ ] `DETACHED` → `DEVICE_ARRIVED` → `RECONNECTING` → `IDENTITY_OK` → `VERIFYING` → `VERIFY_OK` → `ATTACHED`
-    - [ ] `VERIFYING` → `VERIFY_FAILED` → `DETACHED`
-    - [ ] `RECONNECTING` → `IDENTITY_FOREIGN` → `DETACHED`（`FOREIGN` は書き込み禁止のまま）
-    - [ ] `ATTACHED` 以外で `is_write_allowed()` と `is_remote_delete_allowed()` が偽であること
+    - [x] `DEGRADED` → `DEVICE_REMOVED` → `DETACHED`（リプローブを待たない）
+    - [x] `ATTACHED` → `USER_DETACH` → `DETACHED_BY_USER`
+    - [x] `DETACHED` → `DEVICE_ARRIVED` → `RECONNECTING` → `IDENTITY_OK` → `VERIFYING` → `VERIFY_OK` → `ATTACHED`
+    - [x] `VERIFYING` → `VERIFY_FAILED` → `DETACHED`
+    - [x] `RECONNECTING` → `IDENTITY_FOREIGN` → `DETACHED`（`FOREIGN` は書き込み禁止のまま）
+    - [x] `ATTACHED` 以外で `is_write_allowed()` と `is_remote_delete_allowed()` が偽であること
 - [x] `tests/unit/test_device_watcher.py`: `dbcv_unitmask` からのドライブレター復元（純粋関数）
 - [x] 同テストへWindows専用ケースを追加し、`ctypes` 構造体のABIレイアウト、ネイティブメッセージ解析、Qtへのイベントフィルタ登録・解除を `windows-latest` 上で検証する（非Windowsではskip）
 - [ ] `tests/unit/test_detach.py`（既存を拡張）: リプローブ回数と間隔の制御
@@ -684,7 +684,7 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 - [ ] V-3. **`metadata.db` を削除し、EML＋永続マニフェストだけからDBを再構築**した結果が、再構築前と**意味的に一致**する（accounts/foldersの自然キー・表示名・UIDVALIDITY、messagesの自然キー・EMLパス・ハッシュ・状態・日時・サイズ、message_contentsとFTSの検索結果、purge墓標とremote_state、audit_logが一致する。`is_sync_target` は再構築後すべて0とする運用設定として比較対象から除外する。レビュー修正案 3.2）。再構築が途中失敗しても既存DBが壊れない
 - [ ] V-4. purge が「`purge_intent` fsync → 共有参照ゼロ確認 → EML削除 → `purged` fsync → FTS除去 → 墓標化 → 監査記録」の順序で実行され、他レコードが参照するEMLを削除しない。各段階での途中停止後も、再起動・再実行で墓標化が完了する（冪等性。レビュー修正案 3.3）
 - [ ] V-5. サーバー削除が3つの事前条件を満たさない対象を自動除外し、`ATTACHED` 以外では入口で拒否され、件数手入力を経ないと実行できない。応答前の通信断は `uncertain` として保持され、再接続後の照合を経てから `deleted` へ確定する。UID EXPUNGEが保証できないサーバーでは `expunge` を実行しない（レビュー修正案 3.4）
-- [ ] V-6. 状態機械が開発計画書 5.7.1-3 の遷移表どおりに動き、`ATTACHED` 以外で `is_write_allowed()` と `is_remote_delete_allowed()` が偽になる（Qt非依存の単体テスト）
+- [x] V-6. 状態機械が開発計画書 5.7.1-3 の遷移表どおりに動き、`ATTACHED` 以外で `is_write_allowed()` と `is_remote_delete_allowed()` が偽になる（Qt非依存の単体テスト）
 - [ ] V-7. `FOREIGN`（別デバイスが同じドライブレターを取得）検出時に即座に全書き込みが禁止される
 - [ ] V-8. スタール `.lock`（ロック実体は取得できるが `heartbeat_at` が古い）で起動でき、範囲限定検証が自動実行される
 - [ ] V-9. 「ストレージを安全に取り外す」がワーカー停止からロック解放までを規定の順序で実行し、実行後にWindowsがドライブの取り外しを拒否しない（手動確認）
