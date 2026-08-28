@@ -36,6 +36,13 @@ from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.ports import BaseCredentialStore, BaseIntegrityStorage
 from mail_dock.domain.repository import MessageRecord
 from mail_dock.domain.search import MessageFilter, MessageSummary, PageCursor, SearchPage
+from mail_dock.infrastructure.database.backup import (
+    LAST_BACKUP_STATE_KEY,
+    backup_database,
+    backup_is_due,
+    backup_timestamp,
+    local_backup_is_allowed,
+)
 from mail_dock.infrastructure.database.connection import (
     ConnectionManager,
     checkpoint_truncate,
@@ -46,7 +53,11 @@ from mail_dock.infrastructure.database.message_repository import SqliteMessageRe
 from mail_dock.infrastructure.database.migrator import migrate
 from mail_dock.infrastructure.database.search_repository import SqliteSearchRepository
 from mail_dock.infrastructure.fetchers.onamae_imap import OnamaeImapFetcher
-from mail_dock.infrastructure.logging_config import set_storage_log_target, setup_logging
+from mail_dock.infrastructure.logging_config import (
+    purge_old_logs,
+    set_storage_log_target,
+    setup_logging,
+)
 from mail_dock.infrastructure.security.keyring_store import (
     KeyringBackendStatus,
     KeyringCredentialStore,
@@ -460,6 +471,11 @@ class StorageSession:
                 LOGGER.info("Database migration complete at schema version %d", version)
                 self.previous_clean_shutdown = self._read_clean_shutdown(connection)
                 self._write_clean_shutdown(connection, False)
+                self._backup_if_due(connection)
+            if not self.readonly:
+                removed_logs = purge_old_logs(root / "logs", self.settings.sync_log_retention_days)
+                if removed_logs:
+                    LOGGER.info("Removed %d expired synchronization logs", removed_logs)
             self._entered = True
             return self
         except BaseException:
@@ -471,8 +487,11 @@ class StorageSession:
         try:
             if exc_type is None:
                 self._save_settings()
-                if not self.readonly and not self._clean_shutdown_written:
-                    self._write_clean_shutdown(self.connection_manager.get_connection(), True)
+                if not self.readonly:
+                    connection = self.connection_manager.get_connection()
+                    self._backup_if_due(connection, force=True)
+                    if not self._clean_shutdown_written:
+                        self._write_clean_shutdown(connection, True)
         finally:
             self._cleanup()
 
@@ -510,6 +529,53 @@ class StorageSession:
             connection.commit()
         except sqlite3.Error as error:
             raise DatabaseError("Could not write clean shutdown state") from error
+
+    def _backup_if_due(self, connection: sqlite3.Connection, *, force: bool = False) -> None:
+        """Create operational backups while the session still owns its connection."""
+
+        if self._root is None or self.readonly:
+            return
+        last_backup_at = self._read_app_state(connection, LAST_BACKUP_STATE_KEY)
+        if not force and not backup_is_due(last_backup_at):
+            return
+
+        try:
+            backup_database(connection, self._root / "metadata.db.bak")
+            if self.settings.db_backup_to_local_disk:
+                if not local_backup_is_allowed(self.encryption_declaration):
+                    LOGGER.warning(
+                        "Skipping local database backup because the destination encryption "
+                        "is weaker or unknown for an encrypted storage root"
+                    )
+                else:
+                    backup_database(connection, config.config_dir() / "metadata.db.bak")
+            self._write_app_state(connection, LAST_BACKUP_STATE_KEY, backup_timestamp())
+            LOGGER.info("Database backup completed")
+        except DatabaseError:
+            LOGGER.exception("Database backup failed")
+
+    @staticmethod
+    def _read_app_state(connection: sqlite3.Connection, key: str) -> str | None:
+        try:
+            row = connection.execute(
+                "SELECT value FROM app_state WHERE key = ?",
+                (key,),
+            ).fetchone()
+        except sqlite3.Error as error:
+            raise DatabaseError(f"Could not read application state: {key}") from error
+        return None if row is None else row[0]
+
+    @staticmethod
+    def _write_app_state(connection: sqlite3.Connection, key: str, value: str) -> None:
+        try:
+            connection.execute(
+                "INSERT INTO app_state (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
+            connection.commit()
+        except sqlite3.Error as error:
+            raise DatabaseError(f"Could not write application state: {key}") from error
 
     def checkpoint_for_detach(self) -> None:
         """Flush the WAL and close this thread's connection before root release."""

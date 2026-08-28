@@ -125,13 +125,16 @@ def set_storage_log_target(path: Path | None) -> None:
 
 
 def purge_old_logs(log_dir: Path, days: int = 90) -> int:
-    """Delete log files older than ``days`` and return the number removed."""
+    """Delete old synchronization logs without touching application logs."""
     if days < 0:
         raise ValueError("days must be non-negative")
 
     cutoff = time.time() - days * 24 * 60 * 60
     removed = 0
-    for path in log_dir.glob("*.log*"):
+    # ``audit_log`` is stored in SQLite and is intentionally permanent. The
+    # application log is also owned by the local configuration directory, so
+    # retention applies only to storage-side ``sync-*.log`` files.
+    for path in log_dir.glob("sync-*.log"):
         if not path.is_file() or path.stat().st_mtime >= cutoff:
             continue
         path.unlink()
