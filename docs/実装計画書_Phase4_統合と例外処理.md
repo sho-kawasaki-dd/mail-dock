@@ -540,17 +540,17 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **H-3. マニフェストと再構築のテスト**
 
-- [ ] `tests/unit/test_manifest.py`（既存を拡張）
-    - [ ] `checkpoint` / `account_snapshot` / `folder_snapshot` / `purge_intent` / `purged` / `remote_delete_intent` / `remote_delete_completed` / `remote_delete_uncertain` のスキーマ検証
-    - [ ] 最後の `checkpoint` 以降のイベント列挙が正しいこと
-    - [ ] 末尾以外のCRC32不一致が `ManifestCorruptError` になり、自動修復されないこと
-- [ ] `tests/integration/test_reindex.py`
-    - [ ] 同期後に `metadata.db` を削除し、EML＋マニフェストだけから再構築した結果が**再構築前と一致**すること（messages / message_contents / FTS / folders）
-    - [ ] purge済みメッセージの墓標レコードと `local_state='purged'` が復元されること
-    - [ ] `remote_delete_completed` / `delete_detected` / `moved` から `remote_state` が復元されること。未確定の `remote_delete_uncertain` は `uncertain` のまま復元されること
-    - [ ] 再構築された `folders.is_sync_target` がすべて 0 であること
-    - [ ] 再構築が途中で失敗しても既存 `metadata.db` が壊れないこと
-    - [ ] `manifests/pst/` が存在しても警告ログを残してスキップされること
+- [x] `tests/unit/test_manifest.py`（既存を拡張）
+    - [x] `checkpoint` / `account_snapshot` / `folder_snapshot` / `purge_intent` / `purged` / `remote_delete_intent` / `remote_delete_completed` / `remote_delete_uncertain` のスキーマ検証
+    - [x] 最後の `checkpoint` 以降のイベント列挙が正しいこと
+    - [x] 末尾以外のCRC32不一致が `ManifestCorruptError` になり、自動修復されないこと
+- [x] `tests/integration/test_reindex.py`
+    - [x] 同期後に `metadata.db` を削除し、EML＋マニフェストだけから再構築した結果が**再構築前と一致**すること（messages / message_contents / FTS / folders）
+    - [x] purge済みメッセージの墓標レコードと `local_state='purged'` が復元されること
+    - [x] `remote_delete_completed` / `delete_detected` / `moved` から `remote_state` が復元されること。未確定の `remote_delete_uncertain` は `uncertain` のまま復元されること
+    - [x] 再構築された `folders.is_sync_target` がすべて 0 であること
+    - [x] 再構築が途中で失敗しても既存 `metadata.db` が壊れないこと
+    - [x] `manifests/pst/` が存在しても警告ログを残してスキップされること
 
 #### **H-4. 検証ユースケースのテスト**
 

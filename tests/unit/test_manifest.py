@@ -205,11 +205,12 @@ def test_middle_corruption_is_not_repaired(tmp_path: Path) -> None:
         writer.flush_and_sync()
     source = tmp_path / "manifests/imap/account/events-202607.jsonl"
     lines = source.read_bytes().splitlines(keepends=True)
-    lines[0] = lines[0].replace(b"CRC32:", b"CRC33:")
+    lines[0] = lines[0].replace(b'"uid":7', b'"uid":9')
     path.write_bytes(b"".join(lines))
 
     with pytest.raises(ManifestCorruptError):
         list(read_events(path))
+    assert path.read_bytes() == b"".join(lines)
 
 
 def test_fetch_skipped_cannot_point_to_an_eml(tmp_path: Path) -> None:
@@ -295,6 +296,54 @@ def test_manifest_accepts_phase_four_event_schemas(
         writer.append(event)
 
 
+def test_phase_four_events_require_all_schema_fields(tmp_path: Path) -> None:
+    cases = (
+        (
+            {
+                "event": "checkpoint",
+                "account_id": "account",
+                "timestamp": "2026-07-30T12:34:56Z",
+                "sequence": 1,
+                "batch_id": "batch-1",
+            },
+            "batch_id",
+        ),
+        (
+            {
+                "event": "account_snapshot",
+                "account_id": "account",
+                "provider_type": "imap",
+                "display_name": "Example",
+                "host": "imap.example.test",
+                "port": 993,
+                "username": "user@example.test",
+                "timestamp": "2026-07-30T12:34:56Z",
+            },
+            "host",
+        ),
+        (
+            {
+                "event": "folder_snapshot",
+                "account_id": "account",
+                "folder_raw_name": "INBOX",
+                "display_name": "受信箱",
+                "uidvalidity": 42,
+                "delimiter": "/",
+                "timestamp": "2026-07-30T12:34:56Z",
+            },
+            "uidvalidity",
+        ),
+        (_purge_event("purge_intent", "2026-07-30T12:34:56Z"), "file_hash"),
+        (_remote_delete_event("remote_delete_intent", "2026-07-30T12:34:56Z"), "mode"),
+    )
+
+    for event, field in cases:
+        malformed = dict(event)
+        del malformed[field]
+        with ManifestWriter(tmp_path, "account") as writer, pytest.raises(ValueError):
+            writer.append(malformed)
+
+
 def test_account_snapshot_rejects_secret_fields(tmp_path: Path) -> None:
     event: dict[str, JSONValue] = {
         "event": "account_snapshot",
@@ -344,6 +393,20 @@ def test_manifest_reads_events_after_last_checkpoint(tmp_path: Path) -> None:
     events = list(read_events_since_checkpoint(tmp_path, "account"))
 
     assert [event["uid"] for event in events] == [8]
+
+
+def test_manifest_reads_only_events_after_the_latest_checkpoint(tmp_path: Path) -> None:
+    with ManifestWriter(tmp_path, "account") as writer:
+        writer.append(_fetch_event("2026-07-31T00:00:00Z", uid=7))
+        writer.checkpoint(1, "batch-1")
+        writer.append(_fetch_event("2026-08-01T00:00:00Z", uid=8))
+        writer.checkpoint(2, "batch-2")
+        writer.append(_fetch_event("2026-08-02T00:00:00Z", uid=9))
+
+    assert [event["uid"] for event in read_events_since_checkpoint(tmp_path, "account")] == [9]
+    checkpoint = read_last_checkpoint(tmp_path, "account")
+    assert checkpoint is not None
+    assert checkpoint["sequence"] == 2
 
 
 def test_manifest_lists_only_incomplete_destructive_intents(tmp_path: Path) -> None:
