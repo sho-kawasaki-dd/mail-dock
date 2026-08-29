@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -832,13 +832,14 @@ def _flag_fetcher(
     *, condstore: bool = False, highest_modseq: int | None = None
 ) -> FlagTrackingFetcher:
     raw = _eml(1)
+    recent = datetime.now(UTC) - timedelta(days=1)
     return FlagTrackingFetcher(
         folders=[RemoteFolder("INBOX", "Inbox", uidvalidity=41)],
         messages={
             "INBOX": [
                 RemoteMessageRef(
                     uid=1,
-                    internal_date=datetime(2026, 7, 30, tzinfo=UTC),
+                    internal_date=recent,
                     size_bytes=len(raw),
                     flags=(r"\Seen",),
                 )
@@ -1028,7 +1029,7 @@ def test_flag_refresh_fetch_error_isolated_from_account_sync() -> None:
 
 
 def test_flag_refresh_limits_window_and_fetches_only_expired_uids() -> None:
-    recent = datetime(2026, 7, 30, tzinfo=UTC)
+    recent = datetime.now(UTC) - timedelta(days=1)
     old = datetime(2020, 1, 1, tzinfo=UTC)
     fetcher = FlagTrackingFetcher(
         folders=[RemoteFolder("INBOX", "Inbox", uidvalidity=41)],
@@ -1082,7 +1083,7 @@ def test_flag_refresh_skips_imap_when_no_uid_has_expired() -> None:
 
 
 def test_condstore_updates_fresh_delta_and_touches_expired_missing_delta() -> None:
-    recent = datetime(2026, 7, 30, tzinfo=UTC)
+    recent = datetime.now(UTC) - timedelta(days=1)
     fetcher = FlagTrackingFetcher(
         folders=[RemoteFolder("INBOX", "Inbox", uidvalidity=41)],
         messages={
@@ -1205,7 +1206,7 @@ def test_flag_refresh_cancellation_keeps_previous_modseq() -> None:
             "INBOX": [
                 RemoteMessageRef(
                     uid=1,
-                    internal_date=datetime(2026, 7, 30, tzinfo=UTC),
+                    internal_date=datetime.now(UTC) - timedelta(days=1),
                     flags=(r"\Seen",),
                 )
             ]
@@ -1247,7 +1248,12 @@ def test_flag_refresh_authentication_error_aborts_account_sync() -> None:
     fetcher = FlagAuthenticationFailureFetcher(
         folders=[RemoteFolder("INBOX", "Inbox", uidvalidity=41)],
         messages={
-            "INBOX": [RemoteMessageRef(uid=1, internal_date=datetime(2026, 7, 30, tzinfo=UTC))]
+            "INBOX": [
+                RemoteMessageRef(
+                    uid=1,
+                    internal_date=datetime.now(UTC) - timedelta(days=1),
+                )
+            ]
         },
         eml_bytes={("INBOX", 1): _eml(1)},
     )
