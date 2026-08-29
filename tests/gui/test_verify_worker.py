@@ -96,20 +96,50 @@ def test_storage_detached_is_forwarded(qtbot: Any) -> None:
         worker.stop()
 
 
+def test_running_operation_can_be_cancelled_with_its_returned_token(qtbot: Any) -> None:
+    started = Event()
+    cancelled = Event()
+    release = Event()
+
+    def blocking_verify(*_args: Any, **kwargs: Any) -> FullVerifyResult:
+        token = cast(Any, kwargs["cancel"])
+        started.set()
+        while True:
+            token.raise_if_cancelled()
+            release.wait(0.01)
+
+    worker = _worker(full_usecase=blocking_verify)
+    worker.cancelled.connect(cancelled.set)
+    worker.start()
+
+    try:
+        token = worker.full_verify()
+        qtbot.waitUntil(started.is_set, timeout=2_000)
+        token.cancel()
+        qtbot.waitUntil(cancelled.is_set, timeout=2_000)
+    finally:
+        release.set()
+        worker.stop()
+
+
 def test_write_operation_checks_exclusive_guard(qtbot: Any) -> None:
     guard_calls: list[str] = []
+    operation_calls: list[str] = []
     worker = VerifyWorker(
         cast(BaseMessageRepository, object()),
         cast(BaseIntegrityStorage, object()),
         cast(Any, lambda: cast(BaseManifestReader, object())),
-        range_verify_usecase=lambda *_args, **_kwargs: RangeVerifyResult(0, (), 0, 0, False),
+        range_verify_usecase=lambda *_args, **_kwargs: (
+            operation_calls.append("usecase") or RangeVerifyResult(0, (), 0, 0, False)
+        ),
         exclusive_write_guard=lambda: guard_calls.append("checked"),
     )
     worker.start()
 
     try:
         worker.range_verify()
-        qtbot.waitUntil(lambda: guard_calls == ["checked"], timeout=2_000)
+        qtbot.waitUntil(lambda: operation_calls == ["usecase"], timeout=2_000)
+        assert guard_calls == ["checked"]
     finally:
         worker.stop()
 

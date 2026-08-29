@@ -554,12 +554,12 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **H-4. 検証ユースケースのテスト**
 
-- [ ] `tests/unit/test_verify.py`（Fake ポートのみ）
-    - [ ] クイック検証がサイズ不一致を検出すること
-    - [ ] 範囲限定検証が checkpoint 以降のみを対象にすること
-    - [ ] ハッシュ不一致のEMLが `tmp/` へ隔離され、`sync_failures` へ記録されること
-    - [ ] フル検証と孤児スキャンが `CancelToken` で中断できること
-- [ ] `tests/gui/test_verify_worker.py`: 進捗の間引き、キャンセル、`storage_detached` の Signal 伝播、DB書き込みが `SyncWorker` 側で行われること
+- [x] `tests/unit/test_verify.py`（Fake ポートのみ）
+    - [x] クイック検証がサイズ不一致を検出すること
+    - [x] 範囲限定検証が checkpoint 以降のみを対象にすること
+    - [x] ハッシュ不一致のEMLが `tmp/` へ隔離され、`sync_failures` へ記録されること
+    - [x] フル検証と孤児スキャンが `CancelToken` で中断できること
+- [x] `tests/gui/test_verify_worker.py`: 進捗の間引き、キャンセル、`storage_detached` の Signal 伝播、DB書き込みが `SyncWorker` 側で行われること
 
 #### **H-5. purge・削除のテスト**
 

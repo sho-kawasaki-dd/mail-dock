@@ -54,6 +54,17 @@ class MemoryIntegrityStorage(BaseIntegrityStorage):
         self.files.pop(relative_path, None)
 
 
+class CancellingIntegrityStorage(MemoryIntegrityStorage):
+    def __init__(self, files: Mapping[str, bytes], token: CancelToken) -> None:
+        super().__init__(files)
+        self.token = token
+
+    def iter_chunks(self, relative_path: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
+        for chunk in super().iter_chunks(relative_path, chunk_size):
+            self.token.cancel()
+            yield chunk
+
+
 class MemoryManifestReader(BaseManifestReader):
     def __init__(self, events: list[Mapping[str, JSONValue]]) -> None:
         self.events = events
@@ -225,6 +236,31 @@ def test_orphan_scan_can_be_cancelled_before_physical_actions() -> None:
 
     assert result.cancelled
     assert result.checked_count == 0
+
+
+def test_full_verify_can_be_cancelled_at_a_chunk_boundary() -> None:
+    token = CancelToken()
+    storage = CancellingIntegrityStorage({"eml/message.eml": b"message"}, token)
+
+    result = full_verify(InMemoryMessageRepository(), storage, cancel=token)
+
+    assert result.cancelled
+    assert result.checked_count == 1
+    assert result.issues == ()
+
+
+def test_orphan_scan_can_be_cancelled_during_hashing() -> None:
+    token = CancelToken()
+    path = "eml/orphan.eml"
+    storage = CancellingIntegrityStorage({path: b"orphan"}, token)
+
+    result = orphan_scan(InMemoryMessageRepository(), storage, cancel=token)
+
+    assert result.cancelled
+    assert result.checked_count == 1
+    assert result.registerable == ()
+    assert result.quarantined_paths == ()
+    assert storage.quarantined == []
 
 
 def test_verify_manifest_repairs_only_a_malformed_tail(tmp_path: Path) -> None:
