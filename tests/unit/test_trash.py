@@ -307,3 +307,86 @@ def test_recover_incomplete_purge_resumes_after_existing_intent() -> None:
     assert [event["event"] for event in manifest.events] == ["purge_intent", "purged"]
     assert repo.messages[message_id]["local_state"] == "purged"
     assert "message.eml" not in storage.files
+
+
+def test_recover_incomplete_purge_finishes_when_eml_was_already_deleted() -> None:
+    """A crash right after the physical delete leaves no file but no ``purged`` event."""
+    repo = InMemoryMessageRepository()
+    message_id = _message(repo, uid=1, path="message.eml", raw=b"message", local_state="trashed")
+    timestamp = "2026-08-27T00:00:00+00:00"
+    manifest = MemoryManifest(
+        [
+            {
+                "event": "purge_intent",
+                "account_id": "account",
+                "source_item_key": "10:1",
+                "relative_path": "message.eml",
+                "file_hash": hashlib.sha256(b"message").hexdigest(),
+                "timestamp": timestamp,
+                "shared_reference_count": 0,
+                "physical_delete": True,
+            }
+        ]
+    )
+    storage = MemoryPurgeStorage({})  # file already gone before the crash
+
+    recover_incomplete_purges(repo, storage, manifest, storage_state=AttachedState())
+
+    assert "delete:message.eml" not in storage.calls
+    assert [event["event"] for event in manifest.events] == ["purge_intent", "purged"]
+    assert repo.messages[message_id]["local_state"] == "purged"
+    assert message_id not in repo.contents
+
+
+def test_recover_incomplete_purge_finishes_database_update_when_purged_already_written() -> None:
+    """A crash after the ``purged`` fsync but before the DB commit must not re-touch storage."""
+    repo = InMemoryMessageRepository()
+    message_id = _message(repo, uid=1, path="message.eml", raw=b"message", local_state="trashed")
+    timestamp = "2026-08-27T00:00:00+00:00"
+    intent_and_completion: list[Mapping[str, JSONValue]] = [
+        {
+            "event": "purge_intent",
+            "account_id": "account",
+            "source_item_key": "10:1",
+            "relative_path": "message.eml",
+            "file_hash": hashlib.sha256(b"message").hexdigest(),
+            "timestamp": timestamp,
+            "shared_reference_count": 0,
+            "physical_delete": True,
+        },
+        {
+            "event": "purged",
+            "account_id": "account",
+            "source_item_key": "10:1",
+            "relative_path": "message.eml",
+            "file_hash": hashlib.sha256(b"message").hexdigest(),
+            "timestamp": timestamp,
+            "shared_reference_count": 0,
+            "physical_delete": True,
+        },
+    ]
+    manifest = MemoryManifest(intent_and_completion)
+    storage = MemoryPurgeStorage({"message.eml": b"message"})
+
+    recover_incomplete_purges(repo, storage, manifest, storage_state=AttachedState())
+
+    assert storage.calls == []  # already durably deleted; recovery must only finish the DB write
+    assert repo.messages[message_id]["local_state"] == "purged"
+    assert message_id not in repo.contents
+    assert len(repo.audit_log) == 1
+
+
+def test_purge_is_idempotent_when_run_twice_on_the_same_message() -> None:
+    repo = InMemoryMessageRepository()
+    message_id = _message(repo, uid=1, path="message.eml", raw=b"message", local_state="trashed")
+    storage = MemoryPurgeStorage({"message.eml": b"message"})
+    manifest = MemoryManifest()
+
+    first = purge(repo, storage, manifest, message_ids=[message_id], storage_state=AttachedState())
+    second = purge(repo, storage, manifest, message_ids=[message_id], storage_state=AttachedState())
+
+    assert first.purged_ids == (message_id,)
+    assert second.purged_ids == ()
+    assert second.skipped_ids == (message_id,)
+    assert len(repo.audit_log) == 1
+    assert [event["event"] for event in manifest.events] == ["purge_intent", "purged"]

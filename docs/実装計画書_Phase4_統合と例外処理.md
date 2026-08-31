@@ -563,31 +563,31 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **H-5. purge・削除のテスト**
 
-- [ ] `tests/unit/test_trash.py`
-    - [ ] ゴミ箱移動でEMLが削除されないこと
-    - [ ] 復元で `active` に戻ること
-    - [ ] purge の順序（`purge_intent` fsync → EML削除 → `purged` fsync → DB更新）が守られること
-    - [ ] **同じ `relative_path` を参照する非purgedレコードがある場合、実ファイルが削除されないこと**
-    - [ ] 最後の参照が消える場合だけ実ファイルが削除されること
-    - [ ] 墓標レコードが残り、`message_contents` の削除でFTSからも消えること
-    - [ ] `purge_mode` の3値それぞれの挙動
-    - [ ] 書き込み不可状態（`ATTACHED` 以外）で purge が拒否されること
-    - [ ] `purge_intent` 追記後・EML削除後・`purged` 追記後・DB更新中のそれぞれで中断し、再起動後に `recover_incomplete_purges()` で墓標化が完了すること（レビュー修正案 3.3）
-    - [ ] purge を同じ対象へ複数回実行しても、EMLや監査ログが不正に二重処理されないこと（冪等性）
-- [ ] `tests/unit/test_delete_remote.py`
-    - [ ] 3つの事前条件のいずれかが欠けた対象が**自動除外**され、除外理由が返ること
-    - [ ] `ATTACHED` 以外で入口拒否されること
-    - [ ] `delete_batch_limit` 超過が拒否されること
-    - [ ] 既定が MOVE であり、`expunge` が明示指定時のみ実行されること
-    - [ ] ドライラン後にEMLが差し替えられた場合、実行直前の再検証で拒否されること
-    - [ ] マニフェスト追記 → `audit_log` → `remote_state` 更新の順序が守られること
-    - [ ] ゴミ箱フォルダ未特定時に削除が実行できないこと
-    - [ ] 応答前の通信断が `remote_delete_uncertain` として記録され、その場では `deleted` と表示されないこと
-    - [ ] 再接続後の照合で `remote_delete_uncertain` が `remote_delete_completed` または取り消しへ確定すること
-    - [ ] UID EXPUNGE非対応サーバーで `expunge` が拒否されること（レビュー修正案 3.4）
-    - [ ] 上記の不確定状態・UID EXPUNGE拒否の分岐はFakeフェッチャー（応答読み取り時の例外注入・`list_existing_uids()`のスクリプト）による決定的な単体テストとして検証し、ソケット切断の実際の再現は狙わない（レビュー修正案 9.3）
-- [ ] `tests/integration/test_remote_delete.py`（Docker/Dovecot）: SPECIAL-USE の `\Trash` 検出、MOVE、`EXPUNGE`
-    - [ ] `remote_delete_uncertain` をテストが直接投入し、別の生 IMAP 接続でサーバー側を先に削除済み/未削除の両方に作り分けてから `reconcile_uncertain_deletes()` を実行し、実サーバーの状態と正しく照合できることを検証する（既存 `test_delete_detection.py` と同じ手法。レビュー修正案 9.3）
+- [x] `tests/unit/test_trash.py`
+    - [x] ゴミ箱移動でEMLが削除されないこと
+    - [x] 復元で `active` に戻ること
+    - [x] purge の順序（`purge_intent` fsync → EML削除 → `purged` fsync → DB更新）が守られること
+    - [x] **同じ `relative_path` を参照する非purgedレコードがある場合、実ファイルが削除されないこと**
+    - [x] 最後の参照が消える場合だけ実ファイルが削除されること
+    - [x] 墓標レコードが残り、`message_contents` の削除でFTSからも消えること
+    - [x] `purge_mode` の3値それぞれの挙動
+    - [x] 書き込み不可状態（`ATTACHED` 以外）で purge が拒否されること
+    - [x] `purge_intent` 追記後・EML削除後・`purged` 追記後・DB更新中のそれぞれで中断し、再起動後に `recover_incomplete_purges()` で墓標化が完了すること（レビュー修正案 3.3）
+    - [x] purge を同じ対象へ複数回実行しても、EMLや監査ログが不正に二重処理されないこと（冪等性）
+- [x] `tests/unit/test_delete_remote.py`
+    - [x] 3つの事前条件のいずれかが欠けた対象が**自動除外**され、除外理由が返ること
+    - [x] `ATTACHED` 以外で入口拒否されること
+    - [x] `delete_batch_limit` 超過が拒否されること
+    - [x] 既定が MOVE であり、`expunge` が明示指定時のみ実行されること
+    - [x] ドライラン後にEMLが差し替えられた場合、実行直前の再検証で拒否されること
+    - [x] マニフェスト追記 → `audit_log` → `remote_state` 更新の順序が守られること
+    - [x] ゴミ箱フォルダ未特定時に削除が実行できないこと
+    - [x] 応答前の通信断が `remote_delete_uncertain` として記録され、その場では `deleted` と表示されないこと
+    - [x] 再接続後の照合で `remote_delete_uncertain` が `remote_delete_completed` または取り消しへ確定すること
+    - [x] UID EXPUNGE非対応サーバーで `expunge` が拒否されること（レビュー修正案 3.4）
+    - [x] 上記の不確定状態・UID EXPUNGE拒否の分岐はFakeフェッチャー（応答読み取り時の例外注入・`list_existing_uids()`のスクリプト）による決定的な単体テストとして検証し、ソケット切断の実際の再現は狙わない（レビュー修正案 9.3）
+- [x] `tests/integration/test_remote_delete.py`（Docker/Dovecot）: SPECIAL-USE の `\Trash` 検出、MOVE、`EXPUNGE`
+    - [x] `remote_delete_uncertain` をテストが直接投入し、別の生 IMAP 接続でサーバー側を先に削除済み/未削除の両方に作り分けてから `reconcile_uncertain_deletes()` を実行し、実サーバーの状態と正しく照合できることを検証する（既存 `test_delete_detection.py` と同じ手法。レビュー修正案 9.3）
 
 #### **H-6. エクスポート・運用機能のテスト**
 

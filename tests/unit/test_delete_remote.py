@@ -115,13 +115,17 @@ class MemoryManifest(BaseManifestWriter, BaseManifestReader):
 
 
 class DeleteFetcher(FakeFetcher):
-    def __init__(self, *, transient: bool = False, uidplus: bool = False) -> None:
-        super().__init__(
-            folders=(
-                RemoteFolder("INBOX", "INBOX", 42),
-                RemoteFolder("Trash", "Trash", 7, frozenset({r"\Trash"})),
-            )
-        )
+    def __init__(
+        self,
+        *,
+        transient: bool = False,
+        uidplus: bool = False,
+        include_trash: bool = True,
+    ) -> None:
+        folders = [RemoteFolder("INBOX", "INBOX", 42)]
+        if include_trash:
+            folders.append(RemoteFolder("Trash", "Trash", 7, frozenset({r"\Trash"})))
+        super().__init__(folders=folders)
         self.transient = transient
         self.uidplus = uidplus
         self.calls: list[tuple[str, int, str]] = []
@@ -172,22 +176,25 @@ def test_dry_run_excludes_invalid_eml_and_missing_contents() -> None:
     repository.messages[2]["file_hash"] = "0" * 64
     _record(repository, message_id=3, raw=b"no contents")
     del repository.contents[3]
+    _record(repository, message_id=4, raw=b"missing file")
     storage = MemoryStorage(
         {
             valid_path: valid_raw,
             "eml/account/2.eml": b"other",
             "eml/account/3.eml": b"no contents",
+            # message 4's EML is intentionally absent (precondition 1: file must exist)
         }
     )
     state = StorageStateMachine(StorageState.ATTACHED)
 
-    result = dry_run(repository, storage, message_ids=(1, 2, 3), storage_state=state)
+    result = dry_run(repository, storage, message_ids=(1, 2, 3, 4), storage_state=state)
 
     assert [candidate.message_id for candidate in result.candidates] == [1]
     assert result.total_size_bytes == len(valid_raw)
     assert {item.message_id: item.reason for item in result.exclusions} == {
         2: "hash_mismatch",
         3: "message_contents_missing",
+        4: "eml_missing",
     }
 
 
@@ -282,6 +289,152 @@ def test_transient_delete_is_recorded_as_uncertain_without_marking_deleted() -> 
     ]
 
 
+def test_execute_rejects_a_batch_larger_than_the_configured_limit() -> None:
+    repository = InMemoryMessageRepository()
+    raw = b"message"
+    path_one = _record(repository, message_id=1, raw=raw)
+    path_two = _record(repository, message_id=2, raw=raw)
+    storage = MemoryStorage({path_one: raw, path_two: raw})
+    state = StorageStateMachine(StorageState.ATTACHED)
+    plan = dry_run(repository, storage, message_ids=(1, 2), storage_state=state)
+    manifest = MemoryManifest()
+    fetcher = DeleteFetcher()
+
+    with pytest.raises(ValueError, match="batch limit"):
+        execute(
+            fetcher,
+            repository,
+            storage,
+            manifest,
+            plan=plan,
+            storage_state=state,
+            delete_batch_limit=1,
+        )
+
+    assert fetcher.calls == []
+    assert manifest.events == []
+
+
+def test_execute_defaults_to_trash_mode_when_unspecified() -> None:
+    repository = InMemoryMessageRepository()
+    raw = b"message"
+    path = _record(repository, message_id=1, raw=raw)
+    storage = MemoryStorage({path: raw})
+    state = StorageStateMachine(StorageState.ATTACHED)
+    plan = dry_run(repository, storage, message_ids=(1,), storage_state=state)
+    manifest = MemoryManifest()
+    fetcher = DeleteFetcher()
+    fetcher.add_message("INBOX", 1, raw)
+
+    result = execute(fetcher, repository, storage, manifest, plan=plan, storage_state=state)
+
+    assert result.completed_ids == (1,)
+    assert fetcher.calls == [("INBOX", 1, "trash")]
+
+
+def test_execute_rejects_a_plan_whose_eml_was_replaced_after_dry_run() -> None:
+    repository = InMemoryMessageRepository()
+    raw = b"message"
+    path = _record(repository, message_id=1, raw=raw)
+    storage = MemoryStorage({path: raw})
+    state = StorageStateMachine(StorageState.ATTACHED)
+    plan = dry_run(repository, storage, message_ids=(1,), storage_state=state)
+    manifest = MemoryManifest()
+    fetcher = DeleteFetcher()
+    fetcher.add_message("INBOX", 1, raw)
+
+    # The on-disk EML changed after the dry run without the DB record being updated
+    # (e.g. external corruption); the pre-execution re-check must catch this.
+    storage.files[path] = b"tampered"
+
+    result = execute(
+        fetcher,
+        repository,
+        storage,
+        manifest,
+        plan=plan,
+        storage_state=state,
+    )
+
+    assert result.completed_ids == ()
+    assert result.skipped_ids == (1,)
+    assert dict(result.errors)[1] == "hash_mismatch"
+    assert fetcher.calls == []
+    assert manifest.events == []
+    assert repository.messages[1]["remote_state"] == "present"
+
+
+def test_execute_rejects_trash_mode_when_the_trash_folder_is_unresolved() -> None:
+    repository = InMemoryMessageRepository()
+    raw = b"message"
+    path = _record(repository, message_id=1, raw=raw)
+    storage = MemoryStorage({path: raw})
+    state = StorageStateMachine(StorageState.ATTACHED)
+    plan = dry_run(repository, storage, message_ids=(1,), storage_state=state)
+    manifest = MemoryManifest()
+    fetcher = DeleteFetcher(include_trash=False)
+
+    with pytest.raises(PermanentError, match="trash folder"):
+        execute(
+            fetcher,
+            repository,
+            storage,
+            manifest,
+            plan=plan,
+            mode="trash",
+            storage_state=state,
+        )
+
+    assert fetcher.calls == []
+    assert manifest.events == []
+
+
+def test_execute_writes_the_manifest_before_updating_the_database() -> None:
+    trace: list[str] = []
+
+    class TracingManifest(MemoryManifest):
+        def append(self, event: Mapping[str, JSONValue]) -> None:
+            trace.append(f"manifest:{event['event']}")
+            super().append(event)
+
+        def flush_and_sync(self) -> None:
+            trace.append("manifest:fsync")
+            super().flush_and_sync()
+
+    class TracingRepository(InMemoryMessageRepository):
+        def record_audit(self, entry: Any) -> None:
+            trace.append("repo:audit")
+            super().record_audit(entry)
+
+        def update_remote_state(
+            self, message_id: Any, state: str, moved_to_folder_id: Any = None
+        ) -> None:
+            trace.append("repo:remote_state")
+            super().update_remote_state(message_id, state, moved_to_folder_id)
+
+    repository = TracingRepository()
+    raw = b"message"
+    path = _record(repository, message_id=1, raw=raw)
+    storage = MemoryStorage({path: raw})
+    state = StorageStateMachine(StorageState.ATTACHED)
+    plan = dry_run(repository, storage, message_ids=(1,), storage_state=state)
+    manifest = TracingManifest()
+    fetcher = DeleteFetcher()
+    fetcher.add_message("INBOX", 1, raw)
+
+    execute(fetcher, repository, storage, manifest, plan=plan, storage_state=state)
+
+    assert trace[:4] == [
+        "manifest:remote_delete_intent",
+        "manifest:fsync",
+        "manifest:remote_delete_completed",
+        "manifest:fsync",
+    ]
+    # audit_log and remote_state land in the same DB transaction, committed only
+    # after the manifest has been durably written.
+    assert set(trace[4:]) == {"repo:audit", "repo:remote_state"}
+
+
 def test_reconcile_marks_uncertain_delete_complete_when_uid_is_gone() -> None:
     repository = InMemoryMessageRepository()
     raw = b"message"
@@ -309,3 +462,32 @@ def test_reconcile_marks_uncertain_delete_complete_when_uid_is_gone() -> None:
 
     assert repository.messages[1]["remote_state"] == "deleted"
     assert manifest.events[-1]["event"] == "remote_delete_completed"
+
+
+def test_reconcile_leaves_uncertain_delete_unresolved_when_uid_still_exists() -> None:
+    """If the server still has the UID, the delete never happened; it must stay 'present'."""
+    repository = InMemoryMessageRepository()
+    raw = b"message"
+    path = _record(repository, message_id=1, raw=raw)
+    storage = MemoryStorage({path: raw})
+    state = StorageStateMachine(StorageState.ATTACHED)
+    plan = dry_run(repository, storage, message_ids=(1,), storage_state=state)
+    manifest = MemoryManifest()
+    manifest.append(
+        {
+            "event": "remote_delete_intent",
+            "account_id": plan.candidates[0].account_id,
+            "folder_raw_name": "INBOX",
+            "uid": 1,
+            "uidvalidity": 42,
+            "mode": "trash",
+            "timestamp": "2026-08-27T00:00:00+00:00",
+        }
+    )
+    fetcher = DeleteFetcher()
+    fetcher.add_message("INBOX", 1, raw)  # UID 1 is still on the server; delete was never applied
+
+    reconcile_uncertain_deletes(fetcher, repository, manifest, storage_state=state)
+
+    assert repository.messages[1]["remote_state"] == "present"
+    assert [event["event"] for event in manifest.events] == ["remote_delete_intent"]
