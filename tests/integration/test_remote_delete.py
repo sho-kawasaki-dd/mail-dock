@@ -75,6 +75,13 @@ def _add_message(
                 "source_item_key": f"{uidvalidity}:{uid}",
                 "content_key": f"reconcile:{account_id}:{uidvalidity}:{uid}",
                 "remote_state": "present",
+                # A remote-delete candidate always has a verified local EML on disk
+                # (D-12), so both list_stored_messages()'s `relative_path IS NOT NULL`
+                # filter and _candidate_for_reconciliation()'s size_bytes/file_hash
+                # checks must be satisfied here too.
+                "relative_path": f"eml/reconcile-{uidvalidity}-{uid}.eml",
+                "file_hash": f"{uidvalidity:064x}"[:64],
+                "size_bytes": 42,
             }
         )
     )

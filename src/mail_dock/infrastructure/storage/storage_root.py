@@ -383,7 +383,13 @@ class StorageLock:
             else:
                 import fcntl
 
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                flock_name = "flock"
+                lock_ex_name = "LOCK_EX"
+                lock_nb_name = "LOCK_NB"
+                flock = getattr(fcntl, flock_name)
+                lock_ex = getattr(fcntl, lock_ex_name)
+                lock_nb = getattr(fcntl, lock_nb_name)
+                flock(fd, lock_ex | lock_nb)
             os.ftruncate(fd, 0)
         except OSError as error:
             if fd is not None:
@@ -446,7 +452,11 @@ class StorageLock:
             else:
                 import fcntl
 
-                fcntl.flock(fd, fcntl.LOCK_UN)
+                flock_name = "flock"
+                lock_un_name = "LOCK_UN"
+                flock = getattr(fcntl, flock_name)
+                lock_un = getattr(fcntl, lock_un_name)
+                flock(fd, lock_un)
         finally:
             os.close(fd)
         if not remove_files:

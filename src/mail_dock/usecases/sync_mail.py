@@ -26,6 +26,7 @@ from mail_dock.domain.repository import BaseMessageRepository, MessageContents, 
 from mail_dock.infrastructure.parsing.eml_parser import parse_eml
 from mail_dock.infrastructure.parsing.headers import to_utc_iso8601
 from mail_dock.usecases.retry import with_retry
+from mail_dock.usecases.snapshots import folder_snapshot_event
 
 _LOGGER = logging.getLogger(__name__)
 _BATCH_MESSAGE_LIMIT = 100
@@ -838,6 +839,10 @@ def sync_account(
             repo.begin_batch()
             repo.initialize_sync_cursors(folder_id, current_uidvalidity, max_uid)
             repo.commit_batch()
+            # Record the newly known uidvalidity so reindex can recover it; the
+            # folders table update above has no manifest counterpart otherwise.
+            manifest.append(folder_snapshot_event(account_id, folder))
+            manifest.flush_and_sync()
             last_seen_uid = max_uid
             backfill_next_uid = max_uid
             initial_completed = max_uid == 0

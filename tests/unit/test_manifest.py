@@ -297,7 +297,7 @@ def test_manifest_accepts_phase_four_event_schemas(
 
 
 def test_phase_four_events_require_all_schema_fields(tmp_path: Path) -> None:
-    cases = (
+    cases: tuple[tuple[dict[str, JSONValue], str], ...] = (
         (
             {
                 "event": "checkpoint",

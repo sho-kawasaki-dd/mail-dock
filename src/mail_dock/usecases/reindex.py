@@ -14,6 +14,7 @@ from mail_dock.domain.messages import ParsedMessage
 from mail_dock.domain.ports import BaseEmlStorage, BaseManifestReader, JSONValue
 from mail_dock.domain.repository import BaseMessageRepository, MessageContents, MessageRecord
 from mail_dock.infrastructure.parsing.eml_parser import parse_eml
+from mail_dock.infrastructure.parsing.headers import to_utc_iso8601
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -368,7 +369,7 @@ def reindex(
                 "sender": parsed.sender,
                 "recipient": parsed.recipient,
                 "cc": parsed.cc,
-                "date_sent": parsed.date_sent.isoformat() if parsed.date_sent else None,
+                "date_sent": to_utc_iso8601(parsed.date_sent) if parsed.date_sent else None,
                 "internal_date": event.get("internal_date"),
                 "size_bytes": size_bytes,
                 "has_attachment": int(parsed.has_attachment),

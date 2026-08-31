@@ -179,16 +179,19 @@ def test_missing_root_detaches_only_after_three_reprobe_attempts(
     assert monitor.state is StorageState.DEGRADED
 
     monitor._reprobe()
-    assert monitor.state is StorageState.DEGRADED
+    state_after_first_reprobe = monitor.state
+    assert state_after_first_reprobe is StorageState.DEGRADED
     assert monitor.reprobe_count == 1
 
     monitor._reprobe()
-    assert monitor.state is StorageState.DEGRADED
+    state_after_second_reprobe = monitor.state
+    assert state_after_second_reprobe is StorageState.DEGRADED
     assert monitor.reprobe_count == 2
 
     monitor._reprobe()
 
-    assert monitor.state is StorageState.DETACHED
+    state_after_third_reprobe: StorageState = monitor.state
+    assert state_after_third_reprobe is StorageState.DETACHED
     assert monitor.reprobe_count == 3
 
 

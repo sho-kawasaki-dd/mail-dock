@@ -168,10 +168,10 @@ class DeviceWatcher(QAbstractNativeEventFilter):
 
         change_type = int(native_message.w_param)
         if change_type == DBT_DEVICEQUERYREMOVE:
-            drive_letters = self._read_drive_letters(native_message.l_param) or ()
-            self._signals.device_query_remove.emit(drive_letters)
+            query_drive_letters = self._read_drive_letters(native_message.l_param) or ()
+            self._signals.device_query_remove.emit(query_drive_letters)
             if self._on_query_remove is not None:
-                self._on_query_remove(drive_letters)
+                self._on_query_remove(query_drive_letters)
             return True, 1
         if change_type not in {DBT_DEVICEREMOVECOMPLETE, DBT_DEVICEARRIVAL}:
             return False, 0

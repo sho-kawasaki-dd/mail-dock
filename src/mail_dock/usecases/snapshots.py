@@ -46,7 +46,9 @@ def _account_event(account: MessageRecord) -> dict[str, JSONValue]:
     }
 
 
-def _folder_event(account_id: str, folder: MessageRecord) -> dict[str, JSONValue]:
+def folder_snapshot_event(account_id: str, folder: MessageRecord) -> dict[str, JSONValue]:
+    """Build a `folder_snapshot` event from a folder record's current attributes."""
+
     uidvalidity = folder.get("uidvalidity")
     delimiter = folder.get("delimiter")
     return {
@@ -114,7 +116,7 @@ def record_folder_snapshot(
 ) -> bool:
     """Record a folder's current attributes when they changed."""
 
-    event = _folder_event(account_id, folder)
+    event = folder_snapshot_event(account_id, folder)
     previous = _previous_snapshot(
         reader,
         "folder_snapshot",

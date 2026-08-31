@@ -125,13 +125,16 @@ def test_running_operation_can_be_cancelled_with_its_returned_token(qtbot: Any) 
 def test_write_operation_checks_exclusive_guard(qtbot: Any) -> None:
     guard_calls: list[str] = []
     operation_calls: list[str] = []
+
+    def range_verify_usecase(*_args: Any, **_kwargs: Any) -> RangeVerifyResult:
+        operation_calls.append("usecase")
+        return RangeVerifyResult(0, (), 0, 0, False)
+
     worker = VerifyWorker(
         cast(BaseMessageRepository, object()),
         cast(BaseIntegrityStorage, object()),
         cast(Any, lambda: cast(BaseManifestReader, object())),
-        range_verify_usecase=lambda *_args, **_kwargs: (
-            operation_calls.append("usecase") or RangeVerifyResult(0, (), 0, 0, False)
-        ),
+        range_verify_usecase=range_verify_usecase,
         exclusive_write_guard=lambda: guard_calls.append("checked"),
     )
     worker.start()

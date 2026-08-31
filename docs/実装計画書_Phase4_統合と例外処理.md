@@ -679,23 +679,23 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 各項目の完了を確認したうえで、対応するタスクのチェックボックスを埋めること。
 
-- [ ] V-1. `uv sync` → `uv run ruff format --check .` → `uv run ruff check .` → `uv run mypy` がすべて成功する
-- [ ] V-2. **フォールト注入4点**（fsync前 / `os.replace` 直前 / マニフェスト追記の行途中 / DBコミット中）すべてで、発生する状態が「DB未登録のEML」または「マニフェスト済みでDB未登録の項目」だけであり、「DBにあるが実体が無い」状態が一度も発生しない。DBコミット失敗時に checkpoint が残らないことも合わせて検証する
-- [ ] V-3. **`metadata.db` を削除し、EML＋永続マニフェストだけからDBを再構築**した結果が、再構築前と**意味的に一致**する（accounts/foldersの自然キー・表示名・UIDVALIDITY、messagesの自然キー・EMLパス・ハッシュ・状態・日時・サイズ、message_contentsとFTSの検索結果、purge墓標とremote_state、audit_logが一致する。`is_sync_target` は再構築後すべて0とする運用設定として比較対象から除外する。レビュー修正案 3.2）。再構築が途中失敗しても既存DBが壊れない
-- [ ] V-4. purge が「`purge_intent` fsync → 共有参照ゼロ確認 → EML削除 → `purged` fsync → FTS除去 → 墓標化 → 監査記録」の順序で実行され、他レコードが参照するEMLを削除しない。各段階での途中停止後も、再起動・再実行で墓標化が完了する（冪等性。レビュー修正案 3.3）
-- [ ] V-5. サーバー削除が3つの事前条件を満たさない対象を自動除外し、`ATTACHED` 以外では入口で拒否され、件数手入力を経ないと実行できない。応答前の通信断は `uncertain` として保持され、再接続後の照合を経てから `deleted` へ確定する。UID EXPUNGEが保証できないサーバーでは `expunge` を実行しない（レビュー修正案 3.4）
+- [x] V-1. `uv sync` → `uv run ruff format --check .` → `uv run ruff check .` → `uv run mypy` がすべて成功する
+- [x] V-2. **フォールト注入4点**（fsync前 / `os.replace` 直前 / マニフェスト追記の行途中 / DBコミット中）すべてで、発生する状態が「DB未登録のEML」または「マニフェスト済みでDB未登録の項目」だけであり、「DBにあるが実体が無い」状態が一度も発生しない。DBコミット失敗時に checkpoint が残らないことも合わせて検証する（`tests/unit/test_detach_faults.py`）
+- [x] V-3. **`metadata.db` を削除し、EML＋永続マニフェストだけからDBを再構築**した結果が、再構築前と**意味的に一致**する（accounts/foldersの自然キー・表示名・UIDVALIDITY、messagesの自然キー・EMLパス・ハッシュ・状態・日時・サイズ、message_contentsとFTSの検索結果、purge墓標とremote_state、audit_logが一致する。`is_sync_target` は再構築後すべて0とする運用設定として比較対象から除外する。レビュー修正案 3.2）。再構築が途中失敗しても既存DBが壊れない。**Docker/Dovecotで実際に検証し、2件の実装バグを本検証で修正済み**: ①`usecases/reindex.py` が `date_sent` の再構築時に生の `.isoformat()`（`+00:00`）を使い、同期時の共有フォーマッタ `to_utc_iso8601()`（`Z`終端）と不一致だった点、②`usecases/sync_mail.py` がフォルダの `uidvalidity` を確定させる `initialize_sync_cursors()` 呼び出し時に対応する `folder_snapshot` イベントを一度も書いておらず、reindex後に `folders.uidvalidity` が失われる点（`tests/integration/test_reindex.py`）
+- [x] V-4. purge が「`purge_intent` fsync → 共有参照ゼロ確認 → EML削除 → `purged` fsync → FTS除去 → 墓標化 → 監査記録」の順序で実行され、他レコードが参照するEMLを削除しない。各段階での途中停止後も、再起動・再実行で墓標化が完了する（冪等性。レビュー修正案 3.3。`tests/unit/test_trash.py`）
+- [x] V-5. サーバー削除が3つの事前条件を満たさない対象を自動除外し、`ATTACHED` 以外では入口で拒否され、件数手入力を経ないと実行できない。応答前の通信断は `uncertain` として保持され、再接続後の照合を経てから `deleted` へ確定する。UID EXPUNGEが保証できないサーバーでは `expunge` を実行しない（レビュー修正案 3.4。`tests/unit/test_delete_remote.py` と Docker/Dovecotの `tests/integration/test_remote_delete.py` で検証。後者は本検証中にテストヘルパーの不備（`relative_path`/`file_hash`/`size_bytes` 未設定によりD-12前提条件チェックへ到達しない）を修正した）
 - [x] V-6. 状態機械が開発計画書 5.7.1-3 の遷移表どおりに動き、`ATTACHED` 以外で `is_write_allowed()` と `is_remote_delete_allowed()` が偽になる（Qt非依存の単体テスト）
-- [ ] V-7. `FOREIGN`（別デバイスが同じドライブレターを取得）検出時に即座に全書き込みが禁止される
-- [ ] V-8. スタール `.lock`（ロック実体は取得できるが `heartbeat_at` が古い）で起動でき、範囲限定検証が自動実行される
-- [ ] V-9. 「ストレージを安全に取り外す」がワーカー停止からロック解放までを規定の順序で実行し、実行後にWindowsがドライブの取り外しを拒否しない（手動確認）
-- [ ] V-10. 切断→再接続で、プロセスを終了せずに `RECONNECTING` → `VERIFYING` → `ATTACHED` まで戻り、同期がバッチ境界から再開される
-- [ ] V-11. CLI に削除系サブコマンドが存在せず、`verify --mode` と `reindex` が動作する（静的テストで固定）
-- [ ] V-12. `uv run pytest -m "not docker and not gui"` が全緑になり、`domain` + `usecases` のカバレッジが 80% 以上である
-- [ ] V-13. GUIテストがローカルで全緑になる（`gui` マーカーのオプトイン実行）
-- [ ] V-14. 層の隔離が維持されている（`presentation/views` / `viewmodels` / `models` に `sqlite3` と `mail_dock.infrastructure` が無く、`domain` / `usecases` に PySide6 が無い）
-- [ ] V-15. 非Windows環境で `device_watcher` が import でき no-op として動作し、Linux CIジョブが緑になる
-- [ ] V-16. トレイ常駐で、閉じる→最小化・定期同期の継続・トレイからの終了が動作する。トレイ非対応環境では閉じる＝終了へフォールバックする
-- [ ] V-17. CI（`lint` / `test-windows` / `test-linux`）が3ジョブとも成功し、GUIテストが実行されていない
+- [x] V-7. `FOREIGN`（別デバイスが同じドライブレターを取得）検出時に即座に全書き込みが禁止される（`tests/unit/test_storage_state.py` / `tests/unit/test_storage_root.py` / `tests/gui/test_storage_monitor.py`）
+- [ ] V-8. スタール `.lock`（ロック実体は取得できるが `heartbeat_at` が古い）で起動でき、範囲限定検証が自動実行される。**部分的にのみ確認済み**: 起動できること自体は確認済み（`tests/unit/test_lock.py`）だが、「起動時に範囲限定検証を自動実行する」（F-6/F-13）はまだ配線されていない。現状 `app.py`/`__main__.py` は前回異常終了時にマニフェスト末尾修復（`repair_manifest_tails`）のみを実行し、`range_verify()` はGUIの「ツール」メニューから手動実行するだけで自動起動パスからは一度も呼ばれない。B-5 の未完了チェックボックスと一致する既知のギャップ
+- [ ] V-9. 「ストレージを安全に取り外す」がワーカー停止からロック解放までを規定の順序で実行し、実行後にWindowsがドライブの取り外しを拒否しない（手動確認）。**手順の自動テスト（`tests/gui/test_safe_eject.py`）は緑だが、実デバイスでの確認はD-16により未実施のまま（本書7.1節参照）**
+- [ ] V-10. 切断→再接続で、プロセスを終了せずに `RECONNECTING` → `VERIFYING` → `ATTACHED` まで戻り、同期がバッチ境界から再開される。**未実装であることを確認した**: `domain/storage_state.py` の状態機械はこの遷移を単体テストレベルでサポートするが（`tests/unit/test_storage_state.py`）、`presentation/app.py`/`storage_monitor.py` にはこの遷移を駆動する復帰フロー（B-5の該当チェックボックス）が配線されていない。`StorageMonitor` の `reconnect` コールバックは存在するが `app.py` の `_window_created()` が `StorageMonitor(...)` を生成する際に渡していない
+- [x] V-11. CLI に削除系サブコマンドが存在せず、`verify --mode` と `reindex` が動作する（静的テストで固定。`tests/unit/test_main.py`）
+- [x] V-12. `uv run pytest -m "not docker and not gui"` が全緑になり、`domain` + `usecases` のカバレッジが 80% 以上である（実測: 541 passed / 4 skipped、`domain`+`usecases` カバレッジ 89%）
+- [x] V-13. GUIテストがローカルで全緑になる（`gui` マーカーのオプトイン実行。実測: 124 passed）
+- [x] V-14. 層の隔離が維持されている（`presentation/views` / `viewmodels` / `models` に `sqlite3` と `mail_dock.infrastructure` が無く、`domain` / `usecases` に PySide6 が無い。`tests/unit/test_ports.py`）
+- [x] V-15. 非Windows環境で `device_watcher` が import でき no-op として動作し、Linux CIジョブが緑になる（WSL/Ubuntu上で `uv run pytest -m "not docker and not gui"` を実行し 542 passed / 3 skipped を確認）
+- [x] V-16. トレイ常駐で、閉じる→最小化・定期同期の継続・トレイからの終了が動作する。トレイ非対応環境では閉じる＝終了へフォールバックする（`tests/gui/test_main_window.py`）
+- [ ] V-17. CI（`lint` / `test-windows` / `test-linux`）が3ジョブとも成功し、GUIテストが実行されていない。**実際のGitHub Actions実行では未確認**。同等コマンドをこのセッションでWindows・WSL/Ubuntu上でそれぞれ手動再現し、いずれも成功することは確認した
 
 ---
 

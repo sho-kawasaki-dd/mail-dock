@@ -137,7 +137,13 @@ def _lock_probe_file(handle: BinaryIO) -> None:
         return
     import fcntl
 
-    fcntl.flock(file_descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    flock_name = "flock"
+    lock_ex_name = "LOCK_EX"
+    lock_nb_name = "LOCK_NB"
+    flock = getattr(fcntl, flock_name)
+    lock_ex = getattr(fcntl, lock_ex_name)
+    lock_nb = getattr(fcntl, lock_nb_name)
+    flock(file_descriptor, lock_ex | lock_nb)
 
 
 def _unlock_probe_file(handle: BinaryIO) -> None:

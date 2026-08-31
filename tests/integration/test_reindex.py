@@ -58,7 +58,7 @@ def _cache_snapshot(connection: sqlite3.Connection) -> dict[str, object]:
         "SELECT m.source_item_key FROM messages_fts AS f "
         "JOIN messages AS m ON m.id = f.rowid "
         "WHERE messages_fts MATCH ? ORDER BY m.source_item_key",
-        ("reindex-marker",),
+        ('"reindex-marker"',),
     ).fetchall()
     return {
         "accounts": accounts,
