@@ -598,13 +598,13 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **H-7. GUIテスト（`gui` マーカー／ローカル手動）**
 
-- [ ] `tests/gui/test_storage_monitor.py`: ハートビート、`FOREIGN` 検出時の書き込み禁止、瞬断復帰、`DETACHED` バナー
-- [ ] `tests/gui/test_safe_eject.py`: 「安全な取り外し」の7手順が順序どおり実行されること
-- [ ] `tests/gui/test_trash_view.py`: ゴミ箱ビュー、残り日数、復元、完全削除
-- [ ] `tests/gui/test_delete_remote_dialog.py`: ドライラン表示、**件数手入力**を通らないと実行できないこと、切断中は無効化されること
-- [ ] `tests/gui/test_tray.py`: 閉じる→最小化、トレイメニューからの終了、トレイ非対応環境のフォールバック
+- [x] `tests/gui/test_storage_monitor.py`: ハートビート、`FOREIGN` 検出時の書き込み禁止、瞬断復帰を検証済み。`DETACHED` バナーの表示は `tests/gui/test_storage_detached.py::test_main_window_shows_detached_banner_and_disables_sync` で検証済み（同ファイルは切断シグナルの伝播も担当するため分割してある）
+- [x] `tests/gui/test_safe_eject.py`: 「安全な取り外し」の手順（ワーカー停止→監視停止→checkpoint→本文ビュー破棄→セッション終了→`DETACHED_BY_USER`表示）が順序どおり実行されることを検証済み
+- [x] `tests/gui/test_trash_view.py`: ゴミ箱ノード選択によるフィルタ切替、残り日数列の表示、復元・完全削除アクションの有効化条件と実行を新規に追加・検証済み（従来未カバーだった箇所）
+- [x] `tests/gui/test_delete_remote_dialog.py`: ドライラン表示・CSV保存・**件数手入力**を通らないと実行できないことを検証済み。切断中の無効化は `tests/gui/test_main_window.py::test_remote_delete_requires_attached_storage_trash_and_selection` で検証済み（アクションの有効/無効はダイアログではなく `MainWindow` 側の責務のため）
+- [x] `tests/gui/test_tray.py`: 閉じる→最小化・トレイメニューからの終了・トレイ非対応環境のフォールバックは `tests/gui/test_main_window.py::test_tray_menu_and_close_behavior` / `test_tray_unavailable_falls_back_to_closing` で検証済み（トレイはツリー等と同じく`MainWindow`が直接所有するため独立ファイルを作らずそちらへ集約）
 - [x] `tests/gui/test_audit_log_view.py`: 読み取り専用であること、削除導線が無いこと
-- [ ] `tests/gui/test_verify_dialog.py`: 各モードの起動、進捗、キャンセル
+- [x] `tests/gui/test_verify_dialog.py`: 各モードの起動、進捗、キャンセルは `tests/gui/test_integrity_dialog.py` で検証済み（実装クラス名が `IntegrityDialog` のためファイル名もそれに合わせてある）
 
 #### **H-8. 静的テスト・CI**
 
