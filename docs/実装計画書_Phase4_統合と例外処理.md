@@ -591,8 +591,8 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **H-6. エクスポート・運用機能のテスト**
 
-- [ ] `tests/unit/test_export_mbox.py`: ハッシュ検証、`purged` のスキップ、一時ファイルが残らないこと、`mailbox` で読み戻せること
-- [ ] `tests/unit/test_export_attachments.py`: サニタイズ、インライン除外、連番、ディレクトリ外へ書けないこと
+- [x] `tests/unit/test_export_mbox.py`: ハッシュ検証、`purged` のスキップ、一時ファイルが残らないこと、`mailbox` で読み戻せること
+- [x] `tests/unit/test_export_attachments.py`: サニタイズ、インライン除外、連番、ディレクトリ外へ書けないこと
 - [x] `tests/unit/test_backup.py`: 週1回判定、終了時バックアップ、`db_backup_to_local_disk` の既定OFF
 - [x] `tests/unit/test_log_retention.py`: 90日超の同期ログのみ削除され、`audit_log` が対象外であること
 

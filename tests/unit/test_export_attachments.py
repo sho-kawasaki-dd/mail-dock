@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 from datetime import datetime
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import cast
 
 import pytest
 
+from mail_dock.domain.errors import StorageError
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.messages import MessagePart, RenderedMessage, StoredEml
 from mail_dock.domain.ports import BaseEmlStorage, BaseMessageRenderer
@@ -96,6 +98,44 @@ def test_uses_numbered_names_and_reports_executable_warning(tmp_path: Path) -> N
     assert "executable_extension" in result.warnings
     assert result.executable_paths == result.files
     assert result.warning_details[0].path == result.files[0]
+
+
+def test_sanitizes_path_traversal_attempts_in_attachment_filename(tmp_path: Path) -> None:
+    storage = FakeStorage(b"eml")
+    renderer = FakeRenderer(
+        (MessagePart(None, "text/plain", "../../secret.txt", b"payload", False),)
+    )
+
+    result = export_attachments(storage, renderer, messages=(_message(),), dest_dir=tmp_path)
+
+    assert result.files == (tmp_path / "secret.txt",)
+    assert (tmp_path / "secret.txt").read_bytes() == b"payload"
+    assert not (tmp_path.parent / "secret.txt").exists()
+
+
+def test_rejects_a_filename_that_resolves_outside_the_destination_via_symlink(
+    tmp_path: Path,
+) -> None:
+    dest_dir = tmp_path / "attachments"
+    dest_dir.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    try:
+        (dest_dir / "escape").symlink_to(outside, target_is_directory=True)
+    except OSError as error:
+        if (
+            error.errno in {errno.EACCES, errno.EPERM, errno.ENOSYS}
+            or getattr(error, "winerror", None) == 1314
+        ):
+            pytest.skip("symlink creation is unavailable in this environment")
+        raise
+    storage = FakeStorage(b"eml")
+    renderer = FakeRenderer((MessagePart(None, "text/plain", "escape", b"payload", False),))
+
+    with pytest.raises(StorageError, match="no longer safe"):
+        export_attachments(storage, renderer, messages=(_message(),), dest_dir=dest_dir)
+
+    assert list(outside.iterdir()) == []
 
 
 def test_skips_purged_messages_and_reports_progress(tmp_path: Path) -> None:
