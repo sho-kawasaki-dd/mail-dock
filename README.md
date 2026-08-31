@@ -40,6 +40,12 @@ For a dedicated external SSD, encrypt the whole device rather than using a file 
 
 Disable vault idle auto-lock and VeraCrypt automatic unmount while mail-dock is running. A multi-hour initial sync can be interrupted by either event just like a physical drive removal. Before shutting down or transporting the drive, stop synchronization, close mail-dock, and explicitly unmount the encrypted volume.
 
+## Safely ejecting the storage drive
+
+Use the "Storage" menu's "Safely eject storage" action before physically removing the drive. It waits for the running sync/verify worker to stop at a batch boundary, checkpoints the WAL, closes every SQLite connection and log handle, releases the storage lock, and then reports that the drive can be removed. Do not pull the drive while a sync or verify is in progress; wait for the action to reach the "safe to remove" state.
+
+In Windows, set the removable drive's policy to **Quick removal** (Disk Management / Device Manager policy tab) rather than "Better performance". Quick removal disables the Windows write cache for the device, which keeps `os.replace` and fsync behavior consistent with what mail-dock assumes. Avoid running the archive drive through a USB hub or on bus power, since power drops on those paths are a common cause of unexpected detachment.
+
 ## Development setup
 
 Requirements: Python 3.13, [uv](https://docs.astral.sh/uv/), and Git. From the repository root:
@@ -94,6 +100,25 @@ mailboxes plus the Japanese `受信トレイ.請求書` hierarchy with `.` as th
 folder delimiter.
 
 Use the application CLI with `uv run mail-dock migrate` or `uv run mail-dock verify`. The `--storage-root` option selects an archive root; `migrate` applies database migrations and `verify` performs read-only integrity checks.
+
+`verify` accepts `--mode quick|range|full|orphans|manifest` (default `quick`):
+
+```sh
+uv run mail-dock verify --storage-root D:\mail-archive --mode quick
+uv run mail-dock verify --storage-root D:\mail-archive --mode full --account main-onamae
+uv run mail-dock verify --storage-root D:\mail-archive --mode orphans
+uv run mail-dock verify --storage-root D:\mail-archive --mode manifest
+```
+
+`quick` checks that each message's file exists and matches its recorded size. `range` re-hashes only the EML files written since the last checkpoint. `full` re-hashes every EML and accepts `--account` to limit the scope. `orphans` scans for EML files that are not registered in the database. `manifest` validates manifest checksums and repairs an incomplete trailing record.
+
+`reindex` discards `metadata.db` and rebuilds it from the EML files and persistent manifests. It asks for confirmation before running and accepts `--account` to limit the rebuilt accounts:
+
+```sh
+uv run mail-dock reindex --storage-root D:\mail-archive
+```
+
+Neither `verify` nor `reindex` deletes mail; there is no CLI subcommand for server deletion or local purge. Those destructive actions are available only from the GUI, where they require an explicit confirmation flow.
 
 ## FTS PoC checks
 
