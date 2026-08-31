@@ -193,6 +193,7 @@ class MainWindow(QMainWindow):
         self.detail_view = DetailView(
             query_worker,
             context.create_html_sanitizer(),
+            context.create_remote_image_detector(),
             self,
             block_remote_images=context.settings.block_remote_images,
         )

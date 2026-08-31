@@ -131,6 +131,10 @@ class _Context:
     def create_html_sanitizer() -> Any:
         return lambda html, **_kwargs: html
 
+    @staticmethod
+    def create_remote_image_detector() -> Any:
+        return lambda _html: False
+
     def stop_workers(self) -> None:
         self.stop_calls += 1
 

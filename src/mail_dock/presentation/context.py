@@ -51,6 +51,7 @@ if TYPE_CHECKING:
 
 MessageRendererFactory = Callable[[], Any]
 HtmlSanitizerFactory = Callable[..., str]
+RemoteImageDetectorFactory = Callable[[str], bool]
 
 
 class _CombinedManifestReader(BaseManifestReader):
@@ -266,6 +267,12 @@ class AppContext:
 
         sanitizer_module = import_module("mail_dock.infrastructure.parsing.html_sanitizer")
         return cast(HtmlSanitizerFactory, sanitizer_module.sanitize_mail_html)
+
+    def create_remote_image_detector(self) -> RemoteImageDetectorFactory:
+        """Create the Qt-independent detector used for the remote-image banner."""
+
+        sanitizer_module = import_module("mail_dock.infrastructure.parsing.html_sanitizer")
+        return cast(RemoteImageDetectorFactory, sanitizer_module.contains_remote_image_reference)
 
     def stop_workers(self) -> None:
         """Stop presentation workers before the owning session is released."""

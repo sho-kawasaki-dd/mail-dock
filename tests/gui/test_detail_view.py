@@ -9,6 +9,7 @@ from PySide6.QtCore import QObject, Signal
 
 from mail_dock.domain.messages import MessagePart, RenderedMessage
 from mail_dock.domain.search import MessageDetail, MessageFilter, MessageSummary
+from mail_dock.infrastructure.parsing.html_sanitizer import contains_remote_image_reference
 from mail_dock.presentation import strings
 from mail_dock.presentation.views.detail_view import DetailView
 from mail_dock.usecases.open_message import OpenedMessage
@@ -95,7 +96,9 @@ def _detail(summary: MessageSummary) -> MessageDetail:
 
 def test_purged_message_uses_fallback_without_opening_eml(qtbot: Any) -> None:
     worker = _FakeWorker()
-    view = DetailView(cast(Any, worker), lambda html, **_kwargs: html)
+    view = DetailView(
+        cast(Any, worker), lambda html, **_kwargs: html, contains_remote_image_reference
+    )
     qtbot.addWidget(view)
     view.show()
     view.show_message(_summary(local_state="purged"))
@@ -107,7 +110,9 @@ def test_purged_message_uses_fallback_without_opening_eml(qtbot: Any) -> None:
 
 def test_status_label_shows_flag_snapshot_time(qtbot: Any) -> None:
     worker = _FakeWorker()
-    view = DetailView(cast(Any, worker), lambda html, **_kwargs: html)
+    view = DetailView(
+        cast(Any, worker), lambda html, **_kwargs: html, contains_remote_image_reference
+    )
     qtbot.addWidget(view)
     seen_at = datetime(2026, 1, 2, 3, 4, tzinfo=UTC)
 
@@ -121,7 +126,9 @@ def test_status_label_shows_flag_snapshot_time(qtbot: Any) -> None:
 
 def test_status_label_uses_snapshot_fallback_without_seen_time(qtbot: Any) -> None:
     worker = _FakeWorker()
-    view = DetailView(cast(Any, worker), lambda html, **_kwargs: html)
+    view = DetailView(
+        cast(Any, worker), lambda html, **_kwargs: html, contains_remote_image_reference
+    )
     qtbot.addWidget(view)
 
     view.show_message(_summary(imap_flags="\\Seen \\Flagged"))
@@ -132,7 +139,9 @@ def test_status_label_uses_snapshot_fallback_without_seen_time(qtbot: Any) -> No
 
 def test_rendered_attachments_exclude_inline_parts(qtbot: Any) -> None:
     worker = _FakeWorker()
-    view = DetailView(cast(Any, worker), lambda html, **_kwargs: html)
+    view = DetailView(
+        cast(Any, worker), lambda html, **_kwargs: html, contains_remote_image_reference
+    )
     qtbot.addWidget(view)
     summary = _summary()
     view.show_message(summary)
@@ -165,7 +174,9 @@ def test_rendered_attachments_exclude_inline_parts(qtbot: Any) -> None:
 
 def test_thread_button_updates_count_and_emits_loaded_items(qtbot: Any) -> None:
     worker = _FakeWorker()
-    view = DetailView(cast(Any, worker), lambda html, **_kwargs: html)
+    view = DetailView(
+        cast(Any, worker), lambda html, **_kwargs: html, contains_remote_image_reference
+    )
     qtbot.addWidget(view)
     view.show()
     summary = _summary()
@@ -209,7 +220,9 @@ def _open(worker: _FakeWorker, view: DetailView, summary: MessageSummary, html_b
 
 def test_remote_images_banner_hidden_without_remote_image_references(qtbot: Any) -> None:
     worker = _FakeWorker()
-    view = DetailView(cast(Any, worker), lambda html, **_kwargs: html)
+    view = DetailView(
+        cast(Any, worker), lambda html, **_kwargs: html, contains_remote_image_reference
+    )
     qtbot.addWidget(view)
     view.show()
     _open(worker, view, _summary(), "<p>本文のみ、画像なし</p>")
@@ -221,7 +234,9 @@ def test_remote_images_banner_hidden_without_remote_image_references(qtbot: Any)
 
 def test_remote_images_banner_shown_for_remote_image_reference(qtbot: Any) -> None:
     worker = _FakeWorker()
-    view = DetailView(cast(Any, worker), lambda html, **_kwargs: html)
+    view = DetailView(
+        cast(Any, worker), lambda html, **_kwargs: html, contains_remote_image_reference
+    )
     qtbot.addWidget(view)
     view.show()
     _open(worker, view, _summary(), '<img src="https://example.test/pixel.gif">')

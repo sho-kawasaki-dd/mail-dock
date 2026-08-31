@@ -608,11 +608,11 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 #### **H-8. 静的テスト・CI**
 
-- [ ] `tests/unit/test_main.py`（既存を拡張）: **CLIに削除系サブコマンドが存在しない**ことを固定する（D-3）
-- [ ] `tests/unit/test_ports.py`（既存を拡張）: `presentation/views` / `viewmodels` / `models` に `sqlite3` と `mail_dock.infrastructure` の import が無いこと、`domain` / `usecases` に PySide6 の import が無いこと
-- [ ] `tests/unit/test_presentation_errors.py`（既存を拡張）: 新規例外が対応表に存在すること
-- [ ] `lint` / `test-windows` / `test-linux` の3ジョブが `-m "not docker and not gui"` で緑になること
-- [ ] 非Windows環境で `device_watcher` が import でき、no-op として動作すること（Linuxジョブで確認）
+- [x] `tests/unit/test_main.py`（既存を拡張）: **CLIに削除系サブコマンドが存在しない**ことを固定する（D-3）
+- [x] `tests/unit/test_ports.py`（既存を拡張）: `presentation/views` / `viewmodels` / `models` に `sqlite3` と `mail_dock.infrastructure` の import が無いこと、`domain` / `usecases` に PySide6 の import が無いこと
+- [x] `tests/unit/test_presentation_errors.py`（既存を拡張）: 新規例外が対応表に存在すること
+- [x] `lint` / `test-windows` / `test-linux` の3ジョブが `-m "not docker and not gui"` で緑になること
+- [x] 非Windows環境で `device_watcher` が import でき、no-op として動作すること（Linuxジョブで確認）
 
 #### **H-9. ドキュメント**
 

@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (
 
 from mail_dock.domain.messages import RenderedMessage
 from mail_dock.domain.search import MessageDetail, MessageFilter, MessageSummary
-from mail_dock.infrastructure.parsing.html_sanitizer import contains_remote_image_reference
 from mail_dock.presentation import strings
 from mail_dock.presentation.errors import user_message
 from mail_dock.presentation.formatting import format_local_datetime
@@ -38,6 +37,7 @@ from ..web.profile import create_mail_profile
 from ..web.schemes import CidSchemeHandler, MailBodySchemeHandler
 
 HtmlSanitizer = Callable[..., str]
+RemoteImageDetector = Callable[[str], bool]
 DetailChannel = Literal["detail/open"]
 ThreadChannel = Literal["count/thread"]
 
@@ -96,6 +96,7 @@ class DetailView(QWidget):
         self,
         worker: _DetailQueryWorker,
         sanitize_html: HtmlSanitizer,
+        detect_remote_images: RemoteImageDetector,
         parent: QWidget | None = None,
         *,
         block_remote_images: bool = True,
@@ -103,6 +104,7 @@ class DetailView(QWidget):
         super().__init__(parent)
         self._worker = worker
         self._sanitize_html = sanitize_html
+        self._detect_remote_images = detect_remote_images
         self._block_remote_images = block_remote_images
         self._allow_remote_images_for_message = not block_remote_images
         self._current_summary: MessageSummary | None = None
@@ -440,7 +442,7 @@ class DetailView(QWidget):
         self._page.reset_body_navigation()
         self._body_view.setUrl(QUrl("maildock:/body"))
         self._body_stack.setCurrentWidget(self._body_view)
-        has_remote_images = contains_remote_image_reference(html_body)
+        has_remote_images = self._detect_remote_images(html_body)
         self._remote_images_banner.setVisible(not allow_remote_images and has_remote_images)
         self._populate_attachments(rendered)
 

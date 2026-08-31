@@ -80,18 +80,45 @@ def test_usecases_do_not_import_provider_database_or_filesystem_apis() -> None:
         assert imports.isdisjoint(forbidden), source_path
 
 
+def _imported_module_names(source_path: Path) -> set[str]:
+    """Return the full dotted module name of every import in ``source_path``."""
+
+    tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+    imports: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            imports.add(node.module)
+    return imports
+
+
+def _matches_forbidden(module_name: str, forbidden_prefixes: tuple[str, ...]) -> bool:
+    return any(
+        module_name == prefix or module_name.startswith(prefix + ".")
+        for prefix in forbidden_prefixes
+    )
+
+
 def test_presentation_views_viewmodels_and_models_do_not_import_infrastructure() -> None:
     presentation_root = Path(__file__).parents[2] / "src" / "mail_dock" / "presentation"
-    forbidden = {"sqlite3", "infrastructure"}
+    forbidden = ("sqlite3", "mail_dock.infrastructure")
 
     for package_name in ("views", "viewmodels", "models"):
         package_dir = presentation_root / package_name
         for source_path in package_dir.rglob("*.py"):
-            tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
-            imports: set[str] = set()
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Import):
-                    imports.update(alias.name.split(".")[0] for alias in node.names)
-                elif isinstance(node, ast.ImportFrom) and node.module is not None:
-                    imports.add(node.module.split(".")[0])
-            assert imports.isdisjoint(forbidden), source_path
+            imports = _imported_module_names(source_path)
+            offending = {name for name in imports if _matches_forbidden(name, forbidden)}
+            assert not offending, (source_path, offending)
+
+
+def test_domain_and_usecases_do_not_import_pyside6() -> None:
+    src_root = Path(__file__).parents[2] / "src" / "mail_dock"
+    forbidden = ("PySide6",)
+
+    for package_name in ("domain", "usecases"):
+        package_dir = src_root / package_name
+        for source_path in package_dir.rglob("*.py"):
+            imports = _imported_module_names(source_path)
+            offending = {name for name in imports if _matches_forbidden(name, forbidden)}
+            assert not offending, (source_path, offending)
