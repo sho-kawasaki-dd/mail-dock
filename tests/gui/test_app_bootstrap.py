@@ -7,6 +7,7 @@ import pytest
 
 from mail_dock import config
 from mail_dock.domain.errors import StorageUnsupportedError
+from mail_dock.domain.storage_state import StorageStateMachine
 from mail_dock.infrastructure.storage.capabilities import CapabilityLevel, StorageCapabilities
 from mail_dock.presentation import app
 from mail_dock.usecases.trash import PurgeResult
@@ -459,3 +460,101 @@ def test_acknowledge_storage_unsupported_persists_timestamp_and_reloads(
     acknowledged = saved[0].storage_profiles["root-uuid"]
     assert isinstance(acknowledged, dict)
     assert isinstance(acknowledged["capability_ack_at"], str)
+
+
+class _RecoverySession:
+    def __init__(self, unclean: bool) -> None:
+        self.settings = config.AppConfig()
+        self.root = Path("/attached")
+        self.was_unclean_shutdown = unclean
+
+    def __enter__(self) -> _RecoverySession:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+
+class _RecoveryContext:
+    def __init__(self, session: _RecoverySession, _settings: config.AppConfig) -> None:
+        self.storage_root = session.root
+
+    def create_message_repository(self) -> str:
+        return "repo"
+
+    def create_eml_storage(self) -> str:
+        return "eml-storage"
+
+    def create_purge_storage(self) -> str:
+        return "purge-storage"
+
+    def create_manifest_reader(self, account_id: str) -> str:
+        return f"reader:{account_id}"
+
+    def create_manifest_writer(self, account_id: str) -> str:
+        return f"writer:{account_id}"
+
+
+def test_start_session_runs_range_verify_and_purge_recovery_after_unclean_shutdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    monkeypatch.setattr(app, "StorageSession", lambda _settings, _root: _RecoverySession(True))
+    monkeypatch.setattr(app, "AppContext", _RecoveryContext)
+    monkeypatch.setattr(
+        app, "backfill_snapshots", lambda *_args, **_kwargs: calls.append("backfill")
+    )
+    monkeypatch.setattr(
+        app, "repair_manifest_tails", lambda *_args, **_kwargs: calls.append("repair")
+    )
+
+    def fake_recover(
+        repo: object,
+        storage: object,
+        purge_storage: object,
+        reader_factory: Any,
+        writer_factory: Any,
+        *,
+        storage_state: object,
+    ) -> tuple[object, ...]:
+        calls.append("recover")
+        assert repo == "repo"
+        assert storage == "eml-storage"
+        assert purge_storage == "purge-storage"
+        assert reader_factory("account") == "reader:account"
+        assert writer_factory("account") == "writer:account"
+        assert isinstance(storage_state, StorageStateMachine)
+        return ()
+
+    monkeypatch.setattr(app, "recover_after_unclean_shutdown", fake_recover)
+
+    app._start_session(config.AppConfig(), Path("/attached"))
+
+    assert calls == ["backfill", "repair", "recover"]
+
+
+def test_start_session_skips_recovery_after_a_clean_shutdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    monkeypatch.setattr(app, "StorageSession", lambda _settings, _root: _RecoverySession(False))
+    monkeypatch.setattr(app, "AppContext", _RecoveryContext)
+    monkeypatch.setattr(
+        app, "backfill_snapshots", lambda *_args, **_kwargs: calls.append("backfill")
+    )
+    monkeypatch.setattr(
+        app,
+        "repair_manifest_tails",
+        lambda *_args, **_kwargs: pytest.fail("must not run without an unclean shutdown"),
+    )
+    monkeypatch.setattr(
+        app,
+        "recover_after_unclean_shutdown",
+        lambda *_args, **_kwargs: pytest.fail("must not run without an unclean shutdown"),
+    )
+
+    app._start_session(config.AppConfig(), Path("/attached"))
+
+    assert calls == ["backfill"]

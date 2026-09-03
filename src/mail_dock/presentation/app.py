@@ -27,6 +27,7 @@ from mail_dock.domain.errors import (
     StorageForeignRootError,
     StorageUnsupportedError,
 )
+from mail_dock.domain.ports import BaseIntegrityStorage
 from mail_dock.domain.storage_state import StorageStateMachine
 from mail_dock.infrastructure.storage.capabilities import (
     capability_level,
@@ -51,7 +52,11 @@ from mail_dock.presentation.views.dialogs.confirmation_dialog import Confirmatio
 from mail_dock.presentation.views.dialogs.error_dialog import show_error
 from mail_dock.presentation.views.setup_wizard import SetupWizard
 from mail_dock.presentation.web.schemes import register_schemes
-from mail_dock.usecases.snapshots import backfill_snapshots, repair_manifest_tails
+from mail_dock.usecases.snapshots import (
+    backfill_snapshots,
+    recover_after_unclean_shutdown,
+    repair_manifest_tails,
+)
 from mail_dock.usecases.trash import (
     PurgeResult,
     list_startup_purge_candidates,
@@ -387,6 +392,14 @@ def _start_session(
             repair_manifest_tails(
                 context.create_message_repository(),
                 context.create_manifest_reader,
+            )
+            recover_after_unclean_shutdown(
+                context.create_message_repository(),
+                cast(BaseIntegrityStorage, context.create_eml_storage()),
+                context.create_purge_storage(),
+                context.create_manifest_reader,
+                context.create_manifest_writer,
+                storage_state=StorageStateMachine(),
             )
         return session, context
     except BaseException as error:

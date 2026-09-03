@@ -333,6 +333,38 @@ def test_storage_session_retains_unclean_shutdown_after_exception(
         assert session.previous_clean_shutdown is False
 
 
+def test_run_command_recovers_range_verification_and_purges_after_unclean_shutdown(
+    tmp_storage_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(main, "check_free_space", lambda path: None)
+
+    with pytest.raises(RuntimeError), StorageSession(config.AppConfig(), tmp_storage_root):
+        raise RuntimeError("simulated crash")
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        main, "repair_manifest_tails", lambda *_args, **_kwargs: calls.append("repair")
+    )
+
+    def fake_recover(*_args: object, **_kwargs: object) -> tuple[object, ...]:
+        calls.append("recover")
+        return ()
+
+    monkeypatch.setattr(main, "recover_after_unclean_shutdown", fake_recover)
+    monkeypatch.setattr(main, "_run_application_command", lambda *_args, **_kwargs: 0)
+
+    result = main._run_command(
+        config.AppConfig(),
+        tmp_storage_root,
+        "account",
+        _build_parser().parse_args(["account", "list"]),
+    )
+
+    assert result == 0
+    assert calls == ["repair", "recover"]
+
+
 def test_storage_session_persists_unsupported_probe_before_raising(
     tmp_storage_root: Path,
     monkeypatch: pytest.MonkeyPatch,

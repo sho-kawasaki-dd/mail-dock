@@ -1,17 +1,25 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
+from typing import Any
 
 from mail_dock.domain.fetcher import RemoteFolder
 from mail_dock.domain.ports import (
     BaseCredentialStore,
+    BaseIntegrityStorage,
     BaseManifestReader,
     BaseManifestWriter,
+    BasePurgeStorage,
     JSONValue,
 )
 from mail_dock.usecases.register_account import register_account, update_account
-from mail_dock.usecases.snapshots import backfill_snapshots, repair_manifest_tails
+from mail_dock.usecases.snapshots import (
+    backfill_snapshots,
+    recover_after_unclean_shutdown,
+    repair_manifest_tails,
+)
 from mail_dock.usecases.sync_folders import refresh_folders, set_sync_target
 from tests.support.fake_fetcher import FakeFetcher
 from tests.support.in_memory_repository import InMemoryMessageRepository
@@ -52,7 +60,17 @@ class MemoryManifest(BaseManifestWriter, BaseManifestReader):
         yield from self.events
 
     def read_incomplete_intents(self) -> Iterator[Mapping[str, JSONValue]]:
-        return iter(())
+        completed = {
+            (event.get("account_id"), event.get("source_item_key"))
+            for event in self.events
+            if event.get("event") == "purged"
+        }
+        yield from (
+            event
+            for event in self.events
+            if event.get("event") == "purge_intent"
+            and (event.get("account_id"), event.get("source_item_key")) not in completed
+        )
 
 
 def test_account_snapshot_skips_unchanged_state_and_records_changes() -> None:
@@ -171,6 +189,109 @@ def test_repair_manifest_tails_reads_each_existing_account_manifest() -> None:
     )
 
     assert repair_manifest_tails(repository, lambda _account_id: manifest) == 1
+
+
+class MemoryIntegrityAndPurgeStorage(BaseIntegrityStorage, BasePurgeStorage):
+    def __init__(self, files: Mapping[str, bytes]) -> None:
+        self.files = dict(files)
+
+    def stat(self, relative_path: str) -> Any:
+        if relative_path not in self.files:
+            raise FileNotFoundError(relative_path)
+
+        class FileStat:
+            st_size = len(self.files[relative_path])
+
+        return FileStat()
+
+    def iter_chunks(self, relative_path: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
+        payload = self.files[relative_path]
+        for start in range(0, len(payload), chunk_size):
+            yield payload[start : start + chunk_size]
+
+    def iter_eml_paths(self, account_id: str | None = None) -> Iterator[str]:
+        del account_id
+        yield from sorted(self.files)
+
+    def quarantine(self, relative_path: str) -> None:
+        self.files.pop(relative_path, None)
+
+    def exists(self, relative_path: str) -> bool:
+        return relative_path in self.files
+
+    def delete(self, relative_path: str) -> None:
+        self.files.pop(relative_path, None)
+
+
+class _AttachedState:
+    def is_write_allowed(self) -> bool:
+        return True
+
+
+def test_recover_after_unclean_shutdown_range_verifies_and_resumes_purges() -> None:
+    repository = InMemoryMessageRepository()
+    repository.upsert_account({"id": "account"})
+    raw = b"hello"
+    file_hash = hashlib.sha256(raw).hexdigest()
+    message_id = repository.add_message(
+        {
+            "account_id": "account",
+            "folder_id": 1,
+            "uid": 1,
+            "uidvalidity": 10,
+            "source_item_key": "10:1",
+            "relative_path": "message.eml",
+            "file_hash": file_hash,
+            "size_bytes": len(raw),
+            "local_state": "trashed",
+        }
+    )
+    manifest = MemoryManifest()
+    manifest.events.append(
+        {
+            "event": "fetch",
+            "account_id": "account",
+            "folder_raw_name": "INBOX",
+            "uid": 1,
+            "uidvalidity": 10,
+            "source_item_key": "10:1",
+            "message_id": None,
+            "relative_path": "message.eml",
+            "file_hash": file_hash,
+            "size_bytes": len(raw),
+            "internal_date": None,
+            "timestamp": "2026-08-26T00:00:00Z",
+            "deduplicated": False,
+        }
+    )
+    manifest.events.append(
+        {
+            "event": "purge_intent",
+            "account_id": "account",
+            "source_item_key": "10:1",
+            "relative_path": "message.eml",
+            "file_hash": file_hash,
+            "timestamp": "2026-08-26T00:00:01Z",
+            "shared_reference_count": 0,
+            "physical_delete": True,
+        }
+    )
+    storage = MemoryIntegrityAndPurgeStorage({"message.eml": raw})
+
+    results = recover_after_unclean_shutdown(
+        repository,
+        storage,
+        storage,
+        lambda _account_id: manifest,
+        lambda _account_id: manifest,
+        storage_state=_AttachedState(),
+    )
+
+    assert len(results) == 1
+    assert results[0].checked_count == 1
+    assert repository.messages[message_id]["local_state"] == "purged"
+    assert "message.eml" not in storage.files
+    assert [event["event"] for event in manifest.events] == ["fetch", "purge_intent", "purged"]
 
 
 class _Credentials(BaseCredentialStore):

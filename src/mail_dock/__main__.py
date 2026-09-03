@@ -36,6 +36,7 @@ from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.ports import BaseCredentialStore, BaseIntegrityStorage
 from mail_dock.domain.repository import MessageRecord
 from mail_dock.domain.search import MessageFilter, MessageSummary, PageCursor, SearchPage
+from mail_dock.domain.storage_state import StorageStateMachine
 from mail_dock.infrastructure.database.backup import (
     LAST_BACKUP_STATE_KEY,
     backup_database,
@@ -95,7 +96,11 @@ from mail_dock.usecases.reindex import ReindexProgress, reindex
 from mail_dock.usecases.reparse import reparse_messages
 from mail_dock.usecases.search_messages import search_messages
 from mail_dock.usecases.search_query import parse_query
-from mail_dock.usecases.snapshots import backfill_snapshots, repair_manifest_tails
+from mail_dock.usecases.snapshots import (
+    backfill_snapshots,
+    recover_after_unclean_shutdown,
+    repair_manifest_tails,
+)
 from mail_dock.usecases.sync_folders import refresh_folders, set_sync_target
 from mail_dock.usecases.sync_mail import SyncOptions, SyncProgress, sync_account
 from mail_dock.usecases.verify import (
@@ -1406,6 +1411,14 @@ def _run_command(
                     repair_manifest_tails(
                         repository,
                         lambda account_id: ManifestReader(session.root, account_id),
+                    )
+                    recover_after_unclean_shutdown(
+                        repository,
+                        EmlStorage(session.root),
+                        EmlStorage(session.root),
+                        lambda account_id: ManifestReader(session.root, account_id),
+                        lambda account_id: ManifestWriter(session.root, account_id),
+                        storage_state=StorageStateMachine(),
                     )
             result = _run_application_command(
                 args,

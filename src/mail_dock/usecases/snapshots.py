@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from datetime import UTC, datetime
 
-from mail_dock.domain.ports import BaseManifestReader, BaseManifestWriter, JSONValue
+from mail_dock.domain.ports import (
+    BaseIntegrityStorage,
+    BaseManifestReader,
+    BaseManifestWriter,
+    BasePurgeStorage,
+    JSONValue,
+)
 from mail_dock.domain.repository import BaseMessageRepository, MessageRecord
+from mail_dock.usecases.trash import StorageWriteGate, recover_incomplete_purges
+from mail_dock.usecases.verify import RangeVerifyResult, range_verify
 
 _ACCOUNT_FIELDS = (
     "account_id",
@@ -182,3 +190,69 @@ def repair_manifest_tails(
         if had_events:
             repaired_manifests += 1
     return repaired_manifests
+
+
+class _AccountRecoveryManifest(BaseManifestReader):
+    """Pair one account's manifest reader and writer for purge recovery.
+
+    ``recover_incomplete_purges`` only writes the completion half of an
+    already-started intent, so it needs both sides of one account's manifest
+    even though its parameter is typed as a reader (see ``BaseManifestReader``
+    usage in ``usecases/trash.py``).
+    """
+
+    def __init__(self, reader: BaseManifestReader, writer: BaseManifestWriter) -> None:
+        self._reader = reader
+        self.writer = writer
+
+    def read_all_events(self) -> Iterator[Mapping[str, JSONValue]]:
+        return self._reader.read_all_events()
+
+    def read_last_checkpoint(self) -> Mapping[str, JSONValue] | None:
+        return self._reader.read_last_checkpoint()
+
+    def read_events_since_checkpoint(self) -> Iterator[Mapping[str, JSONValue]]:
+        return self._reader.read_events_since_checkpoint()
+
+    def read_incomplete_intents(self) -> Iterator[Mapping[str, JSONValue]]:
+        return self._reader.read_incomplete_intents()
+
+
+def recover_after_unclean_shutdown(
+    repo: BaseMessageRepository,
+    integrity_storage: BaseIntegrityStorage,
+    purge_storage: BasePurgeStorage,
+    manifest_reader_factory: Callable[[str], BaseManifestReader],
+    manifest_writer_factory: Callable[[str], BaseManifestWriter],
+    *,
+    storage_state: StorageWriteGate,
+) -> tuple[RangeVerifyResult, ...]:
+    """Run the local, network-free startup recovery after a prior crash (F-6/F-13).
+
+    For each account this re-hashes EMLs written since the last durable
+    checkpoint (repairing and quarantining mismatches) and resumes any
+    ``purge_intent`` left without its completing ``purged`` event. Callers
+    should run this only after ``repair_manifest_tails`` has already made the
+    manifest tails safe to read. ``remote_delete_intent`` reconciliation is
+    intentionally excluded: it requires a live IMAP connection and stays on
+    the regular sync path instead of blocking startup.
+    """
+
+    results: list[RangeVerifyResult] = []
+    for account in repo.list_accounts():
+        account_id = str(account.get("id", account.get("account_id", "")))
+        if not account_id:
+            continue
+        reader = manifest_reader_factory(account_id)
+        results.append(range_verify(repo, integrity_storage, reader))
+        manifest = _AccountRecoveryManifest(reader, manifest_writer_factory(account_id))
+        try:
+            recover_incomplete_purges(
+                repo,
+                purge_storage,
+                manifest,
+                storage_state=storage_state,
+            )
+        finally:
+            manifest.writer.close()
+    return tuple(results)

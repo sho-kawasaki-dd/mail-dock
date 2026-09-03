@@ -280,7 +280,7 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 
 - [x] `StorageSession` 開始時に `app_state.clean_shutdown` を読み、`0` なら「前回異常終了」と判定して結果を保持する
 - [x] 起動直後に `clean_shutdown = 0` を書き、正常終了時に `1` を書く
-- [ ] 前回異常終了時は、起動パスで **①マニフェスト末尾修復 → ②範囲限定検証 → ③未完了 `purge_intent` / `remote_delete_intent` の回復** を自動実行する（グループC・D・E に依存。レビュー修正案 3.3 / 3.4）
+- [x] 前回異常終了時は、起動パスで **①マニフェスト末尾修復 → ②範囲限定検証 → ③未完了 `purge_intent` の回復** を自動実行する（`usecases/snapshots.py` の `recover_after_unclean_shutdown()`。GUI起動パス（`presentation/app.py::_start_session()`）とCLI起動パス（`__main__.py::_run_command()`）の両方に配線済み。`remote_delete_intent` の回復（`reconcile_uncertain_deletes()`）はライブIMAP接続を要するため、起動をブロックしないよう対象外のまま据え置く。レビュー修正案 3.3 / 3.4）
 - [x] 起動パスの最初に、A-6のアカウント/フォルダ snapshot バックフィルを実行する（レビュー修正案 9.1）
 - [ ] 復帰フローを実装する（D-6）
     - [ ] `DBT_DEVICEARRIVAL` または「再接続を試す」で `RECONNECTING` へ入る
@@ -686,7 +686,7 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 - [x] V-5. サーバー削除が3つの事前条件を満たさない対象を自動除外し、`ATTACHED` 以外では入口で拒否され、件数手入力を経ないと実行できない。応答前の通信断は `uncertain` として保持され、再接続後の照合を経てから `deleted` へ確定する。UID EXPUNGEが保証できないサーバーでは `expunge` を実行しない（レビュー修正案 3.4。`tests/unit/test_delete_remote.py` と Docker/Dovecotの `tests/integration/test_remote_delete.py` で検証。後者は本検証中にテストヘルパーの不備（`relative_path`/`file_hash`/`size_bytes` 未設定によりD-12前提条件チェックへ到達しない）を修正した）
 - [x] V-6. 状態機械が開発計画書 5.7.1-3 の遷移表どおりに動き、`ATTACHED` 以外で `is_write_allowed()` と `is_remote_delete_allowed()` が偽になる（Qt非依存の単体テスト）
 - [x] V-7. `FOREIGN`（別デバイスが同じドライブレターを取得）検出時に即座に全書き込みが禁止される（`tests/unit/test_storage_state.py` / `tests/unit/test_storage_root.py` / `tests/gui/test_storage_monitor.py`）
-- [ ] V-8. スタール `.lock`（ロック実体は取得できるが `heartbeat_at` が古い）で起動でき、範囲限定検証が自動実行される。**部分的にのみ確認済み**: 起動できること自体は確認済み（`tests/unit/test_lock.py`）だが、「起動時に範囲限定検証を自動実行する」（F-6/F-13）はまだ配線されていない。現状 `app.py`/`__main__.py` は前回異常終了時にマニフェスト末尾修復（`repair_manifest_tails`）のみを実行し、`range_verify()` はGUIの「ツール」メニューから手動実行するだけで自動起動パスからは一度も呼ばれない。B-5 の未完了チェックボックスと一致する既知のギャップ
+- [x] V-8. スタール `.lock`（ロック実体は取得できるが `heartbeat_at` が古い）で起動でき、範囲限定検証が自動実行される。起動できること自体は確認済み（`tests/unit/test_lock.py`）。スタールロックは前回クラッシュ時に必ず `clean_shutdown=0` も伴うため、`StorageSession.was_unclean_shutdown` を起動パスで判定し、`usecases/snapshots.py::recover_after_unclean_shutdown()` がマニフェスト末尾修復の直後に `range_verify()` を自動実行するよう配線した（GUI: `presentation/app.py::_start_session()`、CLI: `__main__.py::_run_command()`。`tests/gui/test_app_bootstrap.py::test_start_session_runs_range_verify_and_purge_recovery_after_unclean_shutdown`、`tests/unit/test_main.py::test_run_command_recovers_range_verification_and_purges_after_unclean_shutdown`）
 - [ ] V-9. 「ストレージを安全に取り外す」がワーカー停止からロック解放までを規定の順序で実行し、実行後にWindowsがドライブの取り外しを拒否しない（手動確認）。**手順の自動テスト（`tests/gui/test_safe_eject.py`）は緑だが、実デバイスでの確認はD-16により未実施のまま（本書7.1節参照）**
 - [ ] V-10. 切断→再接続で、プロセスを終了せずに `RECONNECTING` → `VERIFYING` → `ATTACHED` まで戻り、同期がバッチ境界から再開される。**未実装であることを確認した**: `domain/storage_state.py` の状態機械はこの遷移を単体テストレベルでサポートするが（`tests/unit/test_storage_state.py`）、`presentation/app.py`/`storage_monitor.py` にはこの遷移を駆動する復帰フロー（B-5の該当チェックボックス）が配線されていない。`StorageMonitor` の `reconnect` コールバックは存在するが `app.py` の `_window_created()` が `StorageMonitor(...)` を生成する際に渡していない
 - [x] V-11. CLI に削除系サブコマンドが存在せず、`verify --mode` と `reindex` が動作する（静的テストで固定。`tests/unit/test_main.py`）
