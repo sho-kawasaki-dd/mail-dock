@@ -1,6 +1,6 @@
 import json
 import zlib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -408,12 +408,16 @@ def test_manifest_reads_events_after_last_checkpoint(tmp_path: Path) -> None:
 
 
 def test_manifest_reads_only_events_after_the_latest_checkpoint(tmp_path: Path) -> None:
+    checkpoint_reference = datetime.now(UTC)
+    before_checkpoint = (checkpoint_reference - timedelta(days=1)).isoformat()
+    after_checkpoint = (checkpoint_reference + timedelta(days=1)).isoformat()
+
     with ManifestWriter(tmp_path, "account") as writer:
-        writer.append(_fetch_event("2026-07-31T00:00:00Z", uid=7))
+        writer.append(_fetch_event(before_checkpoint, uid=7))
         writer.checkpoint(1, "batch-1")
-        writer.append(_fetch_event("2026-08-01T00:00:00Z", uid=8))
+        writer.append(_fetch_event(before_checkpoint, uid=8))
         writer.checkpoint(2, "batch-2")
-        writer.append(_fetch_event("2026-08-02T00:00:00Z", uid=9))
+        writer.append(_fetch_event(after_checkpoint, uid=9))
 
     assert [event["uid"] for event in read_events_since_checkpoint(tmp_path, "account")] == [9]
     checkpoint = read_last_checkpoint(tmp_path, "account")
