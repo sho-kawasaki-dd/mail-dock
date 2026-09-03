@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -437,7 +438,16 @@ class SettingsDialog(QDialog):
 
     def _build_ui(self) -> None:
         self.setWindowTitle(strings.SETTINGS_TITLE)
-        layout = QVBoxLayout(self)
+        self.setSizeGripEnabled(True)
+        self.resize(560, 640)
+
+        outer_layout = QVBoxLayout(self)
+
+        scroll_area = QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
+        content = QWidget(scroll_area)
+        layout = QVBoxLayout(content)
 
         settings_group = QGroupBox(strings.SETTINGS_TITLE, self)
         settings_form = QFormLayout(settings_group)
@@ -655,9 +665,12 @@ class SettingsDialog(QDialog):
         folders_layout.addLayout(folder_controls)
         layout.addWidget(folder_group)
 
+        scroll_area.setWidget(content)
+        outer_layout.addWidget(scroll_area)
+
         self._open_log_button = QPushButton(strings.SETTINGS_BUTTON_OPEN_LOG_FOLDER, self)
         self._open_log_button.clicked.connect(self._open_log_folder)
-        layout.addWidget(self._open_log_button)
+        outer_layout.addWidget(self._open_log_button)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
@@ -671,7 +684,7 @@ class SettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         self._ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
         self._buttons = buttons
-        layout.addWidget(buttons)
+        outer_layout.addWidget(buttons)
 
     def _update_purge_warning(self) -> None:
         is_immediate = self._purge_mode.currentData() == "immediate"
