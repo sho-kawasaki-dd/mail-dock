@@ -288,6 +288,7 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
     - [x] `VERIFYING` で範囲限定検証を実行し、成功したら `ATTACHED` へ戻す
     - [x] Phase 3.6 の共通ブートストラップ（旧セッション解放 → 新 `StorageSession` → `MainWindow` 差し替え）を再利用し、二重セッションを作らない
     - [x] 検証失敗時は `DETACHED` へ戻し、ユーザー判断を求める
+    - [x] 再接続時にWindowsのドライブレターが変わっても、到着通知の候補を設定済みパスから再構成し、`.maildock_root` のUUID一致を確認して新パスを保存する
 - [x] `DETACHED` 中は「再接続を試す／終了」のモーダルのみを表示し、読み取り専用モードを提供しない（F-8）
 - [x] `cleanup_tmp()` が `tmp/pstimp/` を保護している区別を、コメントとテストで固定する（D-25）
 
@@ -688,7 +689,7 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 - [x] V-7. `FOREIGN`（別デバイスが同じドライブレターを取得）検出時に即座に全書き込みが禁止される（`tests/unit/test_storage_state.py` / `tests/unit/test_storage_root.py` / `tests/gui/test_storage_monitor.py`）
 - [x] V-8. スタール `.lock`（ロック実体は取得できるが `heartbeat_at` が古い）で起動でき、範囲限定検証が自動実行される。起動できること自体は確認済み（`tests/unit/test_lock.py`）。スタールロックは前回クラッシュ時に必ず `clean_shutdown=0` も伴うため、`StorageSession.was_unclean_shutdown` を起動パスで判定し、`usecases/snapshots.py::recover_after_unclean_shutdown()` がマニフェスト末尾修復の直後に `range_verify()` を自動実行するよう配線した（GUI: `presentation/app.py::_start_session()`、CLI: `__main__.py::_run_command()`。`tests/gui/test_app_bootstrap.py::test_start_session_runs_range_verify_and_purge_recovery_after_unclean_shutdown`、`tests/unit/test_main.py::test_run_command_recovers_range_verification_and_purges_after_unclean_shutdown`）
 - [ ] V-9. 「ストレージを安全に取り外す」がワーカー停止からロック解放までを規定の順序で実行し、実行後にWindowsがドライブの取り外しを拒否しない（手動確認）。**手順の自動テスト（`tests/gui/test_safe_eject.py`）は緑だが、実デバイスでの確認はD-16により未実施のまま（本書7.1節参照）**
-- [ ] V-10. 切断→再接続で、プロセスを終了せずに `RECONNECTING` → `VERIFYING` → `ATTACHED` まで戻り、同期がバッチ境界から再開される。**未実装であることを確認した**: `domain/storage_state.py` の状態機械はこの遷移を単体テストレベルでサポートするが（`tests/unit/test_storage_state.py`）、`presentation/app.py`/`storage_monitor.py` にはこの遷移を駆動する復帰フロー（B-5の該当チェックボックス）が配線されていない。`StorageMonitor` の `reconnect` コールバックは存在するが `app.py` の `_window_created()` が `StorageMonitor(...)` を生成する際に渡していない
+- [x] V-10. 切断→再接続で、プロセスを終了せずに `RECONNECTING` → `VERIFYING` → `ATTACHED` まで戻り、同期がバッチ境界から再開される。別のドライブレターで再接続された場合も、設定済みパスを到着ドライブへ再構成し、`.maildock_root` のUUID一致を確認して追従する（`tests/gui/test_storage_monitor.py` / `tests/gui/test_app_bootstrap.py`）
 - [x] V-11. CLI に削除系サブコマンドが存在せず、`verify --mode` と `reindex` が動作する（静的テストで固定。`tests/unit/test_main.py`）
 - [x] V-12. `uv run pytest -m "not docker and not gui"` が全緑になり、`domain` + `usecases` のカバレッジが 80% 以上である（実測: 541 passed / 4 skipped、`domain`+`usecases` カバレッジ 89%）
 - [x] V-13. GUIテストがローカルで全緑になる（`gui` マーカーのオプトイン実行。実測: 124 passed）

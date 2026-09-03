@@ -7,8 +7,9 @@ import pytest
 
 from mail_dock import config
 from mail_dock.domain.errors import StorageUnsupportedError
-from mail_dock.domain.storage_state import StorageStateMachine
+from mail_dock.domain.storage_state import StorageState, StorageStateMachine
 from mail_dock.infrastructure.storage.capabilities import CapabilityLevel, StorageCapabilities
+from mail_dock.infrastructure.storage.storage_root import RootProbe
 from mail_dock.presentation import app
 from mail_dock.usecases.trash import PurgeResult
 
@@ -141,6 +142,96 @@ class _FakeThread:
 
 
 _APPLICATION = _FakeApplication()
+
+
+def test_rebase_root_candidates_follows_a_changed_drive_letter() -> None:
+    rebased = app._rebase_root_candidates(
+        (r"E:\mail-dock",),
+        Path(r"E:\mail-dock"),
+        ("F:",),
+    )
+
+    assert rebased == (Path(r"F:\mail-dock"),)
+
+
+def test_device_arrival_uses_matching_uuid_on_a_changed_drive_letter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = config.AppConfig(
+        storage_root_uuid="root-uuid",
+        storage_root_candidates=(r"E:\mail-dock",),
+    )
+    runtime = app._GuiRuntime(cast(Any, object()), settings)
+    runtime.session = cast(
+        Any,
+        type("Session", (), {"root": Path(r"E:\mail-dock"), "root_uuid": "root-uuid"})(),
+    )
+    arrived: list[bool] = []
+    monitor = cast(
+        Any,
+        type(
+            "Monitor",
+            (),
+            {
+                "state": StorageState.DETACHED,
+                "root": Path(r"E:\mail-dock"),
+                "handle_device_arrived": lambda self: arrived.append(True),
+            },
+        )(),
+    )
+    runtime.storage_monitor = monitor
+    resolution_calls: list[tuple[tuple[Path, ...], str | None]] = []
+
+    def resolve(candidates: tuple[Path, ...], expected_uuid: str | None) -> Any:
+        resolution_calls.append((candidates, expected_uuid))
+        return type("Resolution", (), {"path": Path(r"F:\mail-dock"), "probe": RootProbe.OK})()
+
+    monkeypatch.setattr(app, "resolve_root", resolve)
+
+    runtime._handle_device_arrived(("F:",))
+
+    assert monitor.root == Path(r"F:\mail-dock")
+    assert arrived == [True]
+    assert resolution_calls == [((Path(r"F:\mail-dock"),), "root-uuid")]
+
+
+def test_device_arrival_rejects_a_foreign_uuid_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = config.AppConfig(
+        storage_root_uuid="root-uuid",
+        storage_root_candidates=(r"E:\mail-dock",),
+    )
+    runtime = app._GuiRuntime(cast(Any, object()), settings)
+    runtime.session = cast(
+        Any,
+        type("Session", (), {"root": Path(r"E:\mail-dock"), "root_uuid": "root-uuid"})(),
+    )
+    arrived: list[bool] = []
+    monitor = cast(
+        Any,
+        type(
+            "Monitor",
+            (),
+            {
+                "state": StorageState.DETACHED,
+                "root": Path(r"E:\mail-dock"),
+                "handle_device_arrived": lambda self: arrived.append(True),
+            },
+        )(),
+    )
+    runtime.storage_monitor = monitor
+
+    monkeypatch.setattr(
+        app,
+        "resolve_root",
+        lambda _candidates, _expected: type(
+            "Resolution", (), {"path": Path(r"F:\mail-dock"), "probe": RootProbe.FOREIGN}
+        )(),
+    )
+
+    runtime._handle_device_arrived(("F:",))
+
+    assert monitor.root == Path(r"E:\mail-dock")
+    assert arrived == []
 
 
 def _start_fake_session(

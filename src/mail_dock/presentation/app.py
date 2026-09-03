@@ -29,7 +29,7 @@ from mail_dock.domain.errors import (
     StorageUnsupportedError,
 )
 from mail_dock.domain.ports import BaseIntegrityStorage
-from mail_dock.domain.storage_state import StorageStateMachine
+from mail_dock.domain.storage_state import StorageState, StorageStateMachine
 from mail_dock.infrastructure.database.migrator import current_version
 from mail_dock.infrastructure.storage.capabilities import (
     capability_level,
@@ -249,6 +249,38 @@ def _available_root(settings: config.AppConfig, requested_root: Path | None) -> 
     if resolution.probe is RootProbe.FOREIGN:
         raise StorageForeignRootError(strings.ERROR_FOREIGN_ROOT)
     return resolution.path
+
+
+def _rebase_root_candidates(
+    candidates: tuple[str, ...],
+    current_root: Path,
+    drives: object,
+) -> tuple[Path, ...]:
+    """Rebase Windows root candidates onto drives reported as newly arrived."""
+
+    if not isinstance(drives, (tuple, list, set, frozenset)):
+        return ()
+    arrived_drives = tuple(
+        str(drive).rstrip("\\/")
+        for drive in drives
+        if len(str(drive).rstrip("\\/")) == 2 and str(drive).rstrip("\\/")[1] == ":"
+    )
+    if not arrived_drives:
+        return ()
+
+    rebased: list[Path] = []
+    seen: set[str] = set()
+    for source in (*map(Path, candidates), current_root):
+        drive, tail = os.path.splitdrive(str(source))
+        if not drive:
+            continue
+        for arrived_drive in arrived_drives:
+            candidate = Path(arrived_drive + tail)
+            key = os.path.normcase(str(candidate))
+            if key not in seen:
+                seen.add(key)
+                rebased.append(candidate)
+    return tuple(rebased)
 
 
 def _show_error(error: BaseException) -> None:
@@ -535,8 +567,33 @@ class _GuiRuntime:
             self.storage_monitor.handle_device_removed()
 
     def _handle_device_arrived(self, drives: object) -> None:
-        if self._device_matches_root(drives) and self.storage_monitor is not None:
-            self.storage_monitor.handle_device_arrived()
+        monitor = self.storage_monitor
+        if monitor is None:
+            return
+        if monitor.state is StorageState.DETACHED:
+            reconnected_root = self._root_for_arrived_device(drives)
+            if reconnected_root is None:
+                return
+            monitor.root = reconnected_root
+            monitor.handle_device_arrived()
+        elif self._device_matches_root(drives):
+            monitor.handle_device_arrived()
+
+    def _root_for_arrived_device(self, drives: object) -> Path | None:
+        session = self.session
+        if session is None or session.root_uuid is None:
+            return None
+        candidates = _rebase_root_candidates(
+            self.settings.storage_root_candidates,
+            session.root,
+            drives,
+        )
+        if not candidates:
+            return None
+        resolution = resolve_root(candidates, session.root_uuid)
+        if resolution.probe is RootProbe.FOREIGN:
+            return None
+        return resolution.path or candidates[0]
 
     def _prepare_reconnect(self) -> bool:
         if self._reconnect_prepared:
@@ -544,7 +601,9 @@ class _GuiRuntime:
         session = self.session
         if session is None:
             return False
-        self._reconnect_root = session.root
+        self._reconnect_root = (
+            self.storage_monitor.root if self.storage_monitor is not None else session.root
+        )
         self._replacement_window = self.window
         if self.storage_monitor is not None:
             self.storage_monitor.stop()
@@ -577,6 +636,15 @@ class _GuiRuntime:
             ):
                 raise DatabaseError("Storage range verification failed after reconnect")
             _verify_reconnected_storage(new_session)
+            if new_session.root_uuid is None:
+                raise DatabaseError("Reconnected storage root has no UUID")
+            updated_settings = replace(
+                self.settings,
+                storage_root_candidates=(_normalized_storage_path(new_session.root),),
+                storage_root_uuid=new_session.root_uuid,
+            )
+            new_context.save_settings(updated_settings)
+            self.settings = updated_settings
         except BaseException as error:
             if new_session is not None:
                 new_session.__exit__(type(error), error, error.__traceback__)
