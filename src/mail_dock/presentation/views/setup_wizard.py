@@ -31,7 +31,7 @@ from mail_dock.presentation.threads.worker import Worker
 from mail_dock.usecases.register_account import register_account
 from mail_dock.usecases.sync_folders import refresh_folders, set_sync_target
 
-from .dialogs.progress_dialog import ProgressDialog
+from .dialogs.progress_dialog import ProgressDialog, run_with_progress
 
 RootContextFactory = Callable[[Path], Any]
 RootCapabilityProbe = Callable[[Path, str], Mapping[str, object]]
@@ -358,8 +358,14 @@ class SetupWizard(QWizard):
             self._root_status.setText(strings.ERROR_STORAGE_ROOT_MISSING)
             return False
         if not self._root_confirmed and self._on_root_confirmed is not None:
+            on_root_confirmed = self._on_root_confirmed
+            selected_root = self._selected_root
             try:
-                self._context = self._on_root_confirmed(self._selected_root)
+                self._context = run_with_progress(
+                    lambda: on_root_confirmed(selected_root),
+                    strings.WIZARD_STATUS_STARTING_STORAGE,
+                    parent=self,
+                )
             except Exception as error:
                 self._show_inline_error(self._root_status, error)
                 return False

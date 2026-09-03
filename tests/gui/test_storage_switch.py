@@ -61,9 +61,11 @@ class _Session:
 
 
 def test_switch_releases_old_session_before_starting_new_one(
+    qapp: Any,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    del qapp  # _replace_with_root now shows a real ProgressDialog, which needs a live QApplication
     events: list[str] = []
     old_root = tmp_path / "old"
     new_root = tmp_path / "new"
@@ -113,9 +115,11 @@ def test_switch_releases_old_session_before_starting_new_one(
 
 
 def test_switch_persists_new_root_identity_and_profile(
+    qapp: Any,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    del qapp  # _replace_with_root now shows a real ProgressDialog, which needs a live QApplication
     old_root = tmp_path / "old"
     new_root = tmp_path / "new"
     saved: list[config.AppConfig] = []

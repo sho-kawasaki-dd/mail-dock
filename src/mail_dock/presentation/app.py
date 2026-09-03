@@ -53,6 +53,7 @@ from mail_dock.presentation.native.device_watcher import DeviceWatcher
 from mail_dock.presentation.storage_monitor import StorageMonitor
 from mail_dock.presentation.views.dialogs.confirmation_dialog import ConfirmationDialog
 from mail_dock.presentation.views.dialogs.error_dialog import show_error
+from mail_dock.presentation.views.dialogs.progress_dialog import run_with_progress
 from mail_dock.presentation.views.setup_wizard import SetupWizard
 from mail_dock.presentation.web.schemes import register_schemes
 from mail_dock.usecases.snapshots import (
@@ -626,28 +627,36 @@ class _GuiRuntime:
 
         if not self._prepare_reconnect() or self._reconnect_root is None:
             return False
-        new_session: StorageSession | None = None
+        reconnect_root = self._reconnect_root
+        settings = self.settings
+
+        def _run() -> tuple[StorageSession, AppContext]:
+            session, context = _start_session(settings, reconnect_root)
+            try:
+                recovery_results = getattr(session, "recovery_results", ())
+                if any(
+                    getattr(result, "cancelled", False) or getattr(result, "issues", ())
+                    for result in recovery_results
+                ):
+                    raise DatabaseError("Storage range verification failed after reconnect")
+                _verify_reconnected_storage(session)
+                if session.root_uuid is None:
+                    raise DatabaseError("Reconnected storage root has no UUID")
+            except BaseException as error:
+                session.__exit__(type(error), error, error.__traceback__)
+                raise
+            connection_manager = getattr(session, "connection_manager", None)
+            close_current_thread = getattr(connection_manager, "close_current_thread", None)
+            if callable(close_current_thread):
+                close_current_thread()
+            return session, context
+
         try:
-            new_session, new_context = _start_session(self.settings, self._reconnect_root)
-            recovery_results = getattr(new_session, "recovery_results", ())
-            if any(
-                getattr(result, "cancelled", False) or getattr(result, "issues", ())
-                for result in recovery_results
-            ):
-                raise DatabaseError("Storage range verification failed after reconnect")
-            _verify_reconnected_storage(new_session)
-            if new_session.root_uuid is None:
-                raise DatabaseError("Reconnected storage root has no UUID")
-            updated_settings = replace(
-                self.settings,
-                storage_root_candidates=(_normalized_storage_path(new_session.root),),
-                storage_root_uuid=new_session.root_uuid,
+            new_session, new_context = cast(
+                "tuple[StorageSession, AppContext]",
+                run_with_progress(_run, strings.STATUS_STORAGE_RECONNECTING),
             )
-            new_context.save_settings(updated_settings)
-            self.settings = updated_settings
-        except BaseException as error:
-            if new_session is not None:
-                new_session.__exit__(type(error), error, error.__traceback__)
+        except BaseException:
             old_window = self._replacement_window
             if old_window is not None:
                 show = getattr(old_window, "show", None)
@@ -655,6 +664,13 @@ class _GuiRuntime:
                     show()
             return False
 
+        updated_settings = replace(
+            self.settings,
+            storage_root_candidates=(_normalized_storage_path(new_session.root),),
+            storage_root_uuid=new_session.root_uuid,
+        )
+        new_context.save_settings(updated_settings)
+        self.settings = updated_settings
         self.window = None
         self.attach(new_session, new_context)
         self.verify_and_show()
@@ -760,7 +776,21 @@ class _GuiRuntime:
             storage_root_uuid=marker.root_uuid,
             storage_root_candidates=(_normalized_storage_path(root),),
         )
-        context = self.start(root)
+        settings = self.settings
+
+        def _run() -> tuple[StorageSession, AppContext]:
+            session, context = _start_session(settings, root)
+            connection_manager = getattr(session, "connection_manager", None)
+            close_current_thread = getattr(connection_manager, "close_current_thread", None)
+            if callable(close_current_thread):
+                close_current_thread()
+            return session, context
+
+        session, context = cast(
+            "tuple[StorageSession, AppContext]",
+            run_with_progress(_run, strings.STATUS_STORAGE_SWITCHING),
+        )
+        self.attach(session, context)
         updated = replace(
             context.settings,
             storage_root_uuid=context.root_uuid,

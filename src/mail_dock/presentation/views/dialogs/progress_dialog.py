@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from collections.abc import Callable
+
+from PySide6.QtCore import QEventLoop, Signal
 from PySide6.QtWidgets import QProgressDialog, QWidget
 
+from mail_dock.domain.errors import MailDockError
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.presentation import strings
+from mail_dock.presentation.threads.worker import Worker
 
 
 class ProgressDialog(QProgressDialog):
@@ -44,3 +48,44 @@ class ProgressDialog(QProgressDialog):
         self.cancel_requested.emit()
         if self._token is not None:
             self._token.cancel()
+
+
+def run_with_progress(
+    operation: Callable[[], object],
+    message: str,
+    *,
+    parent: QWidget | None = None,
+) -> object:
+    """Run a non-cancellable operation on a worker thread while showing progress.
+
+    The call still blocks the caller (so it can gate a synchronous API such as
+    ``QWizardPage.validateCurrentPage``), but a nested Qt event loop keeps the
+    GUI thread pumping paint and timer events instead of freezing the window.
+    """
+
+    dialog = ProgressDialog(message, parent)
+    dialog.setCancelButton(None)
+    dialog.show()
+    worker = Worker(None)
+    worker.start()
+    loop = QEventLoop()
+    outcome: dict[str, object] = {}
+
+    def _succeeded(value: object) -> None:
+        outcome["value"] = value
+        loop.quit()
+
+    def _failed(error: object) -> None:
+        outcome["error"] = error
+        loop.quit()
+
+    worker.result.connect(_succeeded)
+    worker.failed.connect(_failed)
+    worker.submit(operation)
+    loop.exec()
+    dialog.finish()
+    worker.stop()
+    if "error" in outcome:
+        error = outcome["error"]
+        raise error if isinstance(error, BaseException) else MailDockError(str(error))
+    return outcome.get("value")
