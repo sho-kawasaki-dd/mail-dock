@@ -282,13 +282,13 @@ Phase 3.x までで「導入 → 同期 → 閲覧 → 検索 → 保存」は G
 - [x] 起動直後に `clean_shutdown = 0` を書き、正常終了時に `1` を書く
 - [x] 前回異常終了時は、起動パスで **①マニフェスト末尾修復 → ②範囲限定検証 → ③未完了 `purge_intent` の回復** を自動実行する（`usecases/snapshots.py` の `recover_after_unclean_shutdown()`。GUI起動パス（`presentation/app.py::_start_session()`）とCLI起動パス（`__main__.py::_run_command()`）の両方に配線済み。`remote_delete_intent` の回復（`reconcile_uncertain_deletes()`）はライブIMAP接続を要するため、起動をブロックしないよう対象外のまま据え置く。レビュー修正案 3.3 / 3.4）
 - [x] 起動パスの最初に、A-6のアカウント/フォルダ snapshot バックフィルを実行する（レビュー修正案 9.1）
-- [ ] 復帰フローを実装する（D-6）
-    - [ ] `DBT_DEVICEARRIVAL` または「再接続を試す」で `RECONNECTING` へ入る
-    - [ ] `.maildock_root` のUUID照合 → `.lock` 再取得 → `PRAGMA user_version` 確認 → `PRAGMA quick_check`
-    - [ ] `VERIFYING` で範囲限定検証を実行し、成功したら `ATTACHED` へ戻す
-    - [ ] Phase 3.6 の共通ブートストラップ（旧セッション解放 → 新 `StorageSession` → `MainWindow` 差し替え）を再利用し、二重セッションを作らない
-    - [ ] 検証失敗時は `DETACHED` へ戻し、ユーザー判断を求める
-- [ ] `DETACHED` 中は「再接続を試す／終了」のモーダルのみを表示し、読み取り専用モードを提供しない（F-8）
+- [x] 復帰フローを実装する（D-6）
+    - [x] `DBT_DEVICEARRIVAL` または「再接続を試す」で `RECONNECTING` へ入る
+    - [x] `.maildock_root` のUUID照合 → `.lock` 再取得 → `PRAGMA user_version` 確認 → `PRAGMA quick_check`
+    - [x] `VERIFYING` で範囲限定検証を実行し、成功したら `ATTACHED` へ戻す
+    - [x] Phase 3.6 の共通ブートストラップ（旧セッション解放 → 新 `StorageSession` → `MainWindow` 差し替え）を再利用し、二重セッションを作らない
+    - [x] 検証失敗時は `DETACHED` へ戻し、ユーザー判断を求める
+- [x] `DETACHED` 中は「再接続を試す／終了」のモーダルのみを表示し、読み取り専用モードを提供しない（F-8）
 - [x] `cleanup_tmp()` が `tmp/pstimp/` を保護している区別を、コメントとテストで固定する（D-25）
 
 ---

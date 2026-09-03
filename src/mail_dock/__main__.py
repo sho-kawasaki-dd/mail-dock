@@ -406,6 +406,7 @@ class StorageSession:
         self.credential_store: BaseCredentialStore | None = None
         self.manager: ConnectionManager | None = None
         self._lock: StorageLock | None = None
+        self.recovery_results: tuple[Any, ...] = ()
         self.previous_clean_shutdown: bool | None = None
         self._clean_shutdown_written = False
         self._storage_logging_enabled = False

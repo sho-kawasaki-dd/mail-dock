@@ -311,6 +311,14 @@ ERROR_STORAGE_LOCKED = "他のインスタンスがストレージを使用中�
 ERROR_FOREIGN_ROOT = "選択されたストレージルートは別のアーカイブです。"
 ERROR_STORAGE_DETACHED = "ストレージが切断されました。接続を確認してください。"
 STATUS_STORAGE_DETACHED_BY_USER = "安全に取り外せます"
+STATUS_STORAGE_RECONNECTING = "ストレージを再接続しています..."
+STATUS_STORAGE_VERIFYING = "ストレージを検証しています..."
+DIALOG_STORAGE_DETACHED_TITLE = "ストレージ切断"
+DIALOG_STORAGE_DETACHED_MESSAGE = (
+    "ストレージが切断されています。再接続して検証するか、アプリを終了してください。"
+)
+DIALOG_STORAGE_RECONNECT = "再接続を試す"
+DIALOG_STORAGE_EXIT = "終了"
 ERROR_AUTHENTICATION = "認証に失敗しました。ユーザー名またはパスワードを確認してください。"
 ERROR_CONNECTION = "サーバーに接続できません。"
 ERROR_INSUFFICIENT_SPACE = "ストレージの空き容量が不足しています。"

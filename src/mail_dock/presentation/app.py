@@ -23,12 +23,14 @@ from mail_dock.__main__ import (
 )
 from mail_dock.domain.errors import (
     ConfigError,
+    DatabaseError,
     MailDockError,
     StorageForeignRootError,
     StorageUnsupportedError,
 )
 from mail_dock.domain.ports import BaseIntegrityStorage
 from mail_dock.domain.storage_state import StorageStateMachine
+from mail_dock.infrastructure.database.migrator import current_version
 from mail_dock.infrastructure.storage.capabilities import (
     capability_level,
     probe_capabilities,
@@ -47,6 +49,7 @@ from mail_dock.infrastructure.storage.storage_root import (
 )
 from mail_dock.presentation import strings
 from mail_dock.presentation.context import AppContext
+from mail_dock.presentation.native.device_watcher import DeviceWatcher
 from mail_dock.presentation.storage_monitor import StorageMonitor
 from mail_dock.presentation.views.dialogs.confirmation_dialog import ConfirmationDialog
 from mail_dock.presentation.views.dialogs.error_dialog import show_error
@@ -64,6 +67,20 @@ from mail_dock.usecases.trash import (
 )
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _verify_reconnected_storage(session: StorageSession) -> None:
+    """Check the reopened database before allowing a recovered session to run."""
+
+    manager = session.connection_manager
+    connection = manager.get_connection()
+    try:
+        version = current_version(connection)
+        if version <= 0:
+            raise DatabaseError("Reconnected database has no schema version")
+        _verify_database(connection)
+    finally:
+        manager.close_current_thread()
 
 
 class _StartupVerificationWorker(QObject):
@@ -393,7 +410,7 @@ def _start_session(
                 context.create_message_repository(),
                 context.create_manifest_reader,
             )
-            recover_after_unclean_shutdown(
+            session.recovery_results = recover_after_unclean_shutdown(
                 context.create_message_repository(),
                 cast(BaseIntegrityStorage, context.create_eml_storage()),
                 context.create_purge_storage(),
@@ -417,8 +434,12 @@ class _GuiRuntime:
         self.context: AppContext | None = None
         self.window: Any = None
         self.storage_monitor: StorageMonitor | None = None
+        self.device_watcher: DeviceWatcher | None = None
         self.verification_thread: QThread | None = None
         self.verification_result: dict[str, Any] = {"error": None, "window": None}
+        self._replacement_window: Any = None
+        self._reconnect_root: Path | None = None
+        self._reconnect_prepared = False
 
     def attach(self, session: StorageSession, context: AppContext) -> None:
         self.session = session
@@ -427,6 +448,7 @@ class _GuiRuntime:
         context.storage_root_switch_handler = self.switch_root
         context.storage_setup_handler = self.start_setup
         context.storage_detach_handler = self.safe_detach
+        context.storage_reconnect_handler = self.request_reconnect
         context.window_created_handler = self._window_created
 
     def start(self, root: Path) -> AppContext:
@@ -435,6 +457,11 @@ class _GuiRuntime:
         return context
 
     def _window_created(self, window: Any) -> None:
+        previous_monitor = self.storage_monitor
+        if previous_monitor is not None:
+            previous_monitor.stop()
+        if self.device_watcher is not None:
+            self.device_watcher.uninstall(self.application)
         self.window = window
         if self.session is None or self.context is None:
             return
@@ -454,6 +481,7 @@ class _GuiRuntime:
             storage_lock=getattr(self.session, "storage_lock", None),
             connection_manager=self.session.connection_manager,
             workers=workers,
+            reconnect=self._reconnect,
             config_log_dir=config.config_dir(),
             parent=window if isinstance(window, QObject) else None,
         )
@@ -463,7 +491,108 @@ class _GuiRuntime:
         show_storage_detached = getattr(window, "_show_storage_detached", None)
         if callable(show_storage_detached):
             self.storage_monitor.storage_detached.connect(show_storage_detached)
+        self.device_watcher = DeviceWatcher()
+        self.device_watcher.device_query_remove.connect(self._handle_device_query_remove)
+        self.device_watcher.device_removed.connect(self._handle_device_removed)
+        self.device_watcher.device_arrived.connect(self._handle_device_arrived)
+        self.device_watcher.install(self.application)
+        replacement_window = self._replacement_window
+        self._replacement_window = None
+        if replacement_window is not None and replacement_window is not window:
+            set_attribute = getattr(replacement_window, "setAttribute", None)
+            if callable(set_attribute):
+                set_attribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
+            close = getattr(replacement_window, "close", None)
+            if callable(close):
+                close()
         self.storage_monitor.start()
+
+    def request_reconnect(self) -> None:
+        """Start recovery after the user selects the retry action."""
+
+        monitor = self.storage_monitor
+        if monitor is not None:
+            monitor.request_reconnect()
+
+    def _device_matches_root(self, drives: object) -> bool:
+        if self.session is None:
+            return False
+        drive, _tail = os.path.splitdrive(str(self.session.root))
+        if not drive:
+            return True
+        if not isinstance(drives, (tuple, list, set, frozenset)):
+            return False
+        return drive.rstrip("\\/").casefold() in {
+            str(candidate).rstrip("\\/").casefold() for candidate in drives
+        }
+
+    def _handle_device_query_remove(self, drives: object) -> None:
+        if self._device_matches_root(drives):
+            self.safe_detach()
+
+    def _handle_device_removed(self, drives: object) -> None:
+        if self._device_matches_root(drives) and self.storage_monitor is not None:
+            self.storage_monitor.handle_device_removed()
+
+    def _handle_device_arrived(self, drives: object) -> None:
+        if self._device_matches_root(drives) and self.storage_monitor is not None:
+            self.storage_monitor.handle_device_arrived()
+
+    def _prepare_reconnect(self) -> bool:
+        if self._reconnect_prepared:
+            return self._reconnect_root is not None
+        session = self.session
+        if session is None:
+            return False
+        self._reconnect_root = session.root
+        self._replacement_window = self.window
+        if self.storage_monitor is not None:
+            self.storage_monitor.stop()
+        if self.device_watcher is not None:
+            self.device_watcher.uninstall(self.application)
+            self.device_watcher = None
+        if self.window is not None:
+            _stop_window(self.window, self.context)
+            hide = getattr(self.window, "hide", None)
+            if callable(hide):
+                hide()
+        session.__exit__(RuntimeError, RuntimeError("storage reconnect"), None)
+        self.session = None
+        self.context = None
+        self._reconnect_prepared = True
+        return True
+
+    def _reconnect(self) -> bool:
+        """Release old handles and stage a new session for verification."""
+
+        if not self._prepare_reconnect() or self._reconnect_root is None:
+            return False
+        new_session: StorageSession | None = None
+        try:
+            new_session, new_context = _start_session(self.settings, self._reconnect_root)
+            recovery_results = getattr(new_session, "recovery_results", ())
+            if any(
+                getattr(result, "cancelled", False) or getattr(result, "issues", ())
+                for result in recovery_results
+            ):
+                raise DatabaseError("Storage range verification failed after reconnect")
+            _verify_reconnected_storage(new_session)
+        except BaseException as error:
+            if new_session is not None:
+                new_session.__exit__(type(error), error, error.__traceback__)
+            old_window = self._replacement_window
+            if old_window is not None:
+                show = getattr(old_window, "show", None)
+                if callable(show):
+                    show()
+            return False
+
+        self.window = None
+        self.attach(new_session, new_context)
+        self.verify_and_show()
+        self._reconnect_root = None
+        self._reconnect_prepared = False
+        return True
 
     def verify_and_show(self) -> None:
         if self.session is None or self.context is None:
@@ -482,6 +611,9 @@ class _GuiRuntime:
         if self.storage_monitor is not None:
             self.storage_monitor.stop()
             self.storage_monitor = None
+        if self.device_watcher is not None:
+            self.device_watcher.uninstall(self.application)
+            self.device_watcher = None
         if self.window is not None:
             _stop_window(self.window, self.context)
             # Prevent Qt's quitOnLastWindowClosed from ending app.exec() before
@@ -496,6 +628,12 @@ class _GuiRuntime:
             self.context.stop_workers()
         if self.session is not None:
             self.session.__exit__(None, None, None)
+        replacement_window = self._replacement_window
+        self._replacement_window = None
+        if replacement_window is not None:
+            close = getattr(replacement_window, "close", None)
+            if callable(close):
+                close()
         self.window = None
         self.context = None
         self.session = None
@@ -514,6 +652,9 @@ class _GuiRuntime:
                 stop_workers()
             if self.storage_monitor is not None:
                 self.storage_monitor.stop()
+            if self.device_watcher is not None:
+                self.device_watcher.uninstall(self.application)
+                self.device_watcher = None
             checkpoint = getattr(session, "checkpoint_for_detach", None)
             if callable(checkpoint):
                 checkpoint()

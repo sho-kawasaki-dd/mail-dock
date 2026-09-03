@@ -122,6 +122,7 @@ class AppContext:
         self.storage_root_switch_handler: Callable[[Path], None] | None = None
         self.storage_setup_handler: Callable[[Path | None], None] | None = None
         self.storage_detach_handler: Callable[[], None] | None = None
+        self.storage_reconnect_handler: Callable[[], None] | None = None
         self.window_created_handler: Callable[[Any], None] | None = None
 
     @property
@@ -326,6 +327,7 @@ class AppContext:
         on_storage_root_switch: Callable[[Path], None] | None = None,
         on_storage_setup: Callable[[Path | None], None] | None = None,
         on_storage_detach: Callable[[], None] | None = None,
+        on_storage_reconnect: Callable[[], None] | None = None,
     ) -> Any:
         """Construct the main window through the presentation composition root."""
 
@@ -336,6 +338,7 @@ class AppContext:
             on_storage_root_switch=(on_storage_root_switch or self.storage_root_switch_handler),
             on_storage_setup=on_storage_setup or self.storage_setup_handler,
             on_storage_detach=on_storage_detach or self.storage_detach_handler,
+            on_storage_reconnect=on_storage_reconnect or self.storage_reconnect_handler,
         )
         if self.window_created_handler is not None:
             self.window_created_handler(window)

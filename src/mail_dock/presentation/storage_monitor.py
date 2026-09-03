@@ -20,7 +20,7 @@ from mail_dock.infrastructure.storage.storage_root import RootProbe, probe
 LOGGER = logging.getLogger(__name__)
 
 ProbeFunc = Callable[[Path, str | None], RootProbe]
-ReconnectFunc = Callable[[], None]
+ReconnectFunc = Callable[[], bool | None]
 
 
 class StorageMonitor(QObject):
@@ -146,6 +146,7 @@ class StorageMonitor(QObject):
 
         if self.state not in {StorageState.DETACHED, StorageState.DETACHED_BY_USER}:
             return
+        self._detached_handled = False
         self._transition(StorageEvent.RECONNECT_REQUESTED)
         self._reprobe_count = 0
         self._schedule_reprobe()
@@ -154,6 +155,7 @@ class StorageMonitor(QObject):
         """Start reconnecting after a native device-arrival notification."""
 
         if self.state is StorageState.DETACHED:
+            self._detached_handled = False
             self._transition(StorageEvent.DEVICE_ARRIVED)
             self._reprobe_count = 0
             self._schedule_reprobe()
@@ -197,7 +199,10 @@ class StorageMonitor(QObject):
                 self._notify_reconnected()
             else:
                 self._transition(StorageEvent.IDENTITY_OK, result)
-                self._notify_reconnected()
+                if self._notify_reconnected():
+                    self._transition(StorageEvent.VERIFY_OK, result)
+                else:
+                    self._transition(StorageEvent.VERIFY_FAILED, result)
             return
         if result is RootProbe.FOREIGN:
             if self.state is StorageState.RECONNECTING:
@@ -257,11 +262,17 @@ class StorageMonitor(QObject):
         LOGGER.error("Storage detached: %s", detail)
         self.storage_detached.emit(detail)
 
-    def _notify_reconnected(self) -> None:
-        """Let the composition root replace stopped resources after recovery."""
+    def _notify_reconnected(self) -> bool:
+        """Let the composition root replace resources and report verification."""
 
-        if self.reconnect is not None:
-            self.reconnect()
+        if self.reconnect is None:
+            return False
+        try:
+            result = self.reconnect()
+        except Exception:
+            LOGGER.exception("Storage reconnect failed")
+            return False
+        return result is not False
 
     def _touch_heartbeat(self) -> None:
         if self.storage_lock is None:

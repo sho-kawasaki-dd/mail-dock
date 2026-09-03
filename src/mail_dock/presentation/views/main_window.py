@@ -116,12 +116,14 @@ class MainWindow(QMainWindow):
         on_storage_root_switch: Callable[[Path], None] | None = None,
         on_storage_setup: Callable[[Path | None], None] | None = None,
         on_storage_detach: Callable[[], None] | None = None,
+        on_storage_reconnect: Callable[[], None] | None = None,
     ) -> None:
         super().__init__()
         self.context = context
         self._on_storage_root_switch = on_storage_root_switch
         self._on_storage_setup = on_storage_setup
         self._on_storage_detach = on_storage_detach
+        self._on_storage_reconnect = on_storage_reconnect
         self.setObjectName("mainWindow")
         self.setWindowTitle(strings.MAIN_WINDOW_TITLE)
         self._workers_stopped = False
@@ -144,6 +146,7 @@ class MainWindow(QMainWindow):
         self._ui_settings = QSettings("mail-dock", "mail-dock")
         self._exit_requested = False
         self._close_handled = False
+        self._recovery_dialog_active = False
         self._tray_icon: QSystemTrayIcon | None = None
         self._tray_sync_action: QAction | None = None
         self.sync_timer = QTimer(self)
@@ -1487,7 +1490,7 @@ class MainWindow(QMainWindow):
         self._pending_export_destination = None
 
     def _show_storage_detached(self, _error: object) -> None:
-        """Show the detached banner; recovery state handling remains Phase 4."""
+        """Show the detached banner and require an explicit recovery choice."""
 
         self._storage_detached_banner.setText(strings.BANNER_STORAGE_DETACHED)
         self._storage_detached_banner.setVisible(True)
@@ -1506,6 +1509,37 @@ class MainWindow(QMainWindow):
         storage_detach_action = getattr(self, "storage_detach_action", None)
         if storage_detach_action is not None:
             storage_detach_action.setEnabled(False)
+        delete_remote_action = getattr(self, "delete_remote_action", None)
+        if delete_remote_action is not None:
+            delete_remote_action.setEnabled(False)
+        if not getattr(self, "_recovery_dialog_active", False) and callable(
+            getattr(self, "_on_storage_reconnect", None)
+        ):
+            self._show_storage_recovery_dialog()
+
+    def _show_storage_recovery_dialog(self) -> None:
+        self._recovery_dialog_active = True
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Critical)
+        dialog.setWindowTitle(strings.DIALOG_STORAGE_DETACHED_TITLE)
+        dialog.setText(strings.DIALOG_STORAGE_DETACHED_MESSAGE)
+        reconnect_button = dialog.addButton(
+            strings.DIALOG_STORAGE_RECONNECT,
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        exit_button = dialog.addButton(
+            strings.DIALOG_STORAGE_EXIT,
+            QMessageBox.ButtonRole.RejectRole,
+        )
+        dialog.setDefaultButton(reconnect_button)
+        dialog.exec()
+        self._recovery_dialog_active = False
+        if dialog.clickedButton() is reconnect_button:
+            reconnect = getattr(self, "_on_storage_reconnect", None)
+            if reconnect is not None:
+                reconnect()
+        elif dialog.clickedButton() is exit_button:
+            self._request_exit()
 
     def _show_storage_detached_by_user(self) -> None:
         self._storage_detached_banner.setText(strings.BANNER_STORAGE_DETACHED_BY_USER)
@@ -1538,6 +1572,20 @@ class MainWindow(QMainWindow):
                 self._show_storage_detached_by_user()
             else:
                 self._show_storage_detached(state)
+            return
+        if state is StorageState.RECONNECTING:
+            self._storage_detached_banner.setText(strings.STATUS_STORAGE_RECONNECTING)
+            self._storage_detached_banner.setVisible(True)
+            self._storage_status_label.setText(strings.STATUS_STORAGE_RECONNECTING)
+            self.sync_action.setEnabled(False)
+            self.refresh_folders_action.setEnabled(False)
+            return
+        if state is StorageState.VERIFYING:
+            self._storage_detached_banner.setText(strings.STATUS_STORAGE_VERIFYING)
+            self._storage_detached_banner.setVisible(True)
+            self._storage_status_label.setText(strings.STATUS_STORAGE_VERIFYING)
+            self.sync_action.setEnabled(False)
+            self.refresh_folders_action.setEnabled(False)
             return
         if state is StorageState.ATTACHED:
             self._storage_detached_banner.setVisible(False)

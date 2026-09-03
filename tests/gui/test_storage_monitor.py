@@ -251,3 +251,47 @@ def test_worker_storage_signal_enters_degraded_state(qtbot: Any, tmp_storage_roo
 
     assert monitor.state is StorageState.DEGRADED
     monitor.stop()
+
+
+def test_device_arrival_runs_reconnect_verification_before_attaching(
+    qtbot: Any, tmp_storage_root: Path
+) -> None:
+    del qtbot
+    monitor, _lock, _manager, _worker = _monitor(
+        tmp_storage_root,
+        lambda _root, _uuid: RootProbe.OK,
+    )
+    states: list[StorageState] = []
+    monitor.storage_state_changed.connect(states.append)
+    monitor.reconnect = lambda: True
+
+    monitor.handle_device_removed()
+    monitor.handle_device_arrived()
+    monitor._reprobe()
+
+    assert states == [
+        StorageState.DETACHED,
+        StorageState.RECONNECTING,
+        StorageState.VERIFYING,
+        StorageState.ATTACHED,
+    ]
+
+
+def test_reconnect_verification_failure_returns_to_detached(
+    qtbot: Any, tmp_storage_root: Path
+) -> None:
+    del qtbot
+    monitor, _lock, _manager, _worker = _monitor(
+        tmp_storage_root,
+        lambda _root, _uuid: RootProbe.OK,
+    )
+    detached: list[object] = []
+    monitor.storage_detached.connect(detached.append)
+    monitor.reconnect = lambda: False
+
+    monitor.handle_device_removed()
+    monitor.handle_device_arrived()
+    monitor._reprobe()
+
+    assert monitor.state is StorageState.DETACHED
+    assert len(detached) == 2
