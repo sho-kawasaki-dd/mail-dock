@@ -147,6 +147,7 @@ class MainWindow(QMainWindow):
         self._exit_requested = False
         self._close_handled = False
         self._recovery_dialog_active = False
+        self._tray_notice_shown = False
         self._tray_icon: QSystemTrayIcon | None = None
         self._tray_sync_action: QAction | None = None
         self.sync_timer = QTimer(self)
@@ -254,6 +255,7 @@ class MainWindow(QMainWindow):
 
         if not self._exit_requested and not self._workers_stopped and self._tray_icon is not None:
             self.hide()
+            self._notify_tray_minimize()
             event.ignore()
             return
         if self._close_handled:
@@ -268,6 +270,22 @@ class MainWindow(QMainWindow):
         self.detail_view.close()
         self.stop_workers()
         super().closeEvent(event)
+        # QWidget.close() skips its internal hide() (and thus quitOnLastWindowClosed)
+        # when the window is already hidden, so the tray-minimize path never quits
+        # the event loop on its own; request it explicitly.
+        QApplication.instance().quit()
+
+    def _notify_tray_minimize(self) -> None:
+        """Tell the user once that closing the window keeps the app running in the tray."""
+
+        if self._tray_notice_shown or self._tray_icon is None:
+            return
+        self._tray_notice_shown = True
+        self._tray_icon.showMessage(
+            strings.TRAY_MINIMIZE_NOTICE_TITLE,
+            strings.TRAY_MINIMIZE_NOTICE_BODY,
+            QSystemTrayIcon.MessageIcon.Information,
+        )
 
     def _build_central_layout(self) -> None:
         middle = QWidget(self)

@@ -115,6 +115,11 @@ TRAY_STATUS_WAITING = "待機中"
 TRAY_STATUS_SYNCING = "同期中"
 TRAY_STATUS_ERROR = "エラー"
 TRAY_STATUS_DETACHED = "切断"
+TRAY_MINIMIZE_NOTICE_TITLE = f"{APP_NAME}はバックグラウンドで実行中です"
+TRAY_MINIMIZE_NOTICE_BODY = (
+    "ウィンドウを閉じてもタスクトレイに常駐し、同期を継続します。"
+    "終了するには、トレイアイコンのメニューまたはファイルメニューの「終了」を選択してください。"
+)
 
 INTEGRITY_TITLE = "整合性チェック"
 INTEGRITY_RUN = "実行"
