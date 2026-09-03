@@ -52,11 +52,11 @@ _FETCH_FIELDS = frozenset(
         "relative_path",
         "file_hash",
         "size_bytes",
-        "internal_date",
         "timestamp",
         "deduplicated",
     }
 )
+# internal_date was added to fetch events after Phase 4; older manifests lack the key.
 _CHECKPOINT_FIELDS = frozenset({"event", "account_id", "timestamp", "sequence", "batch_id"})
 _ACCOUNT_SNAPSHOT_FIELDS = frozenset(
     {
@@ -186,10 +186,11 @@ def _validate_event(event: Mapping[str, JSONValue]) -> dict[str, JSONValue]:
             raise TypeError("fetch event size_bytes must be an integer")
         if not isinstance(payload["deduplicated"], bool):
             raise TypeError("fetch event deduplicated must be a boolean")
-        if payload["internal_date"] is not None and not isinstance(payload["internal_date"], str):
+        internal_date = payload.get("internal_date")
+        if internal_date is not None and not isinstance(internal_date, str):
             raise TypeError("fetch event internal_date must be an ISO-8601 string or null")
-        if payload["internal_date"] is not None:
-            _parse_timestamp(payload["internal_date"])
+        if internal_date is not None:
+            _parse_timestamp(internal_date)
     elif event_name == "fetch_skipped":
         required_fields = {"uid", "uidvalidity", "size_bytes", "reason"}
         skipped_missing_fields = required_fields.difference(payload)

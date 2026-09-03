@@ -101,6 +101,18 @@ def test_fetch_requires_all_manifest_fields(tmp_path: Path, field: str) -> None:
         writer.append(event)
 
 
+def test_fetch_event_without_internal_date_is_readable(tmp_path: Path) -> None:
+    event = _fetch_event("2026-07-30T12:34:56Z")
+    del event["internal_date"]
+
+    with ManifestWriter(tmp_path, "account") as writer:
+        writer.append(event)
+
+    path = tmp_path / "manifests/imap/account/events-202607.jsonl"
+    read_back = list(read_events(path))
+    assert read_back == [event]
+
+
 def test_manifest_flush_and_sync_is_the_fsync_boundary(tmp_path: Path) -> None:
     writer = ManifestWriter(tmp_path, "account")
     try:
