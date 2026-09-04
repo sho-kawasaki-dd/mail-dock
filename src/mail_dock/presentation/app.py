@@ -819,10 +819,15 @@ class _GuiRuntime:
             pending_probe = result
             return result
 
+        def before_confirm(selected_root: Path) -> None:
+            if pending_probe is None:
+                raise ConfigError("Storage root must be probed before confirmation")
+            # Must run on the GUI thread: releases the QTimer/QWidget-owning old session.
+            self._release_current()
+
         def start_session(selected_root: Path) -> AppContext:
             if pending_probe is None:
                 raise ConfigError("Storage root must be probed before confirmation")
-            self._release_current()
             self.settings = _commit_setup_root(self.settings, selected_root, pending_probe)
             return self.start(selected_root)
 
@@ -831,6 +836,7 @@ class _GuiRuntime:
             context=None,
             expected_root_uuid=self.settings.storage_root_uuid,
             on_root_confirmed=start_session,
+            on_before_confirm=before_confirm,
             on_root_probe=probe_root,
             on_root_identity_probe=lambda path: probe(path, self.settings.storage_root_uuid).value,
             check_root_space=lambda path: check_free_space(path).value,

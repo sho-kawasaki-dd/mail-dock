@@ -34,6 +34,7 @@ from mail_dock.usecases.sync_folders import refresh_folders, set_sync_target
 from .dialogs.progress_dialog import ProgressDialog, run_with_progress
 
 RootContextFactory = Callable[[Path], Any]
+RootBeforeConfirmHook = Callable[[Path], None]
 RootCapabilityProbe = Callable[[Path, str], Mapping[str, object]]
 RootIdentityProbe = Callable[[Path], str]
 RootInitializer = Callable[[Path], str]
@@ -62,6 +63,7 @@ class SetupWizard(QWizard):
         context: Any | None = None,
         expected_root_uuid: str | None = None,
         on_root_confirmed: RootContextFactory | None = None,
+        on_before_confirm: RootBeforeConfirmHook | None = None,
         on_root_probe: RootCapabilityProbe | None = None,
         root_initializer: RootInitializer | None = None,
         on_root_identity_probe: RootIdentityProbe | None = None,
@@ -75,6 +77,7 @@ class SetupWizard(QWizard):
         self._context = context
         self._expected_root_uuid = expected_root_uuid
         self._on_root_confirmed = on_root_confirmed
+        self._on_before_confirm = on_before_confirm
         self._on_root_probe = on_root_probe
         self._on_root_identity_probe = on_root_identity_probe
         self._root_initializer = root_initializer
@@ -361,6 +364,10 @@ class SetupWizard(QWizard):
             on_root_confirmed = self._on_root_confirmed
             selected_root = self._selected_root
             try:
+                # Runs on the GUI thread, unlike on_root_confirmed below: releasing the
+                # previous session touches QTimer/QWidget owned by the GUI thread.
+                if self._on_before_confirm is not None:
+                    self._on_before_confirm(selected_root)
                 self._context = run_with_progress(
                     lambda: on_root_confirmed(selected_root),
                     strings.WIZARD_STATUS_STARTING_STORAGE,
