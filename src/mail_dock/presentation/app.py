@@ -705,7 +705,12 @@ class _GuiRuntime:
             set_attribute = getattr(self.window, "setAttribute", None)
             if callable(set_attribute):
                 set_attribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
-            close = getattr(self.window, "close", None)
+            # close_for_session_swap() (when available) skips MainWindow.closeEvent's
+            # QApplication.quit(), so a run_with_progress() call right after this isn't
+            # handed an already-quitting event loop. Fall back to close() for fakes.
+            close = getattr(self.window, "close_for_session_swap", None)
+            if not callable(close):
+                close = getattr(self.window, "close", None)
             if callable(close):
                 close()
         elif self.context is not None:
