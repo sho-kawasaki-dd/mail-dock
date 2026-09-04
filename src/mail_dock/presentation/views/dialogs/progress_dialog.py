@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QEventLoop, Signal
+from PySide6.QtCore import QEventLoop, Qt, Signal
 from PySide6.QtWidgets import QProgressDialog, QWidget
 
 from mail_dock.domain.errors import MailDockError
@@ -79,8 +79,11 @@ def run_with_progress(
         outcome["error"] = error
         loop.quit()
 
-    worker.result.connect(_succeeded)
-    worker.failed.connect(_failed)
+    # Force queued delivery: result/failed are plain closures (not QObject slots), so
+    # AutoConnection can resolve to Direct and run on the worker thread, letting
+    # loop.quit() race ahead of loop.exec() and get silently dropped by Qt.
+    worker.result.connect(_succeeded, Qt.ConnectionType.QueuedConnection)
+    worker.failed.connect(_failed, Qt.ConnectionType.QueuedConnection)
     worker.submit(operation)
     loop.exec()
     dialog.finish()
@@ -88,4 +91,6 @@ def run_with_progress(
     if "error" in outcome:
         error = outcome["error"]
         raise error if isinstance(error, BaseException) else MailDockError(str(error))
-    return outcome.get("value")
+    if "value" not in outcome:
+        raise MailDockError("Storage operation produced no result")
+    return outcome["value"]

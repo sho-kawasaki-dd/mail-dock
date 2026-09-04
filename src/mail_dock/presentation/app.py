@@ -786,10 +786,10 @@ class _GuiRuntime:
                 close_current_thread()
             return session, context
 
-        session, context = cast(
-            "tuple[StorageSession, AppContext]",
-            run_with_progress(_run, strings.STATUS_STORAGE_SWITCHING),
-        )
+        result = run_with_progress(_run, strings.STATUS_STORAGE_SWITCHING)
+        if not isinstance(result, tuple) or len(result) != 2:
+            raise DatabaseError("Storage root switch produced no session")
+        session, context = cast("tuple[StorageSession, AppContext]", result)
         self.attach(session, context)
         updated = replace(
             context.settings,
