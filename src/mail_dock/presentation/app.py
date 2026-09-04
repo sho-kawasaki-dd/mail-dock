@@ -851,6 +851,12 @@ class _GuiRuntime:
             resolve_drive_kind=lambda path: drive_kind(path).value,
             resolve_free_space=free_space,
         )
+        # before_confirm() already closed the previous window, so this parentless
+        # wizard would otherwise be the last visible one; quitOnLastWindowClosed
+        # must not end app.exec() before the restored/replacement window shows.
+        set_attribute = getattr(wizard, "setAttribute", None)
+        if callable(set_attribute):
+            set_attribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
         accepted = wizard.exec() == QDialog.DialogCode.Accepted
         if accepted and self.session is not None:
             self.verify_and_show()
@@ -947,6 +953,11 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
                 resolve_drive_kind=lambda path: drive_kind(path).value,
                 resolve_free_space=free_space,
             )
+            # No main window exists yet during first-run bootstrap, so this
+            # parentless wizard must not end app.exec() via quitOnLastWindowClosed.
+            set_attribute = getattr(setup_wizard, "setAttribute", None)
+            if callable(set_attribute):
+                set_attribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
             if setup_wizard.exec() != QDialog.DialogCode.Accepted:
                 return 0
             root = setup_wizard.selected_root

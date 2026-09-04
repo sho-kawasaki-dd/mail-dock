@@ -5,7 +5,8 @@ from types import SimpleNamespace
 from typing import Any, ClassVar, cast
 
 import pytest
-from PySide6.QtWidgets import QFileDialog
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QDialog, QFileDialog
 
 from mail_dock import config
 from mail_dock.domain.errors import StorageForeignRootError
@@ -416,6 +417,38 @@ def test_setup_cancel_reports_error_and_quits_when_reopening_old_root_fails(
     assert shown == []
     assert runtime.session is None
     assert runtime.context is None
+
+
+def test_start_setup_wizard_is_excluded_from_quit_on_last_window_closed(
+    qapp: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del qapp
+    old_root = tmp_path / "old"
+    old_session = _Session(config.AppConfig(), old_root)
+    old_context = _WindowContext(old_root, [])
+    runtime = app._GuiRuntime(cast(Any, object()), config.AppConfig())
+    runtime.attach(cast(Any, old_session), cast(Any, old_context))
+
+    attribute_before_exec: list[bool] = []
+
+    class _WizardStub(QDialog):
+        def __init__(self, **_kwargs: Any) -> None:
+            super().__init__()
+
+        def exec(self) -> int:
+            attribute_before_exec.append(self.testAttribute(Qt.WidgetAttribute.WA_QuitOnClose))
+            return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(app, "SetupWizard", _WizardStub)
+
+    # before_confirm() already closes the previous window (real app.py behavior), so
+    # a parentless wizard left counting toward quitOnLastWindowClosed would end
+    # app.exec() as soon as it closes, before any replacement window can show.
+    runtime.start_setup()
+
+    assert attribute_before_exec == [False]
 
 
 def test_switch_warning_cancel_does_not_call_runtime(

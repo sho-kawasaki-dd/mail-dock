@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Any, ClassVar, cast
 
 import pytest
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QDialog
 
 from mail_dock import config
 from mail_dock.domain.errors import StorageUnsupportedError
@@ -382,6 +384,34 @@ def test_setup_root_probe_does_not_initialize_or_persist_root(
     assert result["encryption"] == "unknown"
     assert loaded == settings
     assert saved == []
+
+
+def test_bootstrap_wizard_is_excluded_from_quit_on_last_window_closed(
+    qapp: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del qapp
+    monkeypatch.setattr(app, "register_schemes", lambda: None)
+    monkeypatch.setattr(app, "_available_root", lambda _settings, _requested: None)
+
+    attribute_before_exec: list[bool] = []
+
+    class _WizardStub(QDialog):
+        def __init__(self, **_kwargs: Any) -> None:
+            super().__init__()
+
+        def exec(self) -> int:
+            attribute_before_exec.append(self.testAttribute(Qt.WidgetAttribute.WA_QuitOnClose))
+            return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(app, "SetupWizard", _WizardStub)
+
+    # No main window exists yet during first-run bootstrap, so a parentless wizard
+    # left counting toward quitOnLastWindowClosed would end app.exec() prematurely.
+    result = app.run_gui(config.AppConfig())
+
+    assert result == 0
+    assert attribute_before_exec == [False]
 
 
 def test_run_gui_cancelled_wizard_does_not_create_session(
