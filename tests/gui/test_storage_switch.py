@@ -286,6 +286,138 @@ def test_cancelled_setup_keeps_current_session(
     assert events == []
 
 
+class _ConnectionManager:
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    def close_current_thread(self) -> None:
+        self.close_calls += 1
+
+
+def _wizard_confirming_then_cancelling(new_root: Path) -> type:
+    class _Wizard:
+        def __init__(self, **kwargs: Any) -> None:
+            self._on_root_probe = kwargs["on_root_probe"]
+            self._on_before_confirm = kwargs["on_before_confirm"]
+            self._on_root_confirmed = kwargs["on_root_confirmed"]
+
+        def exec(self) -> int:
+            self._on_root_probe(new_root, "unknown")
+            self._on_before_confirm(new_root)
+            self._on_root_confirmed(new_root)
+            return 0  # QDialog.DialogCode.Rejected
+
+    return _Wizard
+
+
+def test_setup_cancel_after_root_confirmed_closes_new_session_and_reopens_old_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    old_root = tmp_path / "old"
+    new_root = tmp_path / "new"
+    old_session = _Session(config.AppConfig(), old_root, events)
+    old_context = _WindowContext(old_root, events)
+    runtime = app._GuiRuntime(cast(Any, object()), config.AppConfig())
+    runtime.attach(cast(Any, old_session), cast(Any, old_context))
+    shown: list[str] = []
+    cast(Any, runtime).verify_and_show = lambda: shown.append("shown")
+
+    new_connection_manager = _ConnectionManager()
+
+    def start_session(
+        settings: config.AppConfig,
+        root: Path,
+    ) -> tuple[_Session, _WindowContext]:
+        session = _Session(settings, root, events)
+        session.__enter__()
+        if root == new_root:
+            cast(Any, session).connection_manager = new_connection_manager
+        return session, _WindowContext(root, events)
+
+    monkeypatch.setattr(app, "_start_session", start_session)
+    monkeypatch.setattr(app, "_commit_setup_root", lambda settings, _root, _result: settings)
+    monkeypatch.setattr(
+        app, "_probe_setup_root", lambda settings, _root, _encryption: (settings, {})
+    )
+    monkeypatch.setattr(app.config, "save", lambda _settings: None)
+    monkeypatch.setattr(app, "SetupWizard", _wizard_confirming_then_cancelling(new_root))
+
+    runtime.start_setup()
+
+    # Regression check: the session opened while switching roots is closed on the
+    # worker thread that opened it, instead of leaking through to assert_all_closed().
+    assert new_connection_manager.close_calls == 1
+    assert events == [
+        "stop-workers",
+        "old-exit",
+        "new-enter",
+        "stop-workers",
+        "old-exit",
+        "new-enter",
+    ]
+    assert runtime.context is not None
+    assert runtime.context.storage_root == old_root
+    assert shown == ["shown"]
+    assert runtime.fatal_error is None
+
+
+def test_setup_cancel_reports_error_and_quits_when_reopening_old_root_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    old_root = tmp_path / "old"
+    new_root = tmp_path / "new"
+    old_session = _Session(config.AppConfig(), old_root, events)
+    old_context = _WindowContext(old_root, events)
+
+    class _FakeApplication:
+        def __init__(self) -> None:
+            self.quit_calls = 0
+
+        def quit(self) -> None:
+            self.quit_calls += 1
+
+    application = _FakeApplication()
+    runtime = app._GuiRuntime(cast(Any, application), config.AppConfig())
+    runtime.attach(cast(Any, old_session), cast(Any, old_context))
+    shown: list[str] = []
+    cast(Any, runtime).verify_and_show = lambda: shown.append("shown")
+
+    reopen_error = RuntimeError("old root missing")
+
+    def start_session(
+        settings: config.AppConfig,
+        root: Path,
+    ) -> tuple[_Session, _WindowContext]:
+        if root == old_root:
+            raise reopen_error
+        session = _Session(settings, root, events)
+        session.__enter__()
+        return session, _WindowContext(root, events)
+
+    monkeypatch.setattr(app, "_start_session", start_session)
+    monkeypatch.setattr(app, "_commit_setup_root", lambda settings, _root, _result: settings)
+    monkeypatch.setattr(
+        app, "_probe_setup_root", lambda settings, _root, _encryption: (settings, {})
+    )
+    monkeypatch.setattr(app.config, "save", lambda _settings: None)
+    monkeypatch.setattr(app, "SetupWizard", _wizard_confirming_then_cancelling(new_root))
+    errors: list[BaseException] = []
+    monkeypatch.setattr(app, "_show_error", errors.append)
+
+    runtime.start_setup()
+
+    assert errors == [reopen_error]
+    assert application.quit_calls == 1
+    assert runtime.fatal_error is reopen_error
+    assert shown == []
+    assert runtime.session is None
+    assert runtime.context is None
+
+
 def test_switch_warning_cancel_does_not_call_runtime(
     qtbot: Any,
     monkeypatch: pytest.MonkeyPatch,

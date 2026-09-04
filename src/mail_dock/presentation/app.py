@@ -470,6 +470,7 @@ class _GuiRuntime:
         self.device_watcher: DeviceWatcher | None = None
         self.verification_thread: QThread | None = None
         self.verification_result: dict[str, Any] = {"error": None, "window": None}
+        self.fatal_error: BaseException | None = None
         self._replacement_window: Any = None
         self._reconnect_root: Path | None = None
         self._reconnect_prepared = False
@@ -829,7 +830,14 @@ class _GuiRuntime:
             if pending_probe is None:
                 raise ConfigError("Storage root must be probed before confirmation")
             self.settings = _commit_setup_root(self.settings, selected_root, pending_probe)
-            return self.start(selected_root)
+            context = self.start(selected_root)
+            # Runs on run_with_progress()'s worker thread: leaving this connection
+            # owned by that thread makes assert_all_closed() fail on next release.
+            connection_manager = getattr(self.session, "connection_manager", None)
+            close_current_thread = getattr(connection_manager, "close_current_thread", None)
+            if callable(close_current_thread):
+                close_current_thread()
+            return context
 
         wizard = SetupWizard(
             initial_root=initial_root,
@@ -852,7 +860,15 @@ class _GuiRuntime:
                 self._release_current()
                 self.settings = old_settings
                 config.save(old_settings)
-                self.start(old_root)
+                try:
+                    self.start(old_root)
+                except BaseException as error:
+                    # Nothing left to fall back to: report it and let run_gui() unwind.
+                    LOGGER.exception("Failed to restore the previous storage root")
+                    self.fatal_error = error
+                    _show_error(error)
+                    self.application.quit()
+                    return
                 self.verify_and_show()
 
     def close(self) -> None:
@@ -903,6 +919,11 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
                     pending_probe,
                 )
                 session, context = _start_session(active_settings, selected_root)
+                # Runs on run_with_progress()'s worker thread: see start_setup() above.
+                connection_manager = getattr(session, "connection_manager", None)
+                close_current_thread = getattr(connection_manager, "close_current_thread", None)
+                if callable(close_current_thread):
+                    close_current_thread()
                 updated_settings = replace(
                     session.settings,
                     storage_root_uuid=session.root_uuid,
@@ -954,6 +975,10 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
         runtime.verification_thread = verification_thread
         runtime.verification_result = verification_result
         event_code = app.exec()
+        if runtime.fatal_error is not None:
+            # start_setup() already released the window/session; nothing left to reconcile.
+            session_error = runtime.fatal_error
+            return _exit_code(session_error) if isinstance(session_error, MailDockError) else 1
         window = verification_result["window"]
         runtime.window = window
         error = verification_result["error"]
