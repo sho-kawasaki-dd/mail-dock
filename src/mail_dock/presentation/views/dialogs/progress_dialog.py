@@ -24,6 +24,9 @@ class ProgressDialog(QProgressDialog):
         self.setAutoClose(False)
         self.setAutoReset(False)
         self.setMinimumDuration(0)
+        # Must never count as the app's last window (e.g. shown while the main
+        # window is closed mid storage-switch, with no replacement window yet).
+        self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
         self._token: CancelToken | None = None
         self.canceled.connect(self._cancel_token)
 
