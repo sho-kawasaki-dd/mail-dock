@@ -48,7 +48,7 @@
 | F-3 | `ca_cert_path` が指定されている場合、`ssl.create_default_context()` に対し `load_verify_locations(cafile=ca_cert_path)` を適用したコンテキストを構築する。ファイルが存在しない・読み込めない場合は `ConfigError` を送出し、検証を無効化してフォールバックしない | D-6 |
 | F-4 | `connect()` で（STARTTLS完了後、またはTLS確立直後の）`CAPABILITY` に `LOGINDISABLED` が含まれる場合、`connection.login(...)` の代わりに SASL PLAIN で `connection.authenticate("PLAIN", callback)` を呼ぶ | D-5 |
 | F-5 | `wrap_imap_errors` が STARTTLS失敗・SASL認証失敗を適切に `AuthenticationError` / `TransientError` へ分類する（既存の `AUTHENTICATIONFAILED` 判定に加え、SASL関連の失敗文字列を判定に追加する） | D-5 |
-| F-6 | `accounts` テーブルに `tls_mode TEXT NOT NULL DEFAULT 'implicit'` と `ca_cert_path TEXT` を追加するマイグレーション `005_generic_imap_connection.sql` を作成する。既存行の `provider_type='onamae_imap'` を `'imap'` に正規化するUPDATE文を含める | D-3, D-4, D-6 |
+| F-6 | `accounts` テーブルに `tls_mode TEXT NOT NULL DEFAULT 'implicit'` と `ca_cert_path TEXT` を追加するマイグレーション `007_generic_imap_connection.sql` を作成する。既存行の `provider_type='onamae_imap'` を `'imap'` に正規化するUPDATE文を含める | D-3, D-4, D-6 |
 | F-7 | `usecases/register_account.py` の `register_account` / `update_account` に `tls_mode` / `ca_cert_path` 引数を追加し、`provider_type` の書き込み値を `"imap"` に変更する | D-3, F-6 |
 | F-8 | `domain/repository.py` の `MessageRecord` 相当の型・`SqliteMessageRepository` の `_ACCOUNT_COLUMNS`（該当箇所）に新カラムを反映する | F-6 |
 | F-9 | `presentation/context.py` の `AppContext.create_fetcher()` / `create_fetcher_for_credentials()` と `__main__._account_fetcher()` を、新カラムを読み取って `GenericImapFetcher` へ渡すよう更新する | F-1, F-6 |
@@ -84,7 +84,7 @@
 
 ### **Group B: DBスキーマとリポジトリ**
 
-- [ ] `migrations/005_generic_imap_connection.sql` を追加し、`accounts.tls_mode TEXT NOT NULL DEFAULT 'implicit'` と `accounts.ca_cert_path TEXT` を追加する
+- [ ] `migrations/007_generic_imap_connection.sql` を追加し、`accounts.tls_mode TEXT NOT NULL DEFAULT 'implicit'` と `accounts.ca_cert_path TEXT` を追加する
 - [ ] 同マイグレーション内で `UPDATE accounts SET provider_type = 'imap' WHERE provider_type = 'onamae_imap'` を実行する
 - [ ] `SqliteMessageRepository` の該当カラム定義（アカウント読み書きに関わる箇所）に `tls_mode` / `ca_cert_path` を追加する
 - [ ] `tests/support/in_memory_repository.py` のアカウント関連実装に新カラムを反映する

@@ -174,7 +174,7 @@ mail-dock/
 │   └── migrations/
 │       ├── 001_init.sql
 │       ├── 002_sync_cursor.sql
-│       └── 003_pst_import.sql
+│       └── 006_pst_import.sql
 │
 └── tests/
     ├── unit/                 # ドメイン・ユースケース・パーサの単体テスト
@@ -240,7 +240,7 @@ UI層・DB保管層と通信層を独立させるため、アダプターパタ�
 
 1. **ファイル名は `sha256(eml_bytes)` の先頭32桁**とする（Message-IDのハッシュではない）。理由:
    * Message-ID が欠損しているメールでも一意に決定できる
-    * 完全に同一内容のメールは物理ファイルを共有できる（メール項目自体は重複排除しない）
+    * 完全に同一内容のメールは同一アカウント内でのみ物理ファイルを共有できる（メール項目自体は重複排除しない）
    * ファイル名自体が整合性チェックサムとして機能する
 2. **年月ディレクトリは `Date` ヘッダではなく IMAP の `INTERNALDATE`** を使う。`Date` ヘッダは偽装・欠損・不正フォーマットがあり、パス決定に使うと分散が壊れるため。
 3. **ストレージルートの再検出:** ルート直下に `.maildock_root`（UUIDと作成日時を記録したJSON）を置く。設定ファイルには「直近のパス候補リスト」を保存し、起動時に各候補の `.maildock_root` のUUIDを照合することで、**ドライブレターが変わっても自動追従**する。見つからない場合のみユーザーに再選択を求める。
@@ -250,7 +250,7 @@ UI層・DB保管層と通信層を独立させるため、アダプターパタ�
 7. **永続マニフェスト:** PSTでは `import.json` に原本情報と変換条件、`folders.json` に元フォルダ対応、`items.jsonl` に `source_item_key`・元相対パス・最終EMLパス・完全ハッシュ・状態イベントを保存する。purge時も行を削除せずイベントを追記する。IMAPも再構築に必要な取得元情報を同様に記録する。
    * **マニフェストの各JSONL行末にペイロードのCRC32を付与する。** 「JSONとしては読めるが内容が途中で切れている」torn write を検出可能にするため。復旧時は末尾の不正行だけを切り離す（4.8「マニフェスト検証」）。
 8. **共有EMLの削除:** 同一内容を指す複数レコードが同じ `relative_path` を共有し得る。purgeでは非purgedの参照が残っていないことを確認し、最後の参照が消える場合だけ実ファイルを削除する。
-    * 物理共有は同一アカウント内に限定し、DBの完全な `file_hash` で候補を検索した後、既存EMLをその場で再ハッシュして一致した場合だけ行う。ファイル名に使うSHA-256先頭32桁だけでは同一性を判定しない。
+    * 物理共有は同一アカウント内に限定する。PSTでは取込世代ごとにアカウントを分けるため、新旧世代間では物理共有しない。DBの完全な `file_hash` で候補を検索した後、既存EMLをその場で再ハッシュして一致した場合だけ行う。ファイル名に使うSHA-256先頭32桁だけでは同一性を判定しない。
 9. **`tmp/` は必ずストレージルート配下（＝EMLと同一ボリューム）に置く。** `os.replace` の原子性は同一ボリューム内でのみ成立し、`%TEMP%`（C:）を経由させると「コピー＋削除」に退化して、切断時に中途半端なEMLが本番ディレクトリへ残る。**この配置を「ただの慣習」として動かしてはならない。**
 10. **ルートの同定は常に `.maildock_root` のUUIDで行う。** 外付けドライブでは、再接続時に**別のデバイスが同じドライブレターを取得し得る**。「パスが存在する＝自分のルート」という判定は成立しない。プローブ結果は `OK` / `MISSING` / `FOREIGN`（UUID不一致）の3値とし、**`FOREIGN` は `MISSING` より危険**（他人のドライブへの書き込み事故）として即座に全書き込みを禁止する。
 11. **ストレージ適合性セルフテスト:** 製品名ではなく、ストレージルート上で実際に成立する能力を測定する互換性プローブを、ルート初期化時および必要な再検査時に実行する。排他ロック競合、既存ファイルへの `os.replace` 上書き、SQLiteのWAL、ファイルおよび（POSIXでは）ディレクトリの `fsync`、大文字小文字の区別、想定最大長のパス作成を測定し、結果を `OK` / `DEGRADED` / `UNSUPPORTED` に集約する。排他ロックまたは上書き配置が成立しない場合は `UNSUPPORTED`、WALまたは `fsync` が成立しない場合は `DEGRADED` とする。大文字小文字の区別と長いパスの結果は記録するが、単独では判定を下げない。`UNSUPPORTED` の新規ルートは選択を拒否し、既存の運用ルートでは測定結果を保存したうえで、GUIの確認を経た場合だけ続行を許可する。
@@ -574,7 +574,7 @@ conn.execute("PRAGMA cache_size=-64000")  # 64MB
 
 * `PRAGMA user_version` を採用し、`migrations/001_init.sql` から順次適用する。
 * **マイグレーション実行前に `metadata.db.bak.{version}` へ自動バックアップ**を取る。
-* `source_item_key` とプロバイダー別一意インデックスは `001_init.sql` から導入する。Phase 1の `002_sync_cursor.sql` で二カーソルとUIDVALIDITY別失敗管理を追加し、`003_pst_import.sql`（Phase 4.5）で `pst_imports` / `pst_import_items` を追加する。`remote_state='no_remote'` はCHECK制約を置かずアプリ側で検証する。
+* `source_item_key` とプロバイダー別一意インデックスは `001_init.sql` から導入する。Phase 1の `002_sync_cursor.sql` で二カーソルとUIDVALIDITY別失敗管理を追加し、Phase 4で `003_timestamp_format.sql` / `004_flag_refresh.sql` / `005_phase4.sql` を追加する。Phase 4.5で `006_pst_import.sql`、Phase 5.1で `007_generic_imap_connection.sql` を追加する。`remote_state='no_remote'` はCHECK制約を置かずアプリ側で検証する。
 * Phase 5.2（Gmail対応）では「1通が複数ラベルに属する」ため、`messages.folder_id` を `message_folders` 中間テーブルへ移行する想定。この移行計画を最初からマイグレーション履歴に織り込んでおく。
 
 **多重起動防止とスタールロックの検出**
@@ -995,7 +995,7 @@ readpst -e -t e -8 -j 0 -q -C {charset} [-D] -d {logs/pstimp-{job_id}.log} -o {s
 | キャンセル | `Popen.terminate()` → 応答が無ければ `kill()` | `CancelToken` |
 | 失敗時 | `status='abandoned'`、stderr と `-d` ログを保存し不完全stagingを削除 | 当該ファイルを `pst_import_items` に記録し**次へ進む**。未保存項目が残れば `failed_resumable` |
 
-* Stage A 完了後に staging を安全に走査し、項目ごとの `source_item_key`・相対パス・フォルダ・サイズ・ハッシュを `pst_import_items` と `items.jsonl` に固定する。総数を確定して `status='ready_to_ingest'` としてからStage Bを開始する。
+* Stage A 完了後に staging を安全に走査し、項目ごとの `source_item_key`・相対パス・フォルダ・サイズ・ハッシュを `pst_import_items` と `items.jsonl` に固定してfsyncする。総数・インベントリハッシュを確定し、fsync済みの `stageA_done.json` を最後に原子的に配置してから `status='ready_to_ingest'` とし、Stage Bを開始する。マーカーまたはインベントリ検証が欠けるstagingは再開しない。
 * Stage B の途中でキャンセルまたはアプリ終了した場合は `status='cancelled_resumable'` とし、同じ `import_uuid`・staging・項目マニフェストを保持する。次回は新規取り込みではなく同一ジョブの再開として扱う。
 * 全EMLが最終保存済みで解析失敗だけが残る場合は `completed_with_errors` とし、再解析は最終EMLから行えるためstagingを削除する。未保存項目が残る場合は `failed_resumable` としてstagingを保持する。
 * 全項目成功時は `completed` とし、stagingを削除して `staging_path=NULL` にする。未完了ジョブをユーザーが明示的に破棄した場合だけ `abandoned` としてstagingを削除する。
@@ -1119,9 +1119,9 @@ MailDockError
 
 * 未完了ジョブがある場合は「同一ジョブを再開」または「未完了ジョブを破棄」を提示する。再開では新しい `pst_imports` 行やアカウントを作らない。
 * `is_active=1` の完成済みアーカイブがある場合、通常の再取り込みは禁止する。ユーザーが明示的に「再変換」を選んだ場合のみ新しい `import_uuid` と `replaces_id` を持つ世代を作る。
-* 再変換中も旧世代を閲覧可能なまま保持する。新世代の全EML・永続マニフェスト・DB登録を検証後、単一DBトランザクションで新世代を `is_active=1`、旧世代を `is_active=0` / `status='superseded'` に切り替える。
-* 新世代が中断・失敗した場合は旧世代を一切変更しない。切替完了後の旧世代はアーカイブ単位でローカルゴミ箱へ移し、通常の30日猶予またはゴミ箱内での再確認を経てpurgeする。
-* 旧世代のpurgeでも共有EML参照を確認し、最後の参照である場合だけ実ファイルを削除する。世代交代・破棄・purgeはマニフェストと `audit_log` の双方へ記録する。
+* 再変換中も旧世代を閲覧可能なまま保持する。新世代の全EML・永続マニフェスト・DB登録を検証後、切替準備イベントをfsyncし、単一DBトランザクションで新世代を `is_active=1`、旧世代を `is_active=0` / `status='superseded'` に切り替え、旧世代全体をゴミ箱化する。commit前に切替完了イベントをfsyncし、これが無い停止時は旧世代を正として復旧する。
+* 新世代が中断・失敗した場合は旧世代を一切変更しない。切替完了後の旧世代はアーカイブ単位でローカルゴミ箱へ移し、通常の30日猶予を経てpurgeする。猶予中はアーカイブ単位の逆切替で復元できる。
+* 旧世代のpurgeは同一世代内の共有EMLだけを確認し、新旧世代のEMLは共有しない。世代交代・切戻し・破棄・ゴミ箱・purgeはマニフェストと `audit_log` の双方へ記録する。
 
 #### **8. インポートウィザードのフロー**
 
@@ -1443,7 +1443,7 @@ mail-dock本体は **GPL-3.0-or-later** で公開する。同梱する `readpst`
 | **Phase 2: DB & 検索エンジン** | 1週間 | **冒頭でFTS5+trigramの実測PoC**（1万通規模でインデックスサイズ・検索速度・2文字検索の挙動を計測し設計を確定）。その後 external content スキーマ・トリガー・正規化・AND/OR検索・構造化フィルタを実装 |
 | **Phase 3: GUI基礎構築 (PySide6)** | 2週間 | **QtWebEngine を採用する（確定）。`QTextBrowser` 版の比較試作は行わない**。`QTextBrowser` ではリクエストインターセプタ・カスタムスキーム・CSPを含む5層防御を満たせないため、3ペインレイアウト、遅延ロード対応の一覧モデル、QThreadによる非同期同期、HTML表示の5層サンドボックス、添付保存を実装する。QtWebEngineの起動時間・メモリ・配布サイズはPhase 3で実測し、Phase 4のパッケージング判断へ渡す |
 | **Phase 4: 統合 & 例外処理** | 1〜2週間 | サーバー削除の安全装置一式、ゴミ箱・purge、整合性チェック・再インデックス、mboxエクスポート、ドライブ非接続・移動の例外処理、**稼働中の物理切断対策一式（5.7.1）と VHDX detach による切断シナリオテスト**、**フルスケール（5万通/100GB）での実機同期テスト**（ここで `synchronous` の最終決定を行う）。**実績:** VHDX detach による実デバイス切断試験とフルスケール実機同期テストは Phase 4 では実施せず延期した（代替として、フォールト注入によるEML fsync前／`os.replace`直前／マニフェスト追記の行途中／DBコミット中の4点切断を自動テストで検証した。手順は実装計画書_Phase4_統合と例外処理.md 7章を参照）。`synchronous` の最終決定は実機テスト未実施のため Phase 4 の範囲外とし、既定 `NORMAL` を維持した |
-| **Phase 4.5: PSTアーカイブ** | 1〜2週間 | **冒頭で readpst の実PST PoC（ブロッカー判定）**。その後マイグレーション002、PST永続マニフェスト、項目状態管理、Stage A/Bと世代交代、ウィザード、機能ガード、実PST検証、readpst同梱とGPL表記 |
+| **Phase 4.5: PSTアーカイブ** | 1〜2週間 | **冒頭で readpst の実PST PoC（ブロッカー判定）**。その後マイグレーション006、PST永続マニフェスト、項目状態管理、Stage A/Bと世代交代、ウィザード、機能ガード、実PST検証、readpst同梱とGPL表記 |
 | **Phase 5: （拡張）汎用IMAP対応 / Gmail・OAuth2** | 随時 | **Phase 5.1（汎用IMAPサーバー対応）**: ID/パスワード認証を使う任意のIMAPサーバー（お名前.com以外）への対応。`GenericImapFetcher`（`OnamaeImapFetcher`から一般化）、STARTTLS・`LOGINDISABLED`時のSASL PLAINフォールバック・カスタムCA証明書指定への対応。詳細は [実装計画書_Phase5.1_汎用IMAPサーバー対応.md](./実装計画書_Phase5.1_汎用IMAPサーバー対応.md) を参照。**Phase 5.2（Gmail/OAuth2）**: `GmailOAuthFetcher` 実装、OAuth2ブラウザ認証フロー、`message_folders` 中間テーブルへのマイグレーション（ラベル対応） |
 
 **Phase 4.5 の内訳と依存関係**
@@ -1451,7 +1451,7 @@ mail-dock本体は **GPL-3.0-or-later** で公開する。同梱する `readpst`
 | # | タスク | 依存 |
 | :---- | :---- | :---- |
 | 1 | **readpst PoC（最優先・方式のブロッカー判定）**。日本語・文字コード・添付・階層・性能・必要DLL・破損時挙動に加え、Windows禁止文字、予約名、末尾ドット/空白、同名・正規化後衝突、長パス、lspst出力の限界を実測。致命的問題があれば方式を再検討する | ― |
-| 2 | マイグレーション `003_pst_import.sql`、`pst_imports` / `pst_import_items`、永続マニフェスト、`remote_state='no_remote'` 対応 | ―（1と並行可） |
+| 2 | マイグレーション `006_pst_import.sql`、`pst_imports` / `pst_import_items`、永続マニフェスト、`remote_state='no_remote'` 対応 | ―（1と並行可） |
 | 3 | `BaseArchiveImporter` / `readpst_locator` / `readpst_runner` | 1 |
 | 4 | `usecases/import_pst.py`（Stage A→項目確定→Stage B、同一ジョブ再開、世代交代、監査記録） | 2, 3 |
 | 5 | インポートウィザード UI | 4 |

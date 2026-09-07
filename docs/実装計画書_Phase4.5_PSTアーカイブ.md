@@ -31,7 +31,7 @@
 | # | 項目 | 決定内容 |
 | :--- | :---- | :---- |
 | D-1 | 実装順序 | **readpst の実PST PoC（グループA）を最優先の方式ブロッカー判定として先頭に置く**。日本語・文字コード・添付・階層・性能に加え、Windows固有の禁止文字・予約名・末尾ドット/空白・同名衝突・長パス・破損PST時の挙動・`lspst`出力の安定性を実測してから他グループへ進む。致命的な問題が見つかった場合は方式（Outlook COM等の代替）を再検討する |
-| D-2 | マイグレーション番号 | 現時点の最新は `005_phase4.sql`。本フェーズは **`006_pst_import.sql`** を追加する。[実装計画書_Phase5.1](./実装計画書_Phase5.1_汎用IMAPサーバー対応.md#87) が予約している `005_generic_imap_connection.sql` は既存の `005_phase4.sql` と番号が衝突しているため、本フェーズの着手時に **`007_generic_imap_connection.sql` へ繰り下げる修正を行う**（Phase 5.1が未着手であることを確認した上で実施。着手済みの場合はこの修正をスキップし、Phase 4.5は次の空き番号を使う） |
+| D-2 | マイグレーション番号 | 現時点の最新は `005_phase4.sql`。本フェーズは **`006_pst_import.sql`** を追加し、後続のPhase 5.1は **`007_generic_imap_connection.sql`** を使用する。開発計画書および関連する実装計画書の採番はこの割当へ統一済みとする |
 | D-3 | 計画書の構成 | **本フェーズは1冊の計画書にまとめる**。PoC・スキーマ・変換エンジン・ユースケース・機能ガード・GUI・整合性対応・配布は相互依存が強く、別冊に分けると依存関係の追跡コストが上回るため |
 | D-4 | CLIへの公開範囲 | Stage A/Bの実行（PSTインポート本体）は **GUI限定**とする。空き容量警告・オプション選択（文字セット・削除済み含む）・世代交代の確認は対話的な確認を要するため、Phase 4 D-3 と同じ思想でCLIには追加しない。既存の `verify` / `reindex` サブコマンドは **PSTマニフェストにも対応させ**、CLIから検証・再構築だけは行えるようにする |
 | D-5 | readpst の入手経路 | **Windows版**は MSYS2 の `mingw-w64-ucrt-x86_64-libpst` から `readpst.exe` / `lspst.exe` と依存DLLを取得し `vendor/readpst/` へ同梱する（配布物はこれのみ）。**Linux版**（`pst-utils` パッケージ）はCIの結合テスト専用とし、配布物には含めない。取得手順は `tools/fetch_readpst.ps1`（Windows）としてスクリプト化し、CIでも同じスクリプトを使う |
@@ -43,8 +43,11 @@
 | D-11 | PST結合テストのCI方針 | pytest に **`pst` マーカーを追加**し、`ci.yml` の3ジョブすべてで `-m "not docker and not gui and not pst"` として**常に除外**する。ローカルでの手動実行のみとし、readpst未同梱環境ではフィクスチャ側でskipする |
 | D-12 | 配布・GPL遵守 | Phase 4.5 に含める。`vendor/readpst/` の取得スクリプト・`THIRD-PARTY-LICENSES.md` の完成・リリースCI（`release.yml`）でのGPL成果物遵守チェックまでを本フェーズのスコープとする。**PyInstaller/Inno Setupによる実際のパッケージングは Phase 6（配布）へ送る**（開発計画書 5.9 は配布全体のフェーズであり、本フェーズはreadpst同梱の土台を作るところまで） |
 | D-13 | 既存フックの扱い | 既存コードには PST 対応の**先回り実装**が3箇所ある: [infrastructure/database/reindex.py](../src/mail_dock/infrastructure/database/reindex.py) の `manifests/pst` 明示スキップ、[infrastructure/storage/eml_storage.py](../src/mail_dock/infrastructure/storage/eml_storage.py) の `tmp/pstimp` 保護、[presentation/models/folder_tree_model.py](../src/mail_dock/presentation/models/folder_tree_model.py) の `message_filter` コメント。本フェーズはこれらのスキップ・保護を「解除」または「実装で埋める」形で進め、既存の防御的挙動（未対応時は安全側にスキップする）を壊さない |
-| D-14 | 重複排除 | **行わない**。IMAP側に同一メールがあっても両方保持する（開発計画書 1.3 / 4.10-6）。`content_key` はPST内・IMAP内それぞれの非一意照合にのみ使い、系統をまたいだ突合は行わない |
+| D-14 | 重複排除・物理共有 | IMAPとPSTの重複排除・相互参照は行わない。物理EML共有は**同一アカウント（PSTでは同一取込世代）内だけ**とし、新旧PST世代間では共有しない。`content_key` は各系統内の非一意照合にのみ使い、系統や世代をまたいだ突合には使わない |
 | D-15 | 対応形式 | `.pst` のみ。`.ost` / 単体 `.msg` / mbox はスコープ外（開発計画書 1.4）。`-t e`（メールのみ）は固定オプションとし、設定項目にしない |
+| D-16 | 世代の可視性と切戻し | 通常のPST一覧・検索には `is_active=1` かつ `completed` / `completed_with_errors` の世代だけを表示する。取込途中は再開UIだけ、`superseded` 世代はPSTゴミ箱だけに表示する。30日猶予中はアーカイブ単位で切戻し可能とし、現行世代との入替を単一トランザクションで行う |
+| D-17 | 切断時の調停 | 切断中はDB・マニフェスト・stagingへ書き込まず、readpst停止と内蔵ディスクへのログ記録だけを行う。再接続後にマーカーとマニフェストを検証して状態を調停する。世代切替は `generation_switch_committed` が無い場合は旧世代を正として復旧する |
+| D-18 | readpstの信頼境界 | 同梱readpstは信頼境界内の独立プロセスとして扱う。staging走査のパス検証はstaging外の出力を**取り込まない**ためのものであり、コンバーターによるstaging外書込みのOSレベル封じ込めは本フェーズの対象外とする |
 
 ### **2.2 機能要件**
 
@@ -54,13 +57,13 @@
 | :--- | :---- | :---- |
 | F-1 | `readpst -e -t e -8 -j 0 -q -C {charset} [-D] -d {logs/pstimp-{job_id}.log} -o {staging} {pst}` を `shell=False`・引数リストで起動すること。`-w` は使用しないこと | 4.10-1 |
 | F-2 | 起動前に `readpst -V` でバージョンを取得し `pst_imports.readpst_version` へ記録すること | 4.10-1 |
-| F-3 | Stage A はレジューム不可とし、中断時は `tmp/pstimp/{job_id}/` を破棄してやり直すこと。`CancelToken` 経由で `Popen.terminate()` → 応答が無ければ `kill()` すること | 4.10-2 |
-| F-4 | Stage A 完了時に fsync 済みの `stageA_done.json` 完了マーカーを作成すること。マーカーが無い staging は次回 `suspect` 扱いとし、再開ではなく破棄＋再抽出を促すこと | 5.7.1-5 |
-| F-5 | Stage A 完了後、staging 配下を全走査して各項目の `source_item_key`・相対パス・フォルダ対応・サイズ・ハッシュを確定し、`pst_import_items` と `items.jsonl` へ固定してから `status='ready_to_ingest'` とすること。走査時に全件 `Path(p).resolve()` が staging ルート配下であることを再検証し、外れた項目はスキップして警告ログを残すこと（readpst が作るディレクトリ名はPST内フォルダ名＝敵性入力であるため） | 4.10-5-2 |
-| F-6 | Stage B は未完了の `pst_import_items` のみを対象とし、開発計画書 4.7 の保存順序（EML保存 → `items.jsonl` 追記+fsync → `BEGIN IMMEDIATE` でDBコミット）をそのまま適用すること | 4.7 / 4.10-2 |
+| F-3 | Stage A はレジューム不可とし、中断時は `tmp/pstimp/{job_id}/` を破棄してやり直すこと。`CancelToken` 経由で `Popen.terminate()` → 応答が無ければ `kill()` すること。切断中は削除・状態更新を試みず、再接続後の調停で処理する | 4.10-2 / D-17 |
+| F-4 | Stage A のreadpst終了後、staging全走査・全項目マニフェストの永続化・fsyncを完了してから、項目数・インベントリSHA-256・静的マニフェストSHA-256を含む `stageA_done.json` を `tmp`→fsync→`os.replace`→親ディレクトリfsync の順で作成すること。マーカーまたは検証が欠けるstagingは `suspect` とし、再開ではなく破棄＋再抽出を促すこと | 5.7.1-5 / D-17 |
+| F-5 | Stage A 完了後、staging 配下を全走査して各項目の `source_item_key`・相対パス・フォルダ対応・サイズ・ハッシュを確定し、`pst_import_items` と `items.jsonl` へ固定してfsyncしてから `stageA_done.json` を作成すること。走査時に通常ファイル以外・symlink・junction/reparse point・`Path(p).resolve()` がstagingルート外となる項目をスキップし、警告ログを残すこと | 4.10-5-2 / D-18 |
+| F-6 | Stage B は未完了の `pst_import_items` のみを対象とし、EML保存 → 対応する `items.jsonl` イベント追記+fsync → `BEGIN IMMEDIATE` で `messages` / `message_contents` / 項目状態・パス・集計値を同一トランザクションでコミットすること。失敗時はロールバックし、マニフェストを正として再適用できること | 4.7 / 4.10-2 |
 | F-7 | Stage B の途中でキャンセルまたはアプリ終了した場合は `status='cancelled_resumable'` とし、同じ `import_uuid`・staging・項目マニフェストを保持すること。次回は新規取込ではなく同一ジョブの再開として扱うこと | 4.10-2 |
 | F-8 | 全EMLが最終保存済みで解析失敗だけが残る場合は `completed_with_errors` としstagingを削除すること。未保存項目が残る場合は `failed_resumable` としstagingを保持すること。全項目成功時は `completed` としstagingを削除すること | 4.10-2 |
-| F-9 | 1ファイルが100MBを超える場合、ハッシュはチャンク計算して保存するが本文解析はスキップし、`pst_import_items.error_class='oversize'` として記録すること（後から「再解析」で復旧可能にする） | 4.10-5-6 |
+| F-9 | 1ファイルが100MBを超える場合、ストリーミング保存でハッシュをチャンク計算し、本文解析はスキップして `pst_import_items.error_class='oversize'` として記録すること。Dateは上限付きヘッダー読み取りで判定し、不正・未来日時・取得不能時は `unknown/` に保存する（後から「再解析」で復旧可能） | 4.10-5-6 |
 | F-10 | `Date` が解釈できないメールは `internal_date=NULL`、`date_sent=NULL` とし、保存先を `unknown/` にすること | 4.7 / 4.10-4 |
 
 #### **抽象化層・変換ランナー（開発計画書 4.10-3）**
@@ -79,7 +82,7 @@
 | F-15 | `migrations/006_pst_import.sql` に `pst_imports`（`import_uuid` UNIQUE、`source_sha256`、`status`、`is_active`、`replaces_id`、`superseded_at`、`staging_path` 等）と `pst_import_items`（PK `(import_id, source_item_key)`）を追加すること。`uq_active_pst_source`（`source_sha256` に対する `is_active=1` の一意インデックス）を含むこと | 3.5.1 |
 | F-16 | `remote_state='no_remote'` はCHECK制約を置かずアプリ側で検証すること。`uid`/`uidvalidity`/`imap_flags`/`flags_seen_at`/`last_seen_at`/`internal_date` は常にNULLとすること | 3.3 |
 | F-17 | `folders.raw_name` に staging ルートからの相対ディレクトリパスを登録すること。元PST名を一意に復元できない場合はreadpst出力名を表示し、`original_name_unresolved=true` をマニフェストへ記録すること。`uidvalidity=NULL` / `last_seen_uid=0` / `is_sync_target=0` で固定すること | 3.2 |
-| F-18 | `manifests/pst/{import_uuid}/` に `import.json`（原本SHA-256・サイズ・mtime・readpstバージョン・オプション）・`folders.json`（元フォルダ対応）・`items.jsonl`（`source_item_key`・相対パス・最終EMLパス・完全ハッシュ・状態イベント）を生成すること。`items.jsonl` の各行末に CRC32 を付与し、既存 [manifest.py](../src/mail_dock/infrastructure/storage/manifest.py) と同じ torn write 検出・末尾修復の仕組みを持つこと | 2.4-7 |
+| F-18 | `manifests/pst/{import_uuid}/` に、schema versionを持つ不変の `import.json`（原本SHA-256・サイズ・mtime・ファイル同一性・readpstバージョン・オプション）と `folders.json`（元フォルダ対応）、append-onlyの `items.jsonl` を生成すること。静的JSONは `tmp`→fsync→`os.replace`→親ディレクトリfsyncで配置し、`items.jsonl` は各行末CRC32・torn write末尾修復・イベントスキーマ検証を既存 [manifest.py](../src/mail_dock/infrastructure/storage/manifest.py) と同等に実装すること。DBを除去しても全状態を再構築できるイベントを保存すること | 2.4-7 / D-17 |
 | F-19 | アカウントIDを `pst_{原本SHA-256の先頭12桁}_{import_uuidの先頭8桁}` 形式で生成すること。完全な原本SHA-256はDBとマニフェストで保持し、短縮値を同一性判定に使わないこと | 2.4-6 |
 
 #### **取込フロー・世代交代（開発計画書 4.10-4・4.10-7）**
@@ -88,11 +91,11 @@
 | :--- | :---- | :---- |
 | F-20 | 取込開始時に完全な `source_sha256` で照合し、未完了ジョブがあれば「再開」または「未完了ジョブを破棄」を提示すること。再開では新しい `pst_imports` 行を作らないこと | 4.10-7 |
 | F-21 | `is_active=1` の完成済みアーカイブがある場合、通常の再取り込みを禁止すること。ユーザーが明示的に「再変換」を選んだ場合のみ新しい `import_uuid` と `replaces_id` を持つ世代を作ること | 4.10-7 |
-| F-22 | 世代交代は新世代の全EML・永続マニフェスト・DB登録を検証後、**単一DBトランザクション**で新世代を `is_active=1`、旧世代を `is_active=0` / `status='superseded'` に切り替えること。切替失敗時は旧世代を一切変更しないこと | 4.10-7 |
-| F-23 | 切替完了後の旧世代はアーカイブ単位でローカルゴミ箱へ移し、通常の30日猶予（`config.purge_mode` に従う）を経てpurgeすること。旧世代のpurgeでも共有EML参照を確認すること | 4.10-7 |
+| F-22 | 世代交代は新世代の全EML・永続マニフェスト・DB登録を検証後、`generation_switch_prepared` をfsyncし、単一DBトランザクションで新世代の有効化・旧世代の `superseded` 化・旧世代全メッセージのゴミ箱化を行う。commit前に `generation_switch_committed` をfsyncし、これが無い停止時は旧世代を正として復旧すること | 4.10-7 / D-17 |
+| F-23 | 切替完了後の旧世代はアーカイブ単位でローカルゴミ箱に置き、通常の30日猶予（`config.purge_mode` に従う）を経てpurgeすること。猶予中はアーカイブ単位の逆切替で復元可能にし、旧世代purgeは同一世代内の共有EMLだけを参照確認すること | 4.10-7 / D-14 / D-16 |
 | F-24 | 開始前に **PSTサイズ×2.5** の空き容量を確認し、不足時は開始させないこと。再変換では旧世代保持分も加算すること | 4.10-5-7 |
 | F-25 | 原本 `.pst` は読み取りのみで開き、コピー・移動・変更を一切行わないこと | 4.10-5-5 |
-| F-26 | `audit_log` へ `pst_import` / `pst_reimport` / `pst_supersede` / `pst_import_abandon` を記録すること | 3.5 |
+| F-26 | `audit_log` とPSTマニフェストへ `pst_import` / `pst_reimport` / `pst_supersede` / `pst_restore_generation` / `pst_import_abandon` を記録すること | 3.5 / D-16 |
 
 #### **機能ガード（開発計画書 4.10-6）**
 
@@ -105,7 +108,7 @@
 
 | # | 要件 | 根拠 |
 | :--- | :---- | :---- |
-| F-29 | 左ペインを「メールアカウント」「PSTアーカイブ」の2ルートに分けること。「すべてのアカウント」による横断表示・横断検索は各ルート内でのみ行うこと | 4.6-1 |
+| F-29 | 左ペインを「メールアカウント」「PSTアーカイブ」の2ルートに分けること。「すべてのアカウント」はIMAPのみ、「すべてのPSTアーカイブ」はアクティブで完成済みのPST世代のみを横断表示・検索すること。取込途中は再開UIだけ、旧世代はPSTゴミ箱だけに表示すること | 4.6-1 / D-16 |
 | F-30 | PSTアーカイブ選択中はツールバーの「同期」「サーバーから削除」を非表示にすること | 4.6-1 |
 | F-31 | インポートウィザードが「ファイル選択 → probe → 再開/破棄または中止/再変換の提示 → オプション指定 → 空き容量チェック → Stage A進捗 → Stage B進捗 → （再変換時）世代切替 → サマリ（原本PST保管の注意書き付き）」の順で進むこと | 4.10-8 |
 | F-32 | Stage Aのキャンセルは不完全stagingを削除して `abandoned` とし、Stage Bのキャンセルはstagingと項目マニフェストを保持して `cancelled_resumable` とすること | 4.10-8 |
@@ -116,7 +119,7 @@
 | :--- | :---- | :---- |
 | F-33 | 再インデックス（`reindex`）が `manifests/pst/` からPST擬似アカウント・フォルダ・メッセージ・`pst_imports`/`pst_import_items`・purge墓標・監査イベントを再構築できること | 4.8 / D-4 |
 | F-34 | 孤児スキャン・マニフェスト検証がPSTマニフェストにも対応し、対応イベントの無い孤児は推測登録せず隔離すること | 4.8 |
-| F-35 | ローカルゴミ箱・30日purgeがPST由来メッセージにもIMAP側と完全に同一に効くこと。共有EML参照カウントが世代交代後も正しく機能すること | 4.10-6 |
+| F-35 | ローカルゴミ箱・30日purgeがPST由来メッセージにもIMAP側と完全に同一に効くこと。出自に応じてIMAPまたはPSTのマニフェストwriterへ状態イベントを記録し、共有EML参照カウントは同一世代内で正しく機能し、新旧世代のpurgeが互いのEMLへ影響しないこと | 4.10-6 / D-14 |
 | F-36 | エクスポート（eml / mbox / CSV）がPST由来メッセージにも共通で動作すること | 4.10-6 |
 
 #### **配布・ライセンス（開発計画書 5.9）**
@@ -133,7 +136,7 @@
 | :--- | :---- | :---- | :---- |
 | N-1 | 一時的な必要空き容量 | PSTサイズ × 約2 （抽出先 + 最終EML） | 開始判定は F-24 の×2.5（余裕を含む） |
 | N-2 | Stage A/B の同時実行 | 常に1PSTファイルずつ順次処理 | 一時領域のピークが「最大のPST 1個分」に収まること（1.4） |
-| N-3 | メモリ使用量 | 1ファイル丸ごと読む場合でも600MB以下を維持 | 100MB超は本文解析をスキップ（F-9） |
+| N-3 | メモリ使用量 | 通常解析時も600MB以下を維持 | 100MB超はストリーミング保存し、本文解析をスキップ（F-9） |
 | N-4 | Stage Bの再開性 | ディレクトリ走査順・連番に依存しない | `pst_import_items` に固定した項目のみで判定する |
 | N-5 | レイヤー依存方向 | `domain` ← `usecases` ← `infrastructure`/`presentation` を維持 | `domain/importer.py` は外部依存ゼロ |
 | N-6 | 単一ライター | 同期・PST取込・検証書き込みを`SyncWorker`へ集約 | Phase 4 の不変条件を維持（D-6） |
@@ -146,7 +149,7 @@
 
 ## **3. タスク**
 
-> 依存関係: **A（PoC）→ B（スキーマ・マニフェスト）→ (C・D を並行) → (E・F・G を並行) → H**。I（テスト）は各グループと並行して作成する。
+> 依存関係: **A（PoC）→ (B（スキーマ・マニフェスト）・C（抽象化層・ランナー）) → D（取込）→ (F（GUI）・G（整合性）) → H**。E（機能ガード）はBの後に実施でき、I（テスト）は各グループと並行して作成する。
 
 ### **3.1 グループA: readpst PoC（*最優先。方式のブロッカー判定*）**
 
@@ -162,6 +165,7 @@
 - [ ] 日本語フォルダ名・日本語本文（`cp932` / `iso-2022-jp`）・添付ファイル・深い階層を含むPSTで変換し、文字化け・添付欠損の有無を確認する
 - [ ] `-C cp932` と `-8` の組み合わせで文字化けが解消するか実測する
 - [ ] Windows禁止文字（`: \ / * ? " < > |`）を含むPST内フォルダ名、予約名（`CON`/`PRN`/`NUL`/`COM1`等）、末尾ドット・空白、同名フォルダ、NFC正規化後の衝突をそれぞれ作成し、readpst出力ディレクトリ名がどうなるかを確認する
+- [ ] `..`・絶対パス・UNC・ドライブ指定・ADS・symlink/junction/reparse point相当の名前を含むPSTを試し、readpstの挙動とstaging外に出た出力を取り込まない検証を確認する（OSレベルのreadpst隔離は対象外）
 - [ ] MAX_PATH（260文字）を超えるパスが生成されるケースを作り、`tmp/pstimp/{import_uuid先頭8桁}/` の短いstagingパスで回避できることを確認する
 - [ ] 破損PST・非対応形式PSTを用意し、readpstの終了コード・stderrの内容を確認する
 - [ ] `lspst` の出力形式を確認し、対応するバージョンでのフォーマット安定性・不明形式時のフォールバック方針を確定する
@@ -182,19 +186,20 @@
 - [ ] `idx_pst_src`（`source_sha256`）と `uq_active_pst_source`（`source_sha256` WHERE `is_active=1`）を追加する
 - [ ] `pst_import_items` テーブルを追加する（PK `(import_id, source_item_key)`、`source_relative_path`、`folder_relative_path`、`source_size_bytes`、`source_sha256`、`final_relative_path`、`message_row_id`、`status`、`error_class`、`error_message`、`attempt_count`）
 - [ ] マイグレーション適用前の自動バックアップ（`metadata.db.bak.{version}`）が既存機構で働くことを確認する
-- [ ] [実装計画書_Phase5.1](./実装計画書_Phase5.1_汎用IMAPサーバー対応.md) が未着手であることを確認し、着手済みでなければ同計画書中の `005_generic_imap_connection.sql` の表記を `007_generic_imap_connection.sql` へ修正する（D-2）
+- [x] [実装計画書_Phase5.1](./実装計画書_Phase5.1_汎用IMAPサーバー対応.md) と開発計画書・Phase 0/1の採番表記を `007_generic_imap_connection.sql` / `006_pst_import.sql` へ統一する（D-2）
 
 #### **B-2. リポジトリ拡張**
 
-- [ ] `domain/ports.py` に `BasePstImportRepository`（`create_import` / `update_import_status` / `find_active_by_source_sha256` / `find_incomplete_by_source_sha256` / `upsert_import_item` / `list_incomplete_items` / `list_items` / `activate_generation`（世代交代を単一トランザクションで行う）を定義する
-- [ ] `infrastructure/database/pst_import_repository.py` に `SqlitePstImportRepository` を実装し、既存 `ConnectionManager` の接続・`begin_batch()`/`commit_batch()` 枠を再利用する
+- [ ] `domain/ports.py` に `BasePstImportRepository`（`create_import` / `update_import_status` / `find_active_by_source_sha256` / `find_incomplete_by_source_sha256` / `upsert_import_item` / `list_incomplete_items` / `list_items` / `activate_generation` / `restore_generation`）と、メッセージ・PST項目・集計を同一SQLite接続でcommit/rollbackする書込み単位を定義する
+- [ ] `infrastructure/database/pst_import_repository.py` に `SqlitePstImportRepository` を実装し、既存 `ConnectionManager` の接続を再利用する。`messages` / `message_contents` / `pst_import_items` / 集計値を単一トランザクションで更新し、明示的なrollbackを実装する
 - [ ] `tests/support/in_memory_repository.py` 相当のインメモリ実装（`InMemoryPstImportRepository`）を追加する
 
 #### **B-3. PST永続マニフェスト**
 
 - [ ] `infrastructure/storage/pst_manifest.py` を新設し、`manifests/pst/{import_uuid}/import.json` / `folders.json` / `items.jsonl` の読み書きを実装する
+- [ ] `import.json` / `folders.json` をschema version・内容ハッシュ付きの不変スナップショットとして `tmp`→fsync→`os.replace`→親ディレクトリfsync の順で配置する
 - [ ] `items.jsonl` の行形式を既存 [manifest.py](../src/mail_dock/infrastructure/storage/manifest.py) と同じ `{JSON}|CRC32:{8hex}` にし、`flush_and_sync()` と末尾torn write切り離しのロジックを再利用する（共通化できる部分は抽出してヘルパー化してもよいが、IMAP側マニフェストのイベント種別・frozensetは変更しない）
-- [ ] 状態イベント（`item_saved` / `item_parse_failed` / `item_oversize` / `purge_intent` / `purged` / `import_superseded` 等）の frozenset とスキーマ検証を実装する
+- [ ] `item_discovered` / `item_saved` / `item_parse_failed` / `item_oversize` / `item_reparsed` / `import_ready` / 完了系 / 世代切替のprepared・committed・restore / `trashed` / `restored` / purge系のイベントについて、必須フィールド・遷移・冪等キーを検証するfrozensetとスキーマを実装する
 - [ ] `domain/ports.py` に `BasePstManifestWriter` / `BasePstManifestReader` を追加する
 
 #### **B-4. アプリ側検証**
@@ -239,21 +244,22 @@
 #### **D-1. `usecases/import_pst.py` — 事前検証とジョブ解決**
 
 - [ ] 原本PSTのSHA-256をチャンク計算する（キャンセル可、読み取り専用オープンのみ）
+- [ ] probe時に原本のSHA-256・サイズ・`mtime_ns`・取得可能ならファイル同一性を記録し、Stage A完了後に再検証する。不一致時は抽出物を採用せず `source_changed` として中止する
 - [ ] `check_free_space()` を使い PSTサイズ×2.5 の空き容量を確認する（再変換時は旧世代保持分を加算）
 - [ ] 完全SHA-256で既存 `pst_imports` を照合し、未完了ジョブがあれば「再開」/「破棄」を、`is_active=1` の完成世代があれば「中止」/「再変換」を返す
 
 #### **D-2. Stage A（抽出）**
 
 - [ ] `tmp/pstimp/{import_uuid先頭8桁}/` へ `readpst_runner` を実行する
-- [ ] 完了時に `stageA_done.json`（fsync済み）を作成する
-- [ ] キャンセル・失敗時はstagingを破棄し `status='abandoned'` とする
+- [ ] readpst終了後に全項目インベントリを永続化・fsyncし、項目数と各マニフェストの内容ハッシュを含む `stageA_done.json` を原子的に作成する
+- [ ] 通常のキャンセル・失敗時はstagingを破棄し `status='abandoned'` とする。切断中は書込みや削除をせず、再接続後の調停でマーカーなしを `suspect` として破棄＋再抽出を提示する
 
 #### **D-3. 項目確定とStage B（取込）**
 
-- [ ] staging全走査で各項目の `source_item_key`・相対パス・フォルダ対応・サイズ・ハッシュを固定し、`pst_import_items` と `items.jsonl` へ書き込む
-- [ ] 全件 `Path(p).resolve()` がstagingルート配下であることを再検証し、外れた項目はスキップして警告ログを残す
-- [ ] `total_files` を確定して `status='ready_to_ingest'` とする
-- [ ] Stage Bで未完了項目のみを4.7の順序（`EmlStorage.save()` → `items.jsonl` 追記+fsync → `begin_batch()`/`add_message()`/`commit_batch()`）で処理する
+- [ ] staging全走査で各項目の `source_item_key`・相対パス・フォルダ対応・サイズ・ハッシュを固定し、`pst_import_items` と `item_discovered` イベントへ書き込んでfsyncする
+- [ ] 通常ファイル以外、symlink、junction/reparse point、`Path(p).resolve()` がstagingルート外の項目はスキップし、警告ログを残す
+- [ ] `total_files` とインベントリハッシュを確定し、`import_ready` をfsyncした後に `stageA_done.json` を原子的に配置して `status='ready_to_ingest'` とする
+- [ ] Stage Bで未完了項目のみを4.7の順序（ストリーミングを含む `EmlStorage.save*()` → `items.jsonl` 追記+fsync → 同一トランザクションでメッセージ・項目状態・集計値をcommit）で処理する。失敗時はrollbackし、マニフェストから再適用する
 - [ ] `Date` 未解釈は `internal_date=NULL` / `unknown/` へ、100MB超は `oversize` 記録＋本文解析スキップとする
 - [ ] キャンセル・アプリ終了時は `cancelled_resumable` とし、staging・項目マニフェストを保持する
 - [ ] 全項目成功で `completed`（staging削除）、解析失敗のみ残存で `completed_with_errors`（staging削除）、未保存項目残存で `failed_resumable`（staging保持）とする
@@ -261,14 +267,14 @@
 #### **D-4. 世代交代**
 
 - [ ] 新世代の全EML・マニフェスト・DB登録の検証を実装する
-- [ ] `activate_generation()` により単一DBトランザクションで新世代 `is_active=1` / 旧世代 `is_active=0, status='superseded'` に切り替える
-- [ ] 失敗時に旧世代が一切変更されないことを保証する
-- [ ] 切替完了後、旧世代をアーカイブ単位でローカルゴミ箱へ移す処理を実装する（`trash.py` の既存APIを再利用）
+- [ ] `generation_switch_prepared` をfsync後、`activate_generation()` により単一DBトランザクションで新世代の有効化・旧世代の `superseded` 化・旧世代全件のゴミ箱化を行い、commit前に `generation_switch_committed` をfsyncする
+- [ ] committedイベントが無い停止時は旧世代を正として復旧し、失敗時に旧世代が一切変更されないことを保証する
+- [ ] 切替完了後の旧世代はPSTゴミ箱にだけ表示し、猶予中は `restore_generation()` によりアーカイブ単位で逆切替できるようにする
 
 #### **D-5. 監査・切断対応**
 
 - [ ] `audit_log` へ `pst_import` / `pst_reimport` / `pst_supersede` / `pst_import_abandon` を記録する
-- [ ] `StorageDetachedError` 検知時に readpstプロセスを `terminate()`→`kill()` し、`stageA_done.json` の有無で `suspect`（再抽出）/ 通常再開を判定する（5.7.1-5）
+- [ ] `StorageDetachedError` 検知時はreadpstプロセスを `terminate()`→`kill()` し、切断中にDB・マニフェスト・stagingへ書込まない。再接続後にマーカー・インベントリ・イベントを調停し、マーカーなし/不正は `suspect`（再抽出）、正常なマーカーはマニフェストをDBへ再適用して通常再開とする
 
 ---
 
@@ -299,7 +305,7 @@
 
 - [ ] [reindex.py](../src/mail_dock/infrastructure/database/reindex.py) の `manifests/pst` スキップを解除し、PST擬似アカウント・フォルダ・メッセージ・`pst_imports`/`pst_import_items`・purge墓標・監査イベントの再構築を実装する
 - [ ] `verify.py` の `orphan_scan()` / `verify_manifest()` をPSTマニフェストに対応させる。対応イベントの無い孤児は隔離し、推測登録しない
-- [ ] `trash.py` の purge がPST由来にも同一に効くこと、世代交代後も `count_path_references()` が正しいことを確認する
+- [ ] 出自によりIMAPまたはPSTのマニフェストwriterを選ぶルーターを追加し、trash / restore / purgeの全状態イベントを永続化する。PSTの参照カウントは同一世代内だけを対象とし、新旧世代のpurgeが互いのEMLへ影響しないことを確認する
 - [ ] エクスポート（`export_message.py` / `export_mbox.py` / `export_attachments.py`）がPST由来メッセージでも動作することを確認する
 
 ---
@@ -326,13 +332,13 @@
 - [ ] `tests/unit/test_readpst_locator.py`：パス解決・バージョン取得・DLL欠落時の`ConverterNotFound`
 - [ ] `tests/unit/test_readpst_runner.py`：fake subprocessでのクラッシュ・無応答・キャンセルの注入
 - [ ] `tests/unit/test_lspst_parser.py`：不明形式のフォールバック、PST種別のマジックバイト判定
-- [ ] `tests/unit/test_import_pst.py`：状態遷移表、Stage Bの冪等性・項目順変更耐性・再開・キャンセル、`completed_with_errors`、未完了破棄、世代切替失敗時に旧世代が維持されること、パストラバーサル防御、oversize処理
-- [ ] `tests/unit/test_pst_manifest.py`：`items.jsonl` のCRC32検証・末尾torn write切り離し
+- [ ] `tests/unit/test_import_pst.py`：状態遷移表、Stage Aインベントリ確定前の停止、Stage Bの冪等性・項目順変更耐性・再開・cancel、DB文単位の失敗とrollback、`completed_with_errors`、未完了破棄、切替committed前の停止時に旧世代が維持されること、世代切戻し、原本変更、パストラバーサル防御、oversize処理
+- [ ] `tests/unit/test_pst_manifest.py`：静的JSONの原子的配置・内容ハッシュ、`items.jsonl` のCRC32検証・末尾torn write切り離し、全イベントからの状態再構築
 - [ ] 既存ガードテスト（`test_sync_mail.py` 等）にPSTアカウント拒否のケースを追加する
 
 #### **I-3. 結合テスト（`pst` マーカー、readpst未同梱環境ではskip）**
 
-- [ ] `tests/integration/test_pst_import.py`：実readpstで小規模PSTを取り込み、日本語・文字コード・添付・禁止文字・予約名・末尾ドット/空白・衝突・深い階層・破損PSTを検証する
+- [ ] `tests/integration/test_pst_import.py`：実readpstで小規模PSTを取り込み、日本語・文字コード・添付・禁止文字・予約名・末尾ドット/空白・衝突・深い階層・破損PST・staging外を指す名称を検証する
 - [ ] `tests/integration/test_pst_reindex.py`：`metadata.db`を破棄し、EML＋PSTマニフェストのみからPSTアーカイブが完全復元されることを検証する
 
 #### **I-4. GUIテスト（`gui` マーカー）**
@@ -391,11 +397,11 @@
 
 - [ ] V-1（ブロッカー）. 実PSTのPoCで、日本語・添付・Windows禁止文字・予約名・末尾ドット/空白・衝突・長パスに致命的な問題が無いこと。問題があれば方式を再検討し、本書4章に結論を記載すること
 - [ ] V-2（中核）. Stage Bを任意の件数で中断→再開して、二重登録・欠落なく完了すること。項目順（ディレクトリ走査順）を入れ替えても同一結果になること
-- [ ] V-3（中核）. `metadata.db` を削除し、EML＋PST永続マニフェストだけからPSTアーカイブ（擬似アカウント・フォルダ・メッセージ・purge墓標・監査イベント）が完全復元されること
+- [ ] V-3（中核）. `metadata.db` を削除し、EML＋PST永続マニフェストだけからPSTアーカイブ（擬似アカウント・フォルダ・メッセージ・項目状態・ゴミ箱/ purge墓標・監査イベント・世代の可視性）が完全復元されること
 - [ ] V-4. 世代交代を新世代検証直後に強制失敗させ、旧世代が閲覧可能なまま無傷であること
-- [ ] V-5. Stage A中／Stage B中に `StorageDetachedError` を注入し、Stage Aは `abandoned`（再抽出）、Stage Bは `cancelled_resumable`（再開可能）になること。`stageA_done.json` が無いstagingが `suspect` として再開されないこと
+- [ ] V-5. Stage A中／Stage B中に切断を注入し、切断中にストレージへ書込みを試みないこと。再接続後の調停で、Stage Aはマーカーなし/不正なら `suspect`（破棄＋再抽出）、Stage Bは正常なマーカーとインベントリがあれば `cancelled_resumable`（再開可能）になること
 - [ ] V-6. PSTアカウントに対する同期・フォルダ選択・サーバー削除が、GUI・CLI・ユースケースのすべてで拒否されること
-- [ ] V-7. 共有EMLの参照カウントが世代交代・複数世代の共存中も正しく機能し、最後の参照が消える場合だけ実ファイルが削除されること
+- [ ] V-7. 同一取込世代内の共有EMLで最後の非purged参照が消える場合だけ実ファイルが削除されること。新旧世代のEMLパスは共有されず、旧世代のpurgeが新世代のEMLへ影響しないこと
 - [ ] V-8. リリースCIで、GPL成果物（バイナリ＋COPYING＋対応ソース＋SHA-256）が欠けた場合にジョブが失敗すること
 - [ ] V-9. `uv run ruff format --check .` / `uv run ruff check .` / `uv run mypy` が成功すること
 - [ ] V-10. `uv run pytest -m "not docker and not gui and not pst"` がCIで緑になること（`pst` マーカーはローカル手動実行のみ）

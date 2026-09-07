@@ -551,7 +551,7 @@ FetchError
 | 切断の状態機械 / `WM_DEVICECHANGE` 監視 / ハートビートのタイマー駆動 / 範囲限定検証 / フォールト注入試験 / VHDX detach試験 | Phase 4 |
 | **EML＋マニフェストからの `metadata.db` 完全再構築** | Phase 4 |
 | フルスケール同期（5万通/100GB）と `synchronous` の最終決定 | Phase 4 |
-| PST関連一式 / `vendor/readpst` / `003_pst_import.sql` | Phase 4.5 |
+| PST関連一式 / `vendor/readpst` / `006_pst_import.sql` | Phase 4.5 |
 | Gmail / OAuth2 / `message_folders` 中間テーブル | Phase 5 |
 | IMAP IDLE（プッシュ受信）、フラグの双方向同期、ローカル既読管理 | 恒久的にスコープ外 |
 
