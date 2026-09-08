@@ -161,7 +161,9 @@ def _validate_import_snapshot(snapshot: Mapping[str, JSONValue]) -> dict[str, JS
     if not isinstance(payload["options"], dict):
         raise ValueError("import manifest options must be an object")
     _validate_sha256(payload.get(_CONTENT_HASH_FIELD), _CONTENT_HASH_FIELD)
-    expected = _with_content_hash({key: value for key, value in payload.items() if key != _CONTENT_HASH_FIELD})
+    expected = _with_content_hash(
+        {key: value for key, value in payload.items() if key != _CONTENT_HASH_FIELD}
+    )
     if payload[_CONTENT_HASH_FIELD] != expected[_CONTENT_HASH_FIELD]:
         raise ValueError("import manifest content_sha256 does not match its contents")
     return payload
@@ -195,7 +197,9 @@ def _validate_folders_snapshot(snapshot: Mapping[str, JSONValue]) -> dict[str, J
         ):
             raise TypeError("folder manifest original_name_unresolved must be a boolean")
     _validate_sha256(payload.get(_CONTENT_HASH_FIELD), _CONTENT_HASH_FIELD)
-    expected = _with_content_hash({key: value for key, value in payload.items() if key != _CONTENT_HASH_FIELD})
+    expected = _with_content_hash(
+        {key: value for key, value in payload.items() if key != _CONTENT_HASH_FIELD}
+    )
     if payload[_CONTENT_HASH_FIELD] != expected[_CONTENT_HASH_FIELD]:
         raise ValueError("folder manifest content_sha256 does not match its contents")
     return payload
@@ -254,7 +258,13 @@ def _validate_event(event: Mapping[str, JSONValue]) -> dict[str, JSONValue]:
     elif event_name in {"purge_intent", "purged"}:
         _require_fields(
             payload,
-            {"source_item_key", "relative_path", "file_hash", "shared_reference_count", "physical_delete"},
+            {
+                "source_item_key",
+                "relative_path",
+                "file_hash",
+                "shared_reference_count",
+                "physical_delete",
+            },
             event_name,
         )
         _require_item_key(payload, event_name)
@@ -263,20 +273,17 @@ def _validate_event(event: Mapping[str, JSONValue]) -> dict[str, JSONValue]:
         _require_non_negative_int(payload, "shared_reference_count", event_name)
         if not isinstance(payload["physical_delete"], bool):
             raise TypeError(f"{event_name} physical_delete must be a boolean")
-    elif event_name == "generation_switch_prepared":
-        _require_text(payload, "replaces_import_uuid", event_name)
-        _validate_import_uuid(payload["replaces_import_uuid"])
-    elif event_name == "generation_switch_committed":
-        _require_text(payload, "replaces_import_uuid", event_name)
-        _validate_import_uuid(payload["replaces_import_uuid"])
+    elif event_name in {"generation_switch_prepared", "generation_switch_committed"}:
+        replaces_import_uuid = _require_text(payload, "replaces_import_uuid", event_name)
+        _validate_import_uuid(replaces_import_uuid)
     elif event_name == "generation_superseded":
-        _require_text(payload, "superseded_import_uuid", event_name)
-        _validate_import_uuid(payload["superseded_import_uuid"])
+        superseded_import_uuid = _require_text(payload, "superseded_import_uuid", event_name)
+        _validate_import_uuid(superseded_import_uuid)
     elif event_name == "generation_restored":
-        _require_text(payload, "restored_import_uuid", event_name)
-        _validate_import_uuid(payload["restored_import_uuid"])
-        _require_text(payload, "superseded_import_uuid", event_name)
-        _validate_import_uuid(payload["superseded_import_uuid"])
+        restored_import_uuid = _require_text(payload, "restored_import_uuid", event_name)
+        superseded_import_uuid = _require_text(payload, "superseded_import_uuid", event_name)
+        _validate_import_uuid(restored_import_uuid)
+        _validate_import_uuid(superseded_import_uuid)
     elif event_name == "import_abandoned":
         _require_text(payload, "reason", event_name)
     if "account_id" in payload:
@@ -328,7 +335,9 @@ def _parse_line(line: bytes) -> Mapping[str, JSONValue]:
     try:
         return _validate_event(cast(Mapping[str, JSONValue], decoded))
     except (TypeError, ValueError) as error:
-        raise ManifestCorruptError("PST manifest record does not satisfy the event schema") from error
+        raise ManifestCorruptError(
+            "PST manifest record does not satisfy the event schema"
+        ) from error
 
 
 def _fsync_directory(path: Path) -> None:
@@ -399,6 +408,7 @@ def read_events(path: Path) -> Iterator[Mapping[str, JSONValue]]:
     def iterator() -> Iterator[Mapping[str, JSONValue]]:
         offset = 0
         truncate_at: int | None = None
+        events: list[Mapping[str, JSONValue]] = []
         with storage_io(), path.open("rb") as manifest_file:
             line = manifest_file.readline()
             while line:
@@ -410,6 +420,16 @@ def read_events(path: Path) -> Iterator[Mapping[str, JSONValue]]:
                         raise
                     truncate_at = offset
                     break
+                try:
+                    _validate_transition(event, events)
+                except (TypeError, ValueError) as error:
+                    if next_line:
+                        raise ManifestCorruptError(
+                            "PST manifest event sequence is invalid"
+                        ) from error
+                    truncate_at = offset
+                    break
+                events.append(event)
                 yield event
                 offset += len(line)
                 line = next_line

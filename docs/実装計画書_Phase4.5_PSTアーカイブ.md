@@ -199,11 +199,11 @@
 
 #### **B-3. PST永続マニフェスト**
 
-- [ ] `infrastructure/storage/pst_manifest.py` を新設し、`manifests/pst/{import_uuid}/import.json` / `folders.json` / `items.jsonl` の読み書きを実装する
-- [ ] `import.json`（`account_id`、`display_name`、`import_uuid`、`created_at`、原本SHA-256・サイズ・mtime・ファイル同一性・readpstバージョン・オプション）および `folders.json`（staging相対パス `raw_name` と `display_name` のマッピング）をschema version・内容ハッシュ付きの不変スナップショットとして `tmp`→fsync→`os.replace`→親ディレクトリfsync の順で配置する
-- [ ] `items.jsonl` の行形式を既存 [manifest.py](../src/mail_dock/infrastructure/storage/manifest.py) と同じ `{JSON}|CRC32:{8hex}` にし、`flush_and_sync()` と末尾torn write切り離しのロジックを再利用する（共通化できる部分は抽出してヘルパー化してもよいが、IMAP側マニフェストのイベント種別・frozensetは変更しない）
-- [ ] 個別メッセージのイベント（`item_discovered` / `item_saved` / `item_parse_failed` / `item_oversize` / `item_reparsed` / `import_ready` / `purge_intent` / `purged`）および世代ライフサイクルイベント（`generation_switch_prepared` / `generation_switch_committed` / `generation_restored` / `generation_superseded` / `import_abandoned`）について、必須フィールド・遷移・冪等キーを検証するfrozensetとスキーマを実装する（個別メッセージの通常ゴミ箱移動・復元はマニフェストへ書かずDB `local_state` のみで管理しIMAPと対称にする）
-- [ ] `domain/ports.py` に `BasePstManifestWriter` / `BasePstManifestReader` を追加する
+- [x] `infrastructure/storage/pst_manifest.py` を新設し、`manifests/pst/{import_uuid}/import.json` / `folders.json` / `items.jsonl` の読み書きを実装する
+- [x] `import.json`（`account_id`、`display_name`、`import_uuid`、`created_at`、原本SHA-256・サイズ・mtime・ファイル同一性・readpstバージョン・オプション）および `folders.json`（staging相対パス `raw_name` と `display_name` のマッピング）をschema version・内容ハッシュ付きの不変スナップショットとして `tmp`→fsync→`os.replace`→親ディレクトリfsync の順で配置する
+- [x] `items.jsonl` の行形式を既存 [manifest.py](../src/mail_dock/infrastructure/storage/manifest.py) と同じ `{JSON}|CRC32:{8hex}` にし、`flush_and_sync()` と末尾torn write切り離しのロジックを再利用する（共通化できる部分は抽出してヘルパー化してもよいが、IMAP側マニフェストのイベント種別・frozensetは変更しない）
+- [x] 個別メッセージのイベント（`item_discovered` / `item_saved` / `item_parse_failed` / `item_oversize` / `item_reparsed` / `import_ready` / `purge_intent` / `purged`）および世代ライフサイクルイベント（`generation_switch_prepared` / `generation_switch_committed` / `generation_restored` / `generation_superseded` / `import_abandoned`）について、必須フィールド・遷移・冪等キーを検証するfrozensetとスキーマを実装する（個別メッセージの通常ゴミ箱移動・復元はマニフェストへ書かずDB `local_state` のみで管理しIMAPと対称にする）
+- [x] `domain/ports.py` に `BasePstManifestWriter` / `BasePstManifestReader` を追加する
 
 #### **B-4. アプリ側検証**
 
