@@ -163,9 +163,9 @@
 
 #### **A-2. 実PSTでの実測（手元の実PSTを使用）**
 
-- [ ] 日本語フォルダ名・日本語本文（`cp932` / `iso-2022-jp`）・添付ファイル・深い階層を含むPSTで変換し、文字化け・添付欠損の有無を確認する
+- [x] 日本語フォルダ名・日本語本文（`cp932` / `iso-2022-jp`）・添付ファイル・深い階層を含むPSTで変換し、文字化け・添付欠損の有無を確認する **問題なし**
 - [x] 日本語フォルダ名を含むPSTの変換で `mk_separate_dir` が `Illegal byte sequence` で失敗する事象を確認した。原因はreadpst.exeの既定マニフェストに `activeCodePage` 指定が無く、プロセスのANSIコードページ（CP932）でUTF-8フォルダ名をnarrow `_mkdir` に渡していたため。`vendor/readpst/readpst.exe.manifest`（`activeCodePage=UTF-8`）を `mt.exe` でreadpst.exeのリソースへ適用し、実機（Windows 11）で解消を確認した（D-19）
-- [ ] `-C cp932` と `-8` の組み合わせで文字化けが解消するか実測する
+- [x] `-C cp932` と `-8` の組み合わせで文字化けが解消するか実測する
 - [ ] Windows禁止文字（`: \ / * ? " < > |`）を含むPST内フォルダ名、予約名（`CON`/`PRN`/`NUL`/`COM1`等）、末尾ドット・空白、同名フォルダ、NFC正規化後の衝突をそれぞれ作成し、readpst出力ディレクトリ名がどうなるかを確認する
 - [ ] `..`・絶対パス・UNC・ドライブ指定・ADS・symlink/junction/reparse point相当の名前を含むPSTを試し、readpstの挙動とstaging外に出た出力を取り込まない検証を確認する（OSレベルのreadpst隔離は対象外）
 - [ ] MAX_PATH（260文字）を超えるパスが生成されるケースを作り、`tmp/pstimp/{import_uuid先頭8桁}/` の短いstagingパスで回避できることを確認する
@@ -371,7 +371,7 @@
 | MAX_PATH超過時の回避可否 | （記入） |
 | 破損PST時の終了コード・stderr | （記入） |
 | `lspst`出力の安定性 | （記入） |
-| 変換速度（分/GB目安） | （記入） |
+| 変換速度（分/GB目安） | 10.3分/GB |
 | 致命的問題の有無・方式継続の可否 | （記入） |
 
 ---
