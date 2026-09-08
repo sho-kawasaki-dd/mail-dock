@@ -106,8 +106,30 @@ def test_pst_message_rejects_remote_fields(
 
     with pytest.raises(ValueError, match="no_remote"):
         repository.add_message(record)
-    with pytest.raises(ValueError, match="NULL"):
-        repository.add_message({**record, "remote_state": "no_remote", "uid": 1})
+
+    for field in (
+        "uid",
+        "uidvalidity",
+        "imap_flags",
+        "flags_seen_at",
+        "last_seen_at",
+        "internal_date",
+    ):
+        with pytest.raises(ValueError, match="NULL"):
+            repository.add_message(
+                {
+                    **record,
+                    "remote_state": "no_remote",
+                    field: "remote-value",
+                }
+            )
+
+    repository.add_message({**record, "remote_state": "no_remote"})
+    assert db_conn.execute(
+        "SELECT uid, uidvalidity, imap_flags, flags_seen_at, last_seen_at, "
+        "internal_date FROM messages WHERE source_item_key = ?",
+        ("item-1",),
+    ).fetchone() == (None, None, None, None, None, None)
 
 
 def test_generation_activation_and_restore_switch_message_visibility(

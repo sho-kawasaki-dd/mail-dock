@@ -207,7 +207,7 @@
 
 #### **B-4. アプリ側検証**
 
-- [ ] `remote_state='no_remote'` のメッセージについて、`uid`/`uidvalidity`/`imap_flags`/`flags_seen_at`/`last_seen_at`/`internal_date` が常にNULLであることをリポジトリ層で検証するヘルパーを追加する（CHECK制約は置かない。F-16）
+- [x] `remote_state='no_remote'` のメッセージについて、`uid`/`uidvalidity`/`imap_flags`/`flags_seen_at`/`last_seen_at`/`internal_date` が常にNULLであることをリポジトリ層で検証するヘルパーを追加する（CHECK制約は置かない。F-16）
 
 ---
 
