@@ -275,7 +275,9 @@ class MainWindow(QMainWindow):
             # QWidget.close() skips its internal hide() (and thus quitOnLastWindowClosed)
             # when the window is already hidden, so the tray-minimize path never quits
             # the event loop on its own; request it explicitly.
-            QApplication.instance().quit()
+            application = QApplication.instance()
+            if application is not None:
+                application.quit()
 
     def close_for_session_swap(self) -> None:
         """Close without quitting the app (storage-root switch/reconnect in app.py)."""
