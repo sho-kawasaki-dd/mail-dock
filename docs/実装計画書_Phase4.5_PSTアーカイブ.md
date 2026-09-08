@@ -166,8 +166,8 @@
 - [x] 日本語フォルダ名・日本語本文（`cp932` / `iso-2022-jp`）・添付ファイル・深い階層を含むPSTで変換し、文字化け・添付欠損の有無を確認する **問題なし**
 - [x] 日本語フォルダ名を含むPSTの変換で `mk_separate_dir` が `Illegal byte sequence` で失敗する事象を確認した。原因はreadpst.exeの既定マニフェストに `activeCodePage` 指定が無く、プロセスのANSIコードページ（CP932）でUTF-8フォルダ名をnarrow `_mkdir` に渡していたため。`vendor/readpst/readpst.exe.manifest`（`activeCodePage=UTF-8`）を `mt.exe` でreadpst.exeのリソースへ適用し、実機（Windows 11）で解消を確認した（D-19）
 - [x] `-C cp932` と `-8` の組み合わせで文字化けが解消するか実測する
-- [ ] Windows禁止文字（`: \ / * ? " < > |`）を含むPST内フォルダ名、予約名（`CON`/`PRN`/`NUL`/`COM1`等）、末尾ドット・空白、同名フォルダ、NFC正規化後の衝突をそれぞれ作成し、readpst出力ディレクトリ名がどうなるかを確認する （**細工PSTの作成手段が未確定のため保留。ただし実PSTで「同名フォルダが異なる親配下に併存する」ことは確認済み → `folders.raw_name` は葉名でなく staging 相対パスであることが必須**）
-- [ ] `..`・絶対パス・UNC・ドライブ指定・ADS・symlink/junction/reparse point相当の名前を含むPSTを試し、readpstの挙動とstaging外に出た出力を取り込まない検証を確認する（OSレベルのreadpst隔離は対象外）（**細工PSTの作成手段が未確定のため保留。staging外検出はStage A走査側の単体テストで代替する**）
+- [x] Windows禁止文字（`: \ / * ? " < > |`）を含むPST内フォルダ名、予約名（`CON`/`PRN`/`NUL`/`COM1`等）、末尾ドット・空白、同名フォルダ、NFC正規化後の衝突をそれぞれ作成し、readpst出力ディレクトリ名がどうなるかを確認する （libpst 0.6.76 の `check_filename()` / `mk_separate_dir()` を移植した `tools/pst_poc/simulate_readpst_dirnames.py` で実測。**`* ? " < > |` と制御文字は `EINVAL` で `DIE()` → 変換全体が異常終了**するのが最大のリスク。詳細は4.2節）
+- [x] `..`・絶対パス・UNC・ドライブ指定・ADS・symlink/junction/reparse point相当の名前を含むPSTを試し、readpstの挙動とstaging外に出た出力を取り込まない検証を確認する（OSレベルのreadpst隔離は対象外） （**staging外へ出たケースはゼロ**。`/ \ :` が `_` へ置換されるためトラバーサル・UNC・ADSは無害化され、`.` / `..` はEEXISTループで `.1` / `..1` になる。詳細は4.2節）
 - [x] MAX_PATH（260文字）を超えるパスが生成されるケースを作り、`tmp/pstimp/{import_uuid先頭8桁}/` の短いstagingパスで回避できることを確認する （`tools/pst_poc/run_longpath_probe.ps1`。238文字の `-o` で絶対パス310文字を生成し成功。ただし成立条件は `longPathAware=true` **かつ** OSの `LongPathsEnabled=1` の両方であり、後者はユーザー環境依存 → 短いstagingパスによる回避は必須のまま）
 - [x] 破損PST・非対応形式PSTを用意し、readpstの終了コード・stderrの内容を確認する （`tools/pst_poc/make_corrupt_pst.py` + `run_corrupt_matrix.ps1`。**全ケースで終了コード1・stderrは空・メッセージはstdoutへ出力**）
 - [x] `lspst` の出力形式を確認し、対応するバージョンでのフォーマット安定性・不明形式時のフォールバック方針を確定する （`run_lspst_matrix.ps1`。**有効なPSTでも `A second message_store has been found.` で途中終了し終了コード1**。フォールバック方針は下記A-3の注記参照）
@@ -234,6 +234,7 @@
 - [ ] 出力ファイル数のポーリングと経過時間による粗い進捗を実装する
 - [ ] `CancelToken` 連携（`terminate()` → タイムアウト後 `kill()`）を実装する
 - [ ] 非ゼロ終了・クラッシュを `ConverterFailed` へラップし、**stdoutとstderr両方**の末尾を保持する（readpstは致命的エラーをstdoutへ出力する。P-1）
+- [ ] `mk_separate_dir: Cannot create directory` を検出した場合は、フォルダ名がWindowsで作成できないことを示す専用メッセージを `ConverterFailed` に付与する（P-7）
 
 #### **C-5. `infrastructure/importers/lspst_parser.py`**
 
@@ -259,7 +260,7 @@
 
 #### **D-3. 項目確定とStage B（取込）**
 
-- [ ] staging全走査で各項目の `source_item_key`・相対パス・フォルダ対応・サイズ・ハッシュを固定し、`pst_import_items` と `item_discovered` イベントへ書き込んでfsyncする
+- [ ] staging全走査で各項目の `source_item_key`・相対パス・フォルダ対応・サイズ・ハッシュを固定し、`pst_import_items` と `item_discovered` イベントへ書き込んでfsyncする。`folder_relative_path` は**実際にディスク上に存在する名前**を記録し、正規化や元名の推測を行わない（P-10～P-12）
 - [ ] 通常ファイル以外、symlink、junction/reparse point、`Path(p).resolve()` がstagingルート外の項目はスキップし、警告ログを残す
 - [ ] `total_files` とインベントリハッシュを確定し、`import_ready` をfsyncした後に `stageA_done.json` を原子的に配置して `status='ready_to_ingest'` とする
 - [ ] Stage Bで未完了項目のみを対象とし、1通ごとのコミットを禁止してバッチ単位（100〜500件ごと、または一定時間・一定サイズごと）で処理する。各項目を `EmlStorage.save_from_file()` によるストリーミングで保存 → `items.jsonl` イベント追記 → バッチ単位で `flush_and_sync()` → 同一トランザクションで `messages` / `message_contents` / 項目状態・集計値をcommitする。失敗時はrollbackし、マニフェストから未完了バッチを再適用する
@@ -367,7 +368,7 @@
 | 必要DLL一覧 | `libpst-4.dll`, `libgcc_s_seh-1.dll`, `libgsf-1-114.dll`, `libgobject-2.0-0.dll`, `libsystre-0.dll`, `libwinpthread-1.dll`, `zlib1.dll`, `libiconv-2.dll`, `libbz2-1.dll`, `libintl-8.dll`, `libglib-2.0-0.dll`, `libstdc++-6.dll`, `libffi-8.dll`, `libtre-5.dll`, `libgio-2.0-0.dll`, `libxml2-16.dll`, `libgmodule-2.0-0.dll`, `libpcre2-8-0.dll`（MSYS2 UCRT64由来。Windows標準DLLは同梱対象外） |
 | `-C cp932` + `-8` の日本語再現性 | 良好。`-e -t e -8 -j 0 -q -C cp932` で日本語フォルダ名（`削除済みアイテム` / `受信トレイ` / `送信済みアイテム` / `千總` 等）がUTF-8で正しく生成され、文字化け・添付欠損なし |
 | Windows上の日本語フォルダ名変換時の`Illegal byte sequence`と対処 | readpst.exe既定マニフェストに`activeCodePage`指定が無くANSIコードページ（CP932）想定のためEILSEQで失敗。`mt.exe`で`vendor/readpst/readpst.exe.manifest`（`activeCodePage=UTF-8`）をreadpst.exeのリソースへ適用し解消（実機Windows 11で確認。D-19） |
-| Windows禁止文字・予約名・末尾ドット/空白・衝突時の挙動 | **未実測（細工PST作成手段が未確定のため保留）**。ただし実PSTで「同名フォルダが異なる親配下に併存」（`受信トレイ/京都DKBS` と `送信済みアイテム/京都DKBS`）は確認済み。`folders.raw_name` は必ず staging 相対パスを使うこと（F-17） |
+| Windows禁止文字・予約名・末尾ドット/空白・衝突時の挙動 | 4.2節に詳細。要点は **`* ? " < > \|` と制御文字を含むフォルダ名で readpst が変換全体を異常終了する**こと、`/ \ :` のみ `_` へ置換されること、予約名（`CON`/`PRN`/`NUL`/`AUX`/`COM1`/`LPT1`）はWindows 11ではディレクトリとして作成できること、末尾ドット/空白はOSが除去し衝突すると連番が付くこと |
 | MAX_PATH超過時の回避可否 | **回避可**。`-o` 238文字 → 絶対パス310文字の出力を生成して成功（`tools/pst_poc/run_longpath_probe.ps1`）。ただし成立条件は `readpst.exe` の `longPathAware=true`（D-19）**かつ** OSの `HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled=1` の両方。後者はユーザー環境依存のため、**短い staging パス（`tmp/pstimp/{uuid8}/`）による回避は必須**。実PSTの最大相対パス長は71文字（`{store名}/連絡先/{GUID}`）で、短い staging 前提なら十分な余裕がある |
 | 破損PST時の終了コード・stderr | **全10ケースで終了コード1・生成ファイル0件・stderrは空**。メッセージは**stdoutへ出力**される。2種類のみ: シグネチャ／`wVer`／非PSTは `Error opening File`、ヘッダは有効だが構造が壊れている場合（切り詰め・`wMagicClient`破壊・BREF 0埋め・Unicode を ANSI と偽装）は `Could not get root record`。→ `readpst_runner` は **stderr だけでなく stdout も捕捉**し `ConverterFailed` に載せること（F-1/C-4の修正が必要） |
 | `lspst`出力の安定性 | **機械可読APIとして信頼できない**（D-9を裏付け）。実PST（Unicode PST・7,715通）に対し `A second message_store has been found. Sorry, this must be an error.` で**途中終了し終了コード1**。列挙できたのは6フォルダ・1,847通のみで、実際の階層（11フォルダ）・件数と乖離。出力はUTF-8/CRLF、`Folder "名前"` / `Email\tFrom: x\tSubject: y` / `Contact` / `Appointment` のTAB区切りだが、**階層情報を一切含まず**（インデントなし）、Subject内の改行がそのまま継続行になるため行単位パースも安全でない。破損PSTに対する挙動は readpst と完全に同一（終了コード1・stdoutへ2種のメッセージ）。→ **方針: `lspst` の終了コードは無視し、パースできた `Folder` 行のみをフラットな参考値として採用、件数は `None`。PST種別判定はマジックバイト（D-10）に一本化** |
@@ -384,6 +385,60 @@
 | P-4 | EMLファイル名は各フォルダ内で **1始まりの連番 `{N}.eml`**。フォルダ間で重複する | N-4のとおり連番に依存しない。`source_item_key` は staging 相対パス基準にする |
 | P-5 | 同一の葉フォルダ名が異なる親配下に併存する（`京都DKBS` / `千總`） | F-17の `folders.raw_name` = staging相対パス を厳守 |
 | P-6 | `lspst` は有効なPSTでも終了コード1で途中終了しうる | C-5: 終了コードを成否判定に使わない。取得できた行だけを参考値に採用 |
+
+### **4.2 敵性フォルダ名の実測（libpst 0.6.76 のソース準拠）**
+
+libpst 0.6.76 の `src/readpst.c` において、`-e`（MODE_SEPARATE）経路のディレクトリ名生成は次の2関数だけで決まる。
+
+```c
+void check_filename(char *fname) {
+    while ((t = strpbrk(t, "/\\:"))) *t = '_';   // 置換対象は / \ : の3文字のみ
+}
+
+void mk_separate_dir(char *dir) {
+    do {
+        snprintf(dir_name, dirsize, (y == 0) ? "%s" : "%s%i", dir, y);
+        check_filename(dir_name);
+        if (D_MKDIR(dir_name)) {
+            if (errno != EEXIST) DIE(...);   // EEXIST 以外は変換全体が異常終了
+        } else break;
+        y++;
+    } while (overwrite == 0);
+    if (chdir(dir_name)) DIE(...);
+}
+```
+
+この2関数をWindows上へ移植した `tools/pst_poc/simulate_readpst_dirnames.py` による実測結果。
+
+| 入力フォルダ名 | サニタイズ後 | 結果 | 最終ディレクトリ名 | staging外へ脱出 |
+| :---- | :---- | :---- | :---- | :---- |
+| `a:b` / `a\b` / `a/b` | `a_b` | ok | `a_b` / `a_b1` / `a_b2` | しない |
+| `a*b` `a?b` `a"b` `a<b` `a>b` `a\|b` | 変化なし | **EINVAL → `DIE()`** | 作られない | — |
+| タブ等の制御文字 | 変化なし | **EINVAL → `DIE()`** | 作られない | — |
+| `CON` `PRN` `NUL` `AUX` `COM1` `LPT1` `CON.txt` | 変化なし | ok | そのまま | しない |
+| `trail.` | 変化なし | ok | `trail`（OSが末尾ドットを除去） | しない |
+| `trail ` | 変化なし | ok | `trail 1`（末尾空白除去で `trail` と衝突し連番付与） | しない |
+| ` lead` | 変化なし | ok | ` lead` | しない |
+| `.` / `..` | 変化なし | ok | `.1` / `..1`（EEXISTループで退避） | しない |
+| `..\..\evil` | `.._.._evil` | ok | `.._.._evil` | しない |
+| `C:\Windows\Temp\evil` | `C__Windows_Temp_evil` | ok | 同左 | しない |
+| `C:evil` | `C_evil` | ok | `C_evil` | しない |
+| `\\server\share\evil` | `__server_share_evil` | ok | 同左 | しない |
+| `note.txt:hidden`（ADS） | `note.txt_hidden` | ok | 同左 | しない |
+| 250文字の名前 | 変化なし | ok | そのまま | しない |
+| NFC `がtest` / NFD `かﾞtest` | 変化なし | ok | **別々のディレクトリとして共存**（Windowsは正規化しない） | しない |
+| 同名の兄弟フォルダ ×2 | 変化なし | ok | `SameName` / `SameName1` | しない |
+
+**結論と実装への反映**
+
+| # | 実測事実 | 実装への反映先 |
+| :--- | :---- | :---- |
+| P-7 | **`* ? " < > \|` と制御文字を含むフォルダ名が1つでもあると readpst が `DIE()` し、変換全体が終了コード1で失敗する**（部分的なstagingだけが残る） | Stage A失敗時はstaging破棄＋再抽出（F-3/D-2）で機能的には安全側に倒れるが、**そのPSTは永久に取り込めない**。stdout末尾の `mk_separate_dir: Cannot create directory ...` を検出し、ユーザーへ「PST内のフォルダ名がWindowsで作成できない」旨を提示する専用メッセージを用意する（C-4・GUIサマリ） |
+| P-8 | パストラバーサル・UNC・ドライブ指定・ADSは `check_filename()` によって無害化され、**staging外へ出るケースは観測されなかった** | D-3の `Path.resolve()` によるstaging外判定は多層防御として維持する（readpstの将来変更・別コンバーター対応のため）。D-18の判断は妥当 |
+| P-9 | 予約名（`CON` 等）はWindows 11でディレクトリとして作成可能。ただし `folders.raw_name` としてDBへ入る | 表示・エクスポート時のパス組み立てでは予約名を再サニタイズする（4.6-4のファイル名サニタイズを流用） |
+| P-10 | `a:b` / `a\b` / `a/b` はいずれも `a_b` へ写像され、連番で区別される。**元のPSTフォルダ名は復元不能** | F-17の `original_name_unresolved=true` はこのケースで実際に発生する。連番サフィックスの有無だけでは元名を判定できないため推測しない |
+| P-11 | NFC と NFD は別ディレクトリとして共存する | フォルダツリー表示で見た目が同一の兄弟が並びうる。`raw_name`（staging相対パス）で一意性を担保し、正規化して突合しない |
+| P-12 | 末尾ドット/空白はOSが除去し、既存名と衝突すると readpst が連番を付ける | 同上。`raw_name` は**実際にディスク上に存在する名前**を記録する（要求した名前ではない） |
 
 ---
 
