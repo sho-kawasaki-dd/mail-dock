@@ -22,8 +22,8 @@ def test_empty_database_migrates_to_latest_version(
 ) -> None:
     db_path = tmp_path / "metadata.db"
 
-    assert migrate(db_conn, db_path) == 5
-    assert current_version(db_conn) == 5
+    assert migrate(db_conn, db_path) == 6
+    assert current_version(db_conn) == 6
     assert db_conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
 
     indexes = {
@@ -48,6 +48,91 @@ def test_empty_database_migrates_to_latest_version(
     )
 
 
+def test_pst_import_migration_creates_import_tables_and_indexes(
+    db_conn: sqlite3.Connection,
+    tmp_path: Path,
+) -> None:
+    assert migrate(db_conn, tmp_path / "metadata.db") == 6
+
+    import_columns = {
+        row[1] for row in db_conn.execute("PRAGMA table_info(pst_imports)")
+    }
+    assert import_columns == {
+        "id",
+        "import_uuid",
+        "account_id",
+        "source_filename",
+        "source_sha256",
+        "source_size_bytes",
+        "source_mtime",
+        "readpst_version",
+        "options_json",
+        "status",
+        "is_active",
+        "replaces_id",
+        "superseded_at",
+        "total_files",
+        "ingested_count",
+        "failed_count",
+        "staging_path",
+        "started_at",
+        "finished_at",
+        "error_message",
+    }
+    item_columns = {
+        row[1] for row in db_conn.execute("PRAGMA table_info(pst_import_items)")
+    }
+    assert item_columns == {
+        "import_id",
+        "source_item_key",
+        "source_relative_path",
+        "folder_relative_path",
+        "source_size_bytes",
+        "source_sha256",
+        "final_relative_path",
+        "message_row_id",
+        "status",
+        "error_class",
+        "error_message",
+        "attempt_count",
+    }
+
+    primary_key = [
+        row[1]
+        for row in sorted(
+            db_conn.execute("PRAGMA table_info(pst_import_items)"),
+            key=lambda column: column[5],
+        )
+        if row[5]
+    ]
+    assert primary_key == ["import_id", "source_item_key"]
+
+    indexes = {
+        row[1]: db_conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+            (row[1],),
+        ).fetchone()[0]
+        for row in db_conn.execute("PRAGMA index_list(pst_imports)")
+    }
+    assert indexes["idx_pst_src"] == (
+        "CREATE INDEX idx_pst_src\nON pst_imports(source_sha256)"
+    )
+    assert indexes["uq_active_pst_source"] == (
+        "CREATE UNIQUE INDEX uq_active_pst_source\n"
+        "ON pst_imports(source_sha256)\n"
+        "WHERE is_active = 1"
+    )
+
+    foreign_keys = {
+        row[2] for row in db_conn.execute("PRAGMA foreign_key_list(pst_imports)")
+    }
+    assert foreign_keys == {"accounts", "pst_imports"}
+    item_foreign_keys = {
+        row[2] for row in db_conn.execute("PRAGMA foreign_key_list(pst_import_items)")
+    }
+    assert item_foreign_keys == {"pst_imports", "messages"}
+
+
 def test_phase4_migration_backs_up_existing_v4_database(
     db_conn: sqlite3.Connection,
     tmp_path: Path,
@@ -68,7 +153,7 @@ def test_phase4_migration_backs_up_existing_v4_database(
     )
     db_conn.commit()
 
-    assert migrate(db_conn, tmp_path / "metadata.db") == 5
+    assert migrate(db_conn, tmp_path / "metadata.db") == 6
 
     backup_path = tmp_path / "metadata.db.bak.4"
     assert backup_path.is_file()
@@ -87,7 +172,7 @@ def test_nonempty_v0_database_is_backed_up_before_migration(tmp_path: Path) -> N
         connection.execute("CREATE TABLE legacy (value TEXT)")
         connection.execute("INSERT INTO legacy VALUES ('old')")
         connection.commit()
-        assert migrate(connection, db_path) == 5
+        assert migrate(connection, db_path) == 6
     finally:
         connection.close()
 
@@ -102,7 +187,7 @@ def test_nonempty_v0_database_is_backed_up_before_migration(tmp_path: Path) -> N
 
     rerun = connect(db_path)
     try:
-        assert migrate(rerun, db_path) == 5
+        assert migrate(rerun, db_path) == 6
     finally:
         rerun.close()
     assert not (tmp_path / "metadata.db.bak.0.1").exists()
@@ -160,7 +245,7 @@ def test_timestamp_migration_normalizes_legacy_values_and_defaults(
     )
     db_conn.commit()
 
-    assert migrate(db_conn, tmp_path / "metadata.db") == 5
+    assert migrate(db_conn, tmp_path / "metadata.db") == 6
 
     values = db_conn.execute(
         """

@@ -184,10 +184,10 @@
 
 #### **B-1. `migrations/006_pst_import.sql`**
 
-- [ ] `pst_imports` テーブルを追加する（`import_uuid` UNIQUE、`account_id`、`source_filename`、`source_sha256`、`source_size_bytes`、`source_mtime`、`readpst_version`、`options_json`、`status`、`is_active`、`replaces_id`、`superseded_at`、`total_files`、`ingested_count`、`failed_count`、`staging_path`、`started_at`、`finished_at`、`error_message`）
-- [ ] `idx_pst_src`（`source_sha256`）と `uq_active_pst_source`（`source_sha256` WHERE `is_active=1`）を追加する
-- [ ] `pst_import_items` テーブルを追加する（PK `(import_id, source_item_key)`、`source_relative_path`、`folder_relative_path`、`source_size_bytes`、`source_sha256`、`final_relative_path`、`message_row_id`、`status`、`error_class`、`error_message`、`attempt_count`）
-- [ ] マイグレーション適用前の自動バックアップ（`metadata.db.bak.{version}`）が既存機構で働くことを確認する
+- [x] `pst_imports` テーブルを追加する（`import_uuid` UNIQUE、`account_id`、`source_filename`、`source_sha256`、`source_size_bytes`、`source_mtime`、`readpst_version`、`options_json`、`status`、`is_active`、`replaces_id`、`superseded_at`、`total_files`、`ingested_count`、`failed_count`、`staging_path`、`started_at`、`finished_at`、`error_message`）
+- [x] `idx_pst_src`（`source_sha256`）と `uq_active_pst_source`（`source_sha256` WHERE `is_active=1`）を追加する
+- [x] `pst_import_items` テーブルを追加する（PK `(import_id, source_item_key)`、`source_relative_path`、`folder_relative_path`、`source_size_bytes`、`source_sha256`、`final_relative_path`、`message_row_id`、`status`、`error_class`、`error_message`、`attempt_count`）
+- [x] マイグレーション適用前の自動バックアップ（`metadata.db.bak.{version}`）が既存機構で働くことを確認する
 - [x] [実装計画書_Phase5.1](./実装計画書_Phase5.1_汎用IMAPサーバー対応.md) と開発計画書・Phase 0/1の採番表記を `007_generic_imap_connection.sql` / `006_pst_import.sql` へ統一する（D-2）
 
 #### **B-2. リポジトリおよびストレージ拡張**
