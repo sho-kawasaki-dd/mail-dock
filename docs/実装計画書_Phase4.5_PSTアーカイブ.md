@@ -220,7 +220,7 @@
 
 #### **C-2. `domain/errors.py` の拡張**
 
-- [ ] `ArchiveImportError` を `MailDockError` 配下に追加し、`ConverterNotFound` / `ConverterFailed` / `UnreadableArchive` を配下に定義する
+- [x] `ArchiveImportError` を `MailDockError` 配下に追加し、`ConverterNotFound` / `ConverterFailed` / `UnreadableArchive` を配下に定義する
 
 #### **C-3. `infrastructure/importers/readpst_locator.py`**
 

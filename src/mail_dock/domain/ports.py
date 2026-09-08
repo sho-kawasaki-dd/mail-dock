@@ -18,6 +18,8 @@ __all__ = [
     "BaseIntegrityStorage",
     "BaseManifestReader",
     "BaseManifestWriter",
+    "BasePstManifestReader",
+    "BasePstManifestWriter",
     "BaseMessageRenderer",
     "BasePurgeStorage",
     "JSONValue",
@@ -155,3 +157,89 @@ class BaseManifestReader(ABC):
     @abstractmethod
     def read_incomplete_intents(self) -> Iterator[Mapping[str, JSONValue]]:
         """Yield destructive-operation intents without completion events."""
+
+
+class BasePstManifestWriter(ABC):
+    """Durable manifest port for one PST import generation."""
+
+    @abstractmethod
+    def write_import_manifest(self, snapshot: Mapping[str, JSONValue]) -> None:
+        """Atomically publish the immutable import metadata snapshot."""
+
+    def write_import_snapshot(self, snapshot: Mapping[str, JSONValue]) -> None:
+        """Compatibility spelling for callers that call snapshots explicitly."""
+
+        self.write_import_manifest(snapshot)
+
+    @abstractmethod
+    def write_folders_manifest(self, folders: list[Mapping[str, JSONValue]]) -> None:
+        """Atomically publish the immutable staging-folder mapping."""
+
+    def write_folders_snapshot(self, folders: list[Mapping[str, JSONValue]]) -> None:
+        """Compatibility spelling for callers that call snapshots explicitly."""
+
+        self.write_folders_manifest(folders)
+
+    @abstractmethod
+    def append(self, event: Mapping[str, JSONValue]) -> None:
+        """Append a validated PST lifecycle or item event without syncing."""
+
+    @abstractmethod
+    def flush_and_sync(self) -> None:
+        """Flush the JSONL handle and make it durable."""
+
+    def close(self) -> None:
+        """Release writer resources, if the implementation owns any."""
+        return None
+
+
+class BasePstManifestReader(ABC):
+    """Read-only port for one PST import generation."""
+
+    @abstractmethod
+    def read_import_manifest(self) -> Mapping[str, JSONValue]:
+        """Read and verify the immutable import metadata snapshot."""
+
+    def read_import_snapshot(self) -> Mapping[str, JSONValue]:
+        """Compatibility spelling for callers that call snapshots explicitly."""
+
+        return self.read_import_manifest()
+
+    @abstractmethod
+    def read_folders_manifest(self) -> list[Mapping[str, JSONValue]]:
+        """Read and verify the immutable folder mapping snapshot."""
+
+    def read_folders_snapshot(self) -> list[Mapping[str, JSONValue]]:
+        """Compatibility spelling for callers that call snapshots explicitly."""
+
+        return self.read_folders_manifest()
+
+    @abstractmethod
+    def read_all_events(self) -> Iterator[Mapping[str, JSONValue]]:
+        """Yield every valid PST event in append order."""
+
+    def read_incomplete_intents(self) -> Iterator[Mapping[str, JSONValue]]:
+        """Yield purge intents without a matching purge completion event."""
+
+        events = list(self.read_all_events())
+        completed = {
+            (
+                event.get("import_uuid"),
+                event.get("source_item_key"),
+                event.get("relative_path"),
+                event.get("file_hash"),
+            )
+            for event in events
+            if event.get("event") == "purged"
+        }
+        for event in events:
+            if event.get("event") != "purge_intent":
+                continue
+            key = (
+                event.get("import_uuid"),
+                event.get("source_item_key"),
+                event.get("relative_path"),
+                event.get("file_hash"),
+            )
+            if key not in completed:
+                yield event

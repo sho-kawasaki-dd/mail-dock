@@ -91,6 +91,22 @@ class PermanentError(FetchError):
     """Raised for a remote failure that cannot be fixed by retrying."""
 
 
+class ArchiveImportError(MailDockError):
+    """Base class for errors raised while importing a local archive."""
+
+
+class ConverterNotFound(ArchiveImportError):  # noqa: N818
+    """Raised when the archive converter is missing or cannot be executed."""
+
+
+class ConverterFailed(ArchiveImportError):  # noqa: N818
+    """Raised when the archive converter fails to process an archive."""
+
+
+class UnreadableArchive(ArchiveImportError):  # noqa: N818
+    """Raised when an archive cannot be read or is not a supported archive."""
+
+
 class UidValidityChanged(FetchError):  # noqa: N818
     """Control-flow signal indicating that a folder needs a new UID generation."""
 
