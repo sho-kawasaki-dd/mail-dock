@@ -362,7 +362,7 @@
 | 項目 | 実測値 |
 | :---- | :---- |
 | readpstバージョン | v0.6.76 |
-| 必要DLL一覧 | （記入） |
+| 必要DLL一覧 | `libpst-4.dll`, `libgcc_s_seh-1.dll`, `libgsf-1-114.dll`, `libgobject-2.0-0.dll`, `libsystre-0.dll`, `libwinpthread-1.dll`, `zlib1.dll`, `libiconv-2.dll`, `libbz2-1.dll`, `libintl-8.dll`, `libglib-2.0-0.dll`, `libstdc++-6.dll`, `libffi-8.dll`, `libtre-5.dll`, `libgio-2.0-0.dll`, `libxml2-16.dll`, `libgmodule-2.0-0.dll`, `libpcre2-8-0.dll`（MSYS2 UCRT64由来。Windows標準DLLは同梱対象外） |
 | `-C cp932` + `-8` の日本語再現性 | （記入） |
 | Windows禁止文字・予約名・末尾ドット/空白・衝突時の挙動 | （記入） |
 | MAX_PATH超過時の回避可否 | （記入） |
