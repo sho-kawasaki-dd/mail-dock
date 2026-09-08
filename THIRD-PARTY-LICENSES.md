@@ -28,7 +28,8 @@ Windows system DLLs reported by `ldd` are not bundled.
 
 | Artifact | Role | License/source | SHA-256 |
 | --- | --- | --- | --- |
-| `vendor/readpst/readpst.exe` | PST to EML converter | GPL-2.0-or-later / [libpst](https://github.com/buggins/libpst) | `727EB1EB629A3FAB2B0CFBE261762D1AD0892A6D8C3740D3731DB84A5FC7897B` |
+| `vendor/readpst/readpst.exe` (as obtained from MSYS2, before manifest patch) | PST to EML converter | GPL-2.0-or-later / [libpst](https://github.com/buggins/libpst) | `727EB1EB629A3FAB2B0CFBE261762D1AD0892A6D8C3740D3731DB84A5FC7897B` |
+| `vendor/readpst/readpst.exe` (as shipped, after `mt.exe` manifest patch) | PST to EML converter | GPL-2.0-or-later / [libpst](https://github.com/buggins/libpst) | `EAD04F4AA6DBAA13616595CF49B98804484B7A22B15962B8334D9D5024E92E9A` |
 | `vendor/readpst/lspst.exe` | PST inspection utility | GPL-2.0-or-later / [libpst](https://github.com/buggins/libpst) | `E40672A956D82E699BCD0D164777B55B62395273DF3DF1D55636853AC3659433` |
 | `vendor/readpst/libpst-4.dll` | libpst runtime | GPL-2.0-or-later / [libpst](https://github.com/buggins/libpst) | `63DD6EEC7D8A5498B5DEABCC45E41938A1A9185E788558FBE5A30FC38487C0C5` |
 | `vendor/readpst/libgcc_s_seh-1.dll` | GCC runtime | [MSYS2 package repository](https://packages.msys2.org/) | `80940372431CC76224DFDA06E2D33F01E49AF3B4E7C499C535BE856EBCADD273` |
@@ -56,6 +57,31 @@ The hashes above were calculated on 2026-09-08 with PowerShell
 runtime DLL is refreshed. The exact package versions and licenses of the
 transitive runtime DLLs must be recorded from their corresponding MSYS2
 package metadata before a release.
+
+### Manifest patch applied to `readpst.exe` (D-19)
+
+On Windows, non-ASCII (e.g. Japanese) PST folder names made `readpst.exe`
+fail with `Illegal byte sequence` in `mk_separate_dir`, because the MinGW/UCRT
+build embeds a default manifest without `activeCodePage`, so the narrow
+`_mkdir` call interprets UTF-8 folder name bytes using the process ANSI code
+page (e.g. CP932) instead of UTF-8. The exe's embedded manifest also makes
+Windows ignore any sidecar `readpst.exe.manifest` placed next to it, so the
+fix must be applied to the binary's own `RT_MANIFEST` resource.
+
+`readpst.exe` is the only artifact in this bundle that is modified from its
+upstream MSYS2 form. `vendor/readpst/readpst.exe.manifest` (tracked in this
+repository, not downloaded) sets `activeCodePage=UTF-8` and
+`longPathAware=true`, and is applied in-place with:
+
+```powershell
+mt.exe -manifest vendor\readpst\readpst.exe.manifest -outputresource:vendor\readpst\readpst.exe;#1
+```
+
+Only the `RT_MANIFEST` resource changes; no libpst/readpst source code is
+modified. Verified on Windows 11 to resolve the `Illegal byte sequence`
+failure for non-ASCII PST folder names. `readpst.exe` above is listed both
+before and after this patch so the change can be verified independently of
+the MSYS2 package.
 
 ## Release review
 

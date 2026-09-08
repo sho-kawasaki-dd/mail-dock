@@ -34,7 +34,7 @@
 | D-2 | マイグレーション番号 | 現時点の最新は `005_phase4.sql`。本フェーズは **`006_pst_import.sql`** を追加し、後続のPhase 5.1は **`007_generic_imap_connection.sql`** を使用する。開発計画書および関連する実装計画書の採番はこの割当へ統一済みとする |
 | D-3 | 計画書の構成 | **本フェーズは1冊の計画書にまとめる**。PoC・スキーマ・変換エンジン・ユースケース・機能ガード・GUI・整合性対応・配布は相互依存が強く、別冊に分けると依存関係の追跡コストが上回るため |
 | D-4 | CLIへの公開範囲 | Stage A/Bの実行（PSTインポート本体）は **GUI限定**とする。空き容量警告・オプション選択（文字セット・削除済み含む）・世代交代の確認は対話的な確認を要するため、Phase 4 D-3 と同じ思想でCLIには追加しない。既存の `verify` / `reindex` サブコマンドは **PSTマニフェストにも対応させ**、CLIから検証・再構築だけは行えるようにする |
-| D-5 | readpst の入手経路 | **Windows版**は MSYS2 の `mingw-w64-ucrt-x86_64-libpst` から `readpst.exe` / `lspst.exe` と依存DLLを取得し `vendor/readpst/` へ同梱する（配布物はこれのみ）。**Linux版**（`pst-utils` パッケージ）はCIの結合テスト専用とし、配布物には含めない。取得手順は `tools/fetch_readpst.ps1`（Windows）としてスクリプト化し、CIでも同じスクリプトを使う |
+| D-5 | readpst の入手経路 | **Windows版**は MSYS2 の `mingw-w64-ucrt-x86_64-libpst` から `readpst.exe` / `lspst.exe` と依存DLLを取得し `vendor/readpst/` へ同梱する（配布物はこれのみ）。**Linux版**（`pst-utils` パッケージ）はCIの結合テスト専用とし、配布物には含めない。取得手順は `tools/fetch_readpst.ps1`（Windows）としてスクリプト化し、CIでも同じスクリプトを使う。取得後、`vendor/readpst/readpst.exe.manifest` を `mt.exe` で `readpst.exe` のリソースへ適用するステップも同スクリプトに含める（D-19） |
 | D-6 | PST取込ワーカーの置き場所 | 開発計画書 3.6「PST取込ワーカーも同期ワーカーと同じ単一ライター枠を使う。同期とPST取込の同時実行は許可しない」に従い、**既存 `SyncWorker` に PST取込操作（Stage A抽出・Stage B取込・世代交代）を追加する**（専用ワーカーは作らない）。単一ライター保証を追加の排他制御なしで満たせ、実装量も最小になるため。Stage A（readpst実行、数分〜数十分）の間も同期を止めてよいものとして扱う。ただし `probe()` はディスク書き込みを伴わないため、ウィザード側（またはバックグラウンドスレッド）で軽量に実行し、`SyncWorker` をブロックしない |
 | D-7 | PSTのpurge/trashイベント記録先 | ローカルゴミ箱・30日purgeはIMAP側と完全に同一の振る舞い（開発計画書 4.10-6）とする。個別メッセージの通常ゴミ箱移動・復元はIMAP同様DB上の `local_state` のみで管理し、実削除（purge）イベントのみを **`manifests/pst/{import_uuid}/items.jsonl` に `purge_intent` / `purged` として追記する**。開発計画書 2.4-7「purge時も行を削除せずイベントを追記する」の対象をPST側マニフェストに閉じ込め、IMAP用マニフェスト（`manifests/imap/{account_id}/`）の構造・イベント種別（Phase 4 グループA）を変更しない。アーカイブ全体のゴミ箱化・復元は世代ライフサイクルイベント（`generation_superseded` / `generation_restored`）として記録する |
 | D-8 | 再変換（世代交代） | 開発計画書 4.10-7 を**完全に実装する**。新世代の全EML・マニフェスト・DB登録を検証後、単一DBトランザクションで新世代 `is_active=1` / 旧世代 `is_active=0, status='superseded'` に切り替える。新世代が中断・失敗した場合は旧世代を一切変更しない |
@@ -48,6 +48,7 @@
 | D-16 | 世代の可視性と切戻し | 通常のPST一覧・検索には `is_active=1` かつ `completed` / `completed_with_errors` の世代だけを表示する。取込途中は再開UIだけ、`superseded` 世代はPSTゴミ箱だけに表示する。30日猶予中はアーカイブ単位で切戻し（`restore_generation`）可能とし、現行世代との入替を単一トランザクションで行う。確定状態は復元旧世代が `is_active=1, status='completed'` かつ全メッセージ `local_state='active'`、退避現行世代が `is_active=0, status='superseded'` かつ全メッセージ `local_state='trashed'` とする |
 | D-17 | 切断時の調停 | 切断中はDB・マニフェスト・stagingへ書き込まず、readpst停止と内蔵ディスクへのログ記録だけを行う。再接続後にマーカーとマニフェストを検証して状態を調停する。世代切替は `generation_switch_committed` が無い場合は旧世代を正として復旧する |
 | D-18 | readpstの信頼境界 | 同梱readpstは信頼境界内の独立プロセスとして扱う。staging走査のパス検証はstaging外の出力を**取り込まない**ためのものであり、コンバーターによるstaging外書込みのOSレベル封じ込めは本フェーズの対象外とする |
+| D-19 | readpst.exeのマニフェスト適用 | Windows実機PoCで、日本語等非ASCIIフォルダ名を含むPST変換時に `mk_separate_dir` が `Illegal byte sequence`（EILSEQ）で失敗することを確認した。原因はMinGW/UCRTビルドのreadpst.exeが `activeCodePage` 未指定の既定マニフェストを埋め込んでおり、narrow `_mkdir` がプロセスのANSIコードページ（日本語環境ではCP932）でUTF-8のフォルダ名バイト列を解釈しようとするため。**`vendor/readpst/readpst.exe.manifest`（`activeCodePage=UTF-8` / `longPathAware=true`）を `mt.exe -manifest ... -outputresource:readpst.exe;#1` でリソースへ適用**することで解消することを実機（Windows 11）で確認済み。readpstの**ソースコードは改変しない**が、配布バイナリの `RT_MANIFEST` リソースのみ上流から変更されるため、`tools/fetch_readpst.ps1` にこの適用ステップを組み込み、適用前後両方のバイナリのSHA-256を `THIRD-PARTY-LICENSES.md` に記録する |
 
 ### **2.2 機能要件**
 
@@ -126,8 +127,8 @@
 
 | # | 要件 | 根拠 |
 | :--- | :---- | :---- |
-| F-37 | `vendor/readpst/` のバイナリをGit管理外とし、`tools/fetch_readpst.ps1` が MSYS2 から取得すること | 5.9 |
-| F-38 | `THIRD-PARTY-LICENSES.md` に readpst・libpst・同梱DLLごとの名称・バージョン・ライセンス・対応ソース・取得元・SHA-256を記載すること | 5.9 |
+| F-37 | `vendor/readpst/` のバイナリをGit管理外とし、`tools/fetch_readpst.ps1` が MSYS2 から取得したうえで `mt.exe` により `activeCodePage=UTF-8` マニフェストを `readpst.exe` へ適用すること | 5.9 / D-19 |
+| F-38 | `THIRD-PARTY-LICENSES.md` に readpst・libpst・同梱DLLごとの名称・バージョン・ライセンス・対応ソース・取得元・SHA-256（マニフェスト適用前後の両方）を記載すること | 5.9 / D-19 |
 | F-39 | リリースワークフローに、GPL成果物（バイナリ＋COPYING＋対応ソース＋SHA-256）が揃っていなければリリースを失敗させるチェックを追加すること | 5.9 |
 
 ### **2.3 非機能要件・制約**
@@ -143,7 +144,7 @@
 
 * `ruff format --check` / `ruff check` / `mypy` / `pytest`（`pst` マーカーを除く）を通すこと。
 * `subprocess` は常に `shell=False`・引数リスト・実行ファイルは同梱パスの絶対解決とし、ユーザー入力をコマンド文字列へ連結しないこと。`CREATE_NO_WINDOW` でコンソールを表示しないこと。
-* readpst は一切改変しないこと。回避策はすべてアプリ側で行うこと。
+* readpst の**ソースコード**は一切改変しないこと。回避策はすべてアプリ側で行うこと。ただし、日本語等非ASCIIフォルダ名の変換に必要な `activeCodePage=UTF-8` マニフェスト適用に限り、配布バイナリの `RT_MANIFEST` リソースを `mt.exe` でパッチすることを許可する（D-19）。適用前後のバイナリ両方のSHA-256を記録すること。
 
 ---
 
@@ -157,12 +158,13 @@
 
 - [x] MSYS2 に `mingw-w64-ucrt-x86_64-libpst` を導入し、`readpst.exe` / `lspst.exe` を取得する
 - [x] `ldd` 相当（`objdump -p` 等）で依存DLL（iconv / zlib 等）を列挙し、`vendor/readpst/` へ収集する
-- [ ] `tools/fetch_readpst.ps1` として取得手順をスクリプト化する（**Group H で実施**）
+- [ ] `tools/fetch_readpst.ps1` として取得手順をスクリプト化する。MSYS2からの取得に加え、`mt.exe` による `activeCodePage=UTF-8` マニフェスト適用（D-19）と、適用前後のバイナリのSHA-256記録を含めること（**Group H で実施**）
 - [ ] WSL または Linux CI コンテナに `pst-utils`（apt）を導入し、Windows版との出力差分（改行・ファイル名・文字コード）を確認する (**WSLに`pst-utils`を導入。出力差分確認は保留**)
 
 #### **A-2. 実PSTでの実測（手元の実PSTを使用）**
 
 - [ ] 日本語フォルダ名・日本語本文（`cp932` / `iso-2022-jp`）・添付ファイル・深い階層を含むPSTで変換し、文字化け・添付欠損の有無を確認する
+- [x] 日本語フォルダ名を含むPSTの変換で `mk_separate_dir` が `Illegal byte sequence` で失敗する事象を確認した。原因はreadpst.exeの既定マニフェストに `activeCodePage` 指定が無く、プロセスのANSIコードページ（CP932）でUTF-8フォルダ名をnarrow `_mkdir` に渡していたため。`vendor/readpst/readpst.exe.manifest`（`activeCodePage=UTF-8`）を `mt.exe` でreadpst.exeのリソースへ適用し、実機（Windows 11）で解消を確認した（D-19）
 - [ ] `-C cp932` と `-8` の組み合わせで文字化けが解消するか実測する
 - [ ] Windows禁止文字（`: \ / * ? " < > |`）を含むPST内フォルダ名、予約名（`CON`/`PRN`/`NUL`/`COM1`等）、末尾ドット・空白、同名フォルダ、NFC正規化後の衝突をそれぞれ作成し、readpst出力ディレクトリ名がどうなるかを確認する
 - [ ] `..`・絶対パス・UNC・ドライブ指定・ADS・symlink/junction/reparse point相当の名前を含むPSTを試し、readpstの挙動とstaging外に出た出力を取り込まない検証を確認する（OSレベルのreadpst隔離は対象外）
@@ -364,6 +366,7 @@
 | readpstバージョン | v0.6.76 |
 | 必要DLL一覧 | `libpst-4.dll`, `libgcc_s_seh-1.dll`, `libgsf-1-114.dll`, `libgobject-2.0-0.dll`, `libsystre-0.dll`, `libwinpthread-1.dll`, `zlib1.dll`, `libiconv-2.dll`, `libbz2-1.dll`, `libintl-8.dll`, `libglib-2.0-0.dll`, `libstdc++-6.dll`, `libffi-8.dll`, `libtre-5.dll`, `libgio-2.0-0.dll`, `libxml2-16.dll`, `libgmodule-2.0-0.dll`, `libpcre2-8-0.dll`（MSYS2 UCRT64由来。Windows標準DLLは同梱対象外） |
 | `-C cp932` + `-8` の日本語再現性 | （記入） |
+| Windows上の日本語フォルダ名変換時の`Illegal byte sequence`と対処 | readpst.exe既定マニフェストに`activeCodePage`指定が無くANSIコードページ（CP932）想定のためEILSEQで失敗。`mt.exe`で`vendor/readpst/readpst.exe.manifest`（`activeCodePage=UTF-8`）をreadpst.exeのリソースへ適用し解消（実機Windows 11で確認。D-19） |
 | Windows禁止文字・予約名・末尾ドット/空白・衝突時の挙動 | （記入） |
 | MAX_PATH超過時の回避可否 | （記入） |
 | 破損PST時の終了コード・stderr | （記入） |
