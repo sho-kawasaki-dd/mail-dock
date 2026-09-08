@@ -166,12 +166,12 @@
 - [x] 日本語フォルダ名・日本語本文（`cp932` / `iso-2022-jp`）・添付ファイル・深い階層を含むPSTで変換し、文字化け・添付欠損の有無を確認する **問題なし**
 - [x] 日本語フォルダ名を含むPSTの変換で `mk_separate_dir` が `Illegal byte sequence` で失敗する事象を確認した。原因はreadpst.exeの既定マニフェストに `activeCodePage` 指定が無く、プロセスのANSIコードページ（CP932）でUTF-8フォルダ名をnarrow `_mkdir` に渡していたため。`vendor/readpst/readpst.exe.manifest`（`activeCodePage=UTF-8`）を `mt.exe` でreadpst.exeのリソースへ適用し、実機（Windows 11）で解消を確認した（D-19）
 - [x] `-C cp932` と `-8` の組み合わせで文字化けが解消するか実測する
-- [ ] Windows禁止文字（`: \ / * ? " < > |`）を含むPST内フォルダ名、予約名（`CON`/`PRN`/`NUL`/`COM1`等）、末尾ドット・空白、同名フォルダ、NFC正規化後の衝突をそれぞれ作成し、readpst出力ディレクトリ名がどうなるかを確認する
-- [ ] `..`・絶対パス・UNC・ドライブ指定・ADS・symlink/junction/reparse point相当の名前を含むPSTを試し、readpstの挙動とstaging外に出た出力を取り込まない検証を確認する（OSレベルのreadpst隔離は対象外）
-- [ ] MAX_PATH（260文字）を超えるパスが生成されるケースを作り、`tmp/pstimp/{import_uuid先頭8桁}/` の短いstagingパスで回避できることを確認する
-- [ ] 破損PST・非対応形式PSTを用意し、readpstの終了コード・stderrの内容を確認する
-- [ ] `lspst` の出力形式を確認し、対応するバージョンでのフォーマット安定性・不明形式時のフォールバック方針を確定する
-- [ ] 変換速度（PSTサイズあたりの所要時間）を実測し、進捗UIの見積もりに使う指標（出力ファイル数か経過時間か）を決定する
+- [ ] Windows禁止文字（`: \ / * ? " < > |`）を含むPST内フォルダ名、予約名（`CON`/`PRN`/`NUL`/`COM1`等）、末尾ドット・空白、同名フォルダ、NFC正規化後の衝突をそれぞれ作成し、readpst出力ディレクトリ名がどうなるかを確認する （**細工PSTの作成手段が未確定のため保留。ただし実PSTで「同名フォルダが異なる親配下に併存する」ことは確認済み → `folders.raw_name` は葉名でなく staging 相対パスであることが必須**）
+- [ ] `..`・絶対パス・UNC・ドライブ指定・ADS・symlink/junction/reparse point相当の名前を含むPSTを試し、readpstの挙動とstaging外に出た出力を取り込まない検証を確認する（OSレベルのreadpst隔離は対象外）（**細工PSTの作成手段が未確定のため保留。staging外検出はStage A走査側の単体テストで代替する**）
+- [x] MAX_PATH（260文字）を超えるパスが生成されるケースを作り、`tmp/pstimp/{import_uuid先頭8桁}/` の短いstagingパスで回避できることを確認する （`tools/pst_poc/run_longpath_probe.ps1`。238文字の `-o` で絶対パス310文字を生成し成功。ただし成立条件は `longPathAware=true` **かつ** OSの `LongPathsEnabled=1` の両方であり、後者はユーザー環境依存 → 短いstagingパスによる回避は必須のまま）
+- [x] 破損PST・非対応形式PSTを用意し、readpstの終了コード・stderrの内容を確認する （`tools/pst_poc/make_corrupt_pst.py` + `run_corrupt_matrix.ps1`。**全ケースで終了コード1・stderrは空・メッセージはstdoutへ出力**）
+- [x] `lspst` の出力形式を確認し、対応するバージョンでのフォーマット安定性・不明形式時のフォールバック方針を確定する （`run_lspst_matrix.ps1`。**有効なPSTでも `A second message_store has been found.` で途中終了し終了コード1**。フォールバック方針は下記A-3の注記参照）
+- [x] 変換速度（PSTサイズあたりの所要時間）を実測し、進捗UIの見積もりに使う指標（出力ファイル数か経過時間か）を決定する  **進捗UIの見積もり指標は出力ファイル数を使う**
 
 #### **A-3. PoC結果の記録**
 
@@ -215,7 +215,7 @@
 
 #### **C-1. `domain/importer.py`**
 
-- [ ] `ArchiveFolder`（`relative_path` / `display_name` / `estimated_count`）、`ArchiveInfo`（`format` / `folders` / `estimated_total` / `source_sha256` / `source_size_bytes`）、`ExtractResult`（`staging_root` / `file_count` / `stderr_tail`）、`ImportOptions` を定義する
+- [ ] `ArchiveFolder`（`relative_path` / `display_name` / `estimated_count`）、`ArchiveInfo`（`format` / `folders` / `estimated_total` / `source_sha256` / `source_size_bytes`）、`ExtractResult`（`staging_root` / `file_count` / `stdout_tail` / `stderr_tail`）、`ImportOptions` を定義する
 - [ ] `BaseArchiveImporter`（`probe()` / `extract()`）を定義する。`BaseMailFetcher` とは統合しない
 
 #### **C-2. `domain/errors.py` の拡張**
@@ -233,11 +233,11 @@
 - [ ] `shell=False`・引数リストで F-1 のオプション構成を起動する
 - [ ] 出力ファイル数のポーリングと経過時間による粗い進捗を実装する
 - [ ] `CancelToken` 連携（`terminate()` → タイムアウト後 `kill()`）を実装する
-- [ ] 非ゼロ終了・クラッシュを `ConverterFailed` へラップし、stderr末尾を保持する
+- [ ] 非ゼロ終了・クラッシュを `ConverterFailed` へラップし、**stdoutとstderr両方**の末尾を保持する（readpstは致命的エラーをstdoutへ出力する。P-1）
 
 #### **C-5. `infrastructure/importers/lspst_parser.py`**
 
-- [ ] `lspst` 出力をパースし、不明な形式は値を推測せず `unknown` / `None` へフォールバックする
+- [ ] `lspst` 出力をパースし、不明な形式は値を推測せず `unknown` / `None` へフォールバックする。**終了コードを成否判定に使わず**、取得できた `Folder` 行だけをフラットな参考値として採用する（件数は `None`。P-6）
 - [ ] PSTファイル先頭のマジックバイトによる種別判定（Unicode/ANSI/不明）を実装する（D-10）
 
 ---
@@ -365,14 +365,25 @@
 | :---- | :---- |
 | readpstバージョン | v0.6.76 |
 | 必要DLL一覧 | `libpst-4.dll`, `libgcc_s_seh-1.dll`, `libgsf-1-114.dll`, `libgobject-2.0-0.dll`, `libsystre-0.dll`, `libwinpthread-1.dll`, `zlib1.dll`, `libiconv-2.dll`, `libbz2-1.dll`, `libintl-8.dll`, `libglib-2.0-0.dll`, `libstdc++-6.dll`, `libffi-8.dll`, `libtre-5.dll`, `libgio-2.0-0.dll`, `libxml2-16.dll`, `libgmodule-2.0-0.dll`, `libpcre2-8-0.dll`（MSYS2 UCRT64由来。Windows標準DLLは同梱対象外） |
-| `-C cp932` + `-8` の日本語再現性 | （記入） |
+| `-C cp932` + `-8` の日本語再現性 | 良好。`-e -t e -8 -j 0 -q -C cp932` で日本語フォルダ名（`削除済みアイテム` / `受信トレイ` / `送信済みアイテム` / `千總` 等）がUTF-8で正しく生成され、文字化け・添付欠損なし |
 | Windows上の日本語フォルダ名変換時の`Illegal byte sequence`と対処 | readpst.exe既定マニフェストに`activeCodePage`指定が無くANSIコードページ（CP932）想定のためEILSEQで失敗。`mt.exe`で`vendor/readpst/readpst.exe.manifest`（`activeCodePage=UTF-8`）をreadpst.exeのリソースへ適用し解消（実機Windows 11で確認。D-19） |
-| Windows禁止文字・予約名・末尾ドット/空白・衝突時の挙動 | （記入） |
-| MAX_PATH超過時の回避可否 | （記入） |
-| 破損PST時の終了コード・stderr | （記入） |
-| `lspst`出力の安定性 | （記入） |
-| 変換速度（分/GB目安） | 10.3分/GB |
+| Windows禁止文字・予約名・末尾ドット/空白・衝突時の挙動 | **未実測（細工PST作成手段が未確定のため保留）**。ただし実PSTで「同名フォルダが異なる親配下に併存」（`受信トレイ/京都DKBS` と `送信済みアイテム/京都DKBS`）は確認済み。`folders.raw_name` は必ず staging 相対パスを使うこと（F-17） |
+| MAX_PATH超過時の回避可否 | **回避可**。`-o` 238文字 → 絶対パス310文字の出力を生成して成功（`tools/pst_poc/run_longpath_probe.ps1`）。ただし成立条件は `readpst.exe` の `longPathAware=true`（D-19）**かつ** OSの `HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled=1` の両方。後者はユーザー環境依存のため、**短い staging パス（`tmp/pstimp/{uuid8}/`）による回避は必須**。実PSTの最大相対パス長は71文字（`{store名}/連絡先/{GUID}`）で、短い staging 前提なら十分な余裕がある |
+| 破損PST時の終了コード・stderr | **全10ケースで終了コード1・生成ファイル0件・stderrは空**。メッセージは**stdoutへ出力**される。2種類のみ: シグネチャ／`wVer`／非PSTは `Error opening File`、ヘッダは有効だが構造が壊れている場合（切り詰め・`wMagicClient`破壊・BREF 0埋め・Unicode を ANSI と偽装）は `Could not get root record`。→ `readpst_runner` は **stderr だけでなく stdout も捕捉**し `ConverterFailed` に載せること（F-1/C-4の修正が必要） |
+| `lspst`出力の安定性 | **機械可読APIとして信頼できない**（D-9を裏付け）。実PST（Unicode PST・7,715通）に対し `A second message_store has been found. Sorry, this must be an error.` で**途中終了し終了コード1**。列挙できたのは6フォルダ・1,847通のみで、実際の階層（11フォルダ）・件数と乖離。出力はUTF-8/CRLF、`Folder "名前"` / `Email\tFrom: x\tSubject: y` / `Contact` / `Appointment` のTAB区切りだが、**階層情報を一切含まず**（インデントなし）、Subject内の改行がそのまま継続行になるため行単位パースも安全でない。破損PSTに対する挙動は readpst と完全に同一（終了コード1・stdoutへ2種のメッセージ）。→ **方針: `lspst` の終了コードは無視し、パースできた `Folder` 行のみをフラットな参考値として採用、件数は `None`。PST種別判定はマジックバイト（D-10）に一本化** |
+| 変換速度（分/GB目安） | 10.3分/GB（初回計測）。今回の再計測では3.32GB・7,715通の抽出が90秒未満で完了（キャッシュ温状態）。進捗UIの指標は引き続き出力ファイル数を使う |
 | 致命的問題の有無・方式継続の可否 | （記入） |
+
+### **4.1 追加で判明した実装上の注意（グループA実測）**
+
+| # | 実測事実 | 実装への反映先 |
+| :--- | :---- | :---- |
+| P-1 | readpst / lspst は致命的エラーを **stdout** に出力し stderr は空 | C-4: `ConverterFailed` へ stdout 末尾も含める。F-1の「stderr末尾を保持」を「stdout/stderr両方の末尾を保持」に読み替える |
+| P-2 | 出力ツリーの最上位に **PSTのメッセージストア表示名のディレクトリ**（今回は `setsubi-mghk03-dkk@dkg.co.jp`）が作られる。これはPST内部の文字列でありサニタイズ対象 | D-3: staging走査は staging ルート直下の1段目も untrusted 名として扱う |
+| P-3 | `-t e` 指定でも `予定表` / `連絡先` / `送信トレイ` など**メールを含まない空ディレクトリが作られる**。`連絡先/{GUID}/` のようなGUID名サブディレクトリも生成される | D-3: ファイルを1件も含まないディレクトリは `folders` へ登録しない |
+| P-4 | EMLファイル名は各フォルダ内で **1始まりの連番 `{N}.eml`**。フォルダ間で重複する | N-4のとおり連番に依存しない。`source_item_key` は staging 相対パス基準にする |
+| P-5 | 同一の葉フォルダ名が異なる親配下に併存する（`京都DKBS` / `千總`） | F-17の `folders.raw_name` = staging相対パス を厳守 |
+| P-6 | `lspst` は有効なPSTでも終了コード1で途中終了しうる | C-5: 終了コードを成否判定に使わない。取得できた行だけを参考値に採用 |
 
 ---
 

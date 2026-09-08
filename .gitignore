@@ -37,6 +37,7 @@ test-storage/
 *.db-shm
 *.db.bak*
 /tools/.bench_fts/
+/tools/.pst_poc/
 
 # Bundled readpst binaries (Phase 4.5). The manifest is authored in-repo and
 # applied to readpst.exe by tools/fetch_readpst.ps1, so it must stay tracked (D-19).
