@@ -192,10 +192,10 @@
 
 #### **B-2. リポジトリおよびストレージ拡張**
 
-- [ ] `domain/repository.py` に `BasePstImportRepository`（`create_import` / `update_import_status` / `find_active_by_source_sha256` / `find_incomplete_by_source_sha256` / `upsert_import_item` / `list_incomplete_items` / `list_items` / `activate_generation` / `restore_generation`）と、メッセージ・PST項目・集計を同一SQLite接続でcommit/rollbackする書込み単位を定義する
-- [ ] `infrastructure/database/pst_import_repository.py` に `SqlitePstImportRepository` を実装し、既存 `ConnectionManager` の接続を再利用する。`messages` / `message_contents` の登録は既存 `SqliteMessageRepository.add_message()` の正規化・FTS・競合解決ロジックを再利用/協調させ、同一トランザクション内で `pst_import_items` / 集計値とアトミックにコミット・明示的ロールバックできるようにする
-- [ ] `tests/support/in_memory_repository.py` 相当のインメモリ実装（`InMemoryPstImportRepository`）を追加する
-- [ ] `domain/ports.py` の `BaseEmlStorage` および `infrastructure/storage/eml_storage.py` に `save_from_file(account_id: str, internal_date: datetime | None, source_path: Path) -> StoredEml` を新設し、staging 上のファイルからチャンク読み取りでハッシュ計算と tmp への書き込み＋アトミック配置を行う（メモリ上限600MBを維持し、100MB超のファイルもストリーミング処理する）
+- [x] `domain/repository.py` に `BasePstImportRepository`（`create_import` / `update_import_status` / `find_active_by_source_sha256` / `find_incomplete_by_source_sha256` / `upsert_import_item` / `list_incomplete_items` / `list_items` / `activate_generation` / `restore_generation`）と、メッセージ・PST項目・集計を同一SQLite接続でcommit/rollbackする書込み単位を定義する
+- [x] `infrastructure/database/pst_import_repository.py` に `SqlitePstImportRepository` を実装し、既存 `ConnectionManager` の接続を再利用する。`messages` / `message_contents` の登録は既存 `SqliteMessageRepository.add_message()` の正規化・FTS・競合解決ロジックを再利用/協調させ、同一トランザクション内で `pst_import_items` / 集計値とアトミックにコミット・明示的ロールバックできるようにする
+- [x] `tests/support/in_memory_repository.py` 相当のインメモリ実装（`InMemoryPstImportRepository`）を追加する
+- [x] `domain/ports.py` の `BaseEmlStorage` および `infrastructure/storage/eml_storage.py` に `save_from_file(account_id: str, internal_date: datetime | None, source_path: Path) -> StoredEml` を新設し、staging 上のファイルからチャンク読み取りでハッシュ計算と tmp への書き込み＋アトミック配置を行う（メモリ上限600MBを維持し、100MB超のファイルもストリーミング処理する）
 
 #### **B-3. PST永続マニフェスト**
 
@@ -215,8 +215,8 @@
 
 #### **C-1. `domain/importer.py`**
 
-- [ ] `ArchiveFolder`（`relative_path` / `display_name` / `estimated_count`）、`ArchiveInfo`（`format` / `folders` / `estimated_total` / `source_sha256` / `source_size_bytes`）、`ExtractResult`（`staging_root` / `file_count` / `stdout_tail` / `stderr_tail`）、`ImportOptions` を定義する
-- [ ] `BaseArchiveImporter`（`probe()` / `extract()`）を定義する。`BaseMailFetcher` とは統合しない
+- [x] `ArchiveFolder`（`relative_path` / `display_name` / `estimated_count`）、`ArchiveInfo`（`format` / `folders` / `estimated_total` / `source_sha256` / `source_size_bytes`）、`ExtractResult`（`staging_root` / `file_count` / `stdout_tail` / `stderr_tail`）、`ImportOptions` を定義する
+- [x] `BaseArchiveImporter`（`probe()` / `extract()`）を定義する。`BaseMailFetcher` とは統合しない
 
 #### **C-2. `domain/errors.py` の拡張**
 

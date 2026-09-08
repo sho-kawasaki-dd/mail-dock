@@ -144,6 +144,64 @@ def save_eml(
     return StoredEml(_relative_path(root, destination), file_hash, len(raw))
 
 
+def save_eml_from_file(
+    root: Path,
+    account_id: str,
+    internal_date: datetime | None,
+    source_path: Path,
+) -> StoredEml:
+    """Stream an EML file into atomic storage without buffering its payload."""
+
+    validate_account_id(account_id)
+    root = root.expanduser().resolve()
+    source_path = Path(source_path)
+    if not source_path.is_file():
+        raise StorageError("Source EML is not a regular file")
+
+    temporary_path: Path | None = None
+    file_hash = ""
+    size_bytes = 0
+    try:
+        with storage_io():
+            temporary_path = root / "tmp" / f"{uuid.uuid4()}.eml"
+            temporary_path.parent.mkdir(parents=True, exist_ok=True)
+            digest = hashlib.sha256()
+            with source_path.open("rb") as source, temporary_path.open("wb") as temporary:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    digest.update(chunk)
+                    size_bytes += len(chunk)
+                    temporary.write(chunk)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            file_hash = digest.hexdigest()
+
+            existing = _find_existing_eml(root, account_id, file_hash)
+            if existing is not None:
+                return existing
+
+            date_directory = _date_directory(internal_date)
+            destination = root / "eml" / account_id / date_directory / f"{file_hash[:32]}.eml"
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if destination.is_file():
+                existing_hash, existing_size = _hash_file(destination)
+                if existing_hash == file_hash:
+                    return StoredEml(
+                        _relative_path(root, destination),
+                        file_hash,
+                        existing_size,
+                        deduplicated=True,
+                    )
+            os.replace(temporary_path, destination)  # noqa: PTH105
+            temporary_path = None
+            _fsync_directory(destination.parent)
+    finally:
+        if temporary_path is not None:
+            with suppress(OSError):
+                temporary_path.unlink(missing_ok=True)
+
+    return StoredEml(_relative_path(root, destination), file_hash, size_bytes)
+
+
 def cleanup_tmp(root: Path) -> int:
     """Remove abandoned temporary EML files, leaving ``tmp/pstimp`` intact."""
 
@@ -172,6 +230,11 @@ class EmlStorage(BaseEmlStorage, BaseIntegrityStorage, BasePurgeStorage):
 
     def save(self, account_id: str, internal_date: datetime | None, raw: bytes) -> StoredEml:
         return save_eml(self.root, account_id, internal_date, raw)
+
+    def save_from_file(
+        self, account_id: str, internal_date: datetime | None, source_path: os.PathLike[str]
+    ) -> StoredEml:
+        return save_eml_from_file(self.root, account_id, internal_date, Path(source_path))
 
     def reuse(self, relative_path: str, expected_hash: str) -> StoredEml | None:
         if len(expected_hash) != _HASH_LENGTH or any(

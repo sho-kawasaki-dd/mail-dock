@@ -7,7 +7,12 @@ from copy import deepcopy
 from typing import Any
 
 from mail_dock.domain.messages import StoredEml
-from mail_dock.domain.repository import BaseMessageRepository, MessageContents, MessageRecord
+from mail_dock.domain.repository import (
+    BaseMessageRepository,
+    BasePstImportRepository,
+    MessageContents,
+    MessageRecord,
+)
 
 
 class InMemoryMessageRepository(BaseMessageRepository):
@@ -487,3 +492,132 @@ class InMemoryMessageRepository(BaseMessageRepository):
 
     def checkpoint(self) -> None:
         self.checkpoint_count += 1
+
+
+class InMemoryPstImportRepository(BasePstImportRepository):
+    """Small PST import fake for use-case tests."""
+
+    def __init__(self) -> None:
+        self.imports: dict[int, dict[str, Any]] = {}
+        self.items: dict[tuple[int, str], dict[str, Any]] = {}
+        self.messages: dict[int, dict[str, Any]] = {}
+        self.contents: dict[int, dict[str, str | None]] = {}
+        self.batch_open = False
+        self._next_import_id = 1
+        self._next_message_id = 1
+
+    @staticmethod
+    def _copy(record: MessageRecord) -> dict[str, Any]:
+        return deepcopy(dict(record))
+
+    def create_import(self, record: MessageRecord) -> int:
+        import_id = self._next_import_id
+        self._next_import_id += 1
+        value = self._copy(record)
+        value["id"] = import_id
+        self.imports[import_id] = value
+        return import_id
+
+    def update_import_status(
+        self,
+        import_id: int,
+        status: str,
+        *,
+        total_files: int | None = None,
+        ingested_count: int | None = None,
+        failed_count: int | None = None,
+        staging_path: str | None = None,
+        finished_at: str | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        values = {
+            "status": status,
+            "total_files": total_files,
+            "ingested_count": ingested_count,
+            "failed_count": failed_count,
+            "staging_path": staging_path,
+            "finished_at": finished_at,
+            "error_message": error_message,
+        }
+        self.imports[import_id].update(values)
+
+    def find_active_by_source_sha256(self, source_sha256: str) -> MessageRecord | None:
+        return next(
+            (
+                self._copy(record)
+                for record in self.imports.values()
+                if record.get("source_sha256") == source_sha256 and record.get("is_active") == 1
+            ),
+            None,
+        )
+
+    def find_incomplete_by_source_sha256(self, source_sha256: str) -> Sequence[MessageRecord]:
+        statuses = {
+            "extracting",
+            "ready_to_ingest",
+            "ingesting",
+            "cancelled_resumable",
+            "failed_resumable",
+        }
+        return [
+            self._copy(record)
+            for record in self.imports.values()
+            if record.get("source_sha256") == source_sha256 and record.get("status") in statuses
+        ]
+
+    def upsert_import_item(self, record: MessageRecord) -> None:
+        key = (int(record["import_id"]), str(record["source_item_key"]))
+        self.items[key] = self._copy(record)
+
+    def list_incomplete_items(self, import_id: int) -> Sequence[MessageRecord]:
+        return [
+            self._copy(record)
+            for (record_import_id, _), record in self.items.items()
+            if record_import_id == import_id and record.get("status") not in {"saved", "completed"}
+        ]
+
+    def list_items(self, import_id: int) -> Sequence[MessageRecord]:
+        return [
+            self._copy(record)
+            for (record_import_id, _), record in self.items.items()
+            if record_import_id == import_id
+        ]
+
+    def add_message(self, record: MessageRecord, contents: MessageContents | None = None) -> int:
+        message_id = self._next_message_id
+        self._next_message_id += 1
+        self.messages[message_id] = {"id": message_id, **self._copy(record)}
+        if contents is not None:
+            self.contents[message_id] = dict(contents)
+        return message_id
+
+    def begin_batch(self) -> None:
+        if self.batch_open:
+            raise RuntimeError("A database batch is already open")
+        self.batch_open = True
+
+    def commit_batch(self) -> None:
+        if not self.batch_open:
+            raise RuntimeError("commit_batch called without begin_batch")
+        self.batch_open = False
+
+    def rollback_batch(self) -> None:
+        if not self.batch_open:
+            raise RuntimeError("rollback_batch called without begin_batch")
+        self.batch_open = False
+
+    def activate_generation(self, import_id: int, replaces_id: int) -> None:
+        self.imports[replaces_id]["is_active"] = 0
+        self.imports[replaces_id]["status"] = "superseded"
+        self.imports[import_id]["is_active"] = 1
+
+    def restore_generation(self, import_id: int) -> None:
+        current = next(
+            record
+            for record in self.imports.values()
+            if record.get("is_active") == 1 and int(record["id"]) != import_id
+        )
+        current["is_active"] = 0
+        current["status"] = "superseded"
+        self.imports[import_id]["is_active"] = 1
+        self.imports[import_id]["status"] = "completed"

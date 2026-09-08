@@ -59,6 +59,36 @@ def test_deduplication_validates_complete_hash_without_writing_tmp(
     assert not list((tmp_storage_root / "tmp").iterdir())
 
 
+def test_save_from_file_streams_and_deduplicates_eml(
+    tmp_storage_root: Path, tmp_path: Path
+) -> None:
+    raw = b"streamed EML content" * 1024
+    source = tmp_path / "staging.eml"
+    source.write_bytes(raw)
+    storage = EmlStorage(tmp_storage_root)
+
+    first = storage.save_from_file("account", None, source)
+    second = storage.save_from_file(
+        "account", datetime(2030, 1, 1, tzinfo=UTC), source
+    )
+
+    assert first.file_hash == hashlib.sha256(raw).hexdigest()
+    assert first.size_bytes == len(raw)
+    assert second.relative_path == first.relative_path
+    assert second.file_hash == first.file_hash
+    assert second.size_bytes == first.size_bytes
+    assert second.deduplicated
+    assert (tmp_storage_root / first.relative_path).read_bytes() == raw
+    assert list((tmp_storage_root / "tmp").iterdir()) == []
+
+
+def test_save_from_file_rejects_non_file_source(tmp_storage_root: Path, tmp_path: Path) -> None:
+    storage = EmlStorage(tmp_storage_root)
+
+    with pytest.raises(StorageError, match="regular file"):
+        storage.save_from_file("account", None, tmp_path / "missing.eml")
+
+
 def test_same_prefix_with_wrong_full_hash_is_not_reused(tmp_storage_root: Path) -> None:
     raw = b"new"
     file_hash = hashlib.sha256(raw).hexdigest()

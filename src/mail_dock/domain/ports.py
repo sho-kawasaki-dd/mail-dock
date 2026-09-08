@@ -48,6 +48,13 @@ class BaseEmlStorage(ABC):
     def save(self, account_id: str, internal_date: datetime | None, raw: bytes) -> StoredEml:
         """Persist raw EML bytes and return their stored location and hash."""
 
+    def save_from_file(
+        self, account_id: str, internal_date: datetime | None, source_path: os.PathLike[str]
+    ) -> StoredEml:
+        """Persist an EML from a file without loading the complete payload in memory."""
+
+        raise NotImplementedError
+
     @abstractmethod
     def reuse(self, relative_path: str, expected_hash: str) -> StoredEml | None:
         """Reuse a previously stored EML only when its complete hash matches."""

@@ -195,3 +195,59 @@ class BaseMessageRepository(ABC):
 
     @abstractmethod
     def checkpoint(self) -> None: ...
+
+
+class BasePstImportRepository(ABC):
+    """Repository port for PST import jobs and their staged items."""
+
+    @abstractmethod
+    def create_import(self, record: MessageRecord) -> int: ...
+
+    @abstractmethod
+    def update_import_status(
+        self,
+        import_id: int,
+        status: str,
+        *,
+        total_files: int | None = None,
+        ingested_count: int | None = None,
+        failed_count: int | None = None,
+        staging_path: str | None = None,
+        finished_at: str | None = None,
+        error_message: str | None = None,
+    ) -> None: ...
+
+    @abstractmethod
+    def find_active_by_source_sha256(self, source_sha256: str) -> MessageRecord | None: ...
+
+    @abstractmethod
+    def find_incomplete_by_source_sha256(self, source_sha256: str) -> Sequence[MessageRecord]: ...
+
+    @abstractmethod
+    def upsert_import_item(self, record: MessageRecord) -> None: ...
+
+    @abstractmethod
+    def add_message(
+        self, record: MessageRecord, contents: MessageContents | None = None
+    ) -> Any: ...
+
+    @abstractmethod
+    def begin_batch(self) -> None: ...
+
+    @abstractmethod
+    def commit_batch(self) -> None: ...
+
+    @abstractmethod
+    def rollback_batch(self) -> None: ...
+
+    @abstractmethod
+    def list_incomplete_items(self, import_id: int) -> Sequence[MessageRecord]: ...
+
+    @abstractmethod
+    def list_items(self, import_id: int) -> Sequence[MessageRecord]: ...
+
+    @abstractmethod
+    def activate_generation(self, import_id: int, replaces_id: int) -> None: ...
+
+    @abstractmethod
+    def restore_generation(self, import_id: int) -> None: ...

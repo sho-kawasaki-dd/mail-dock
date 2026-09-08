@@ -290,7 +290,7 @@ def test_storage_session_migrates_saves_settings_and_releases_lock(
         assert session.root == tmp_storage_root
         assert (
             session.connection_manager.get_connection().execute("PRAGMA user_version").fetchone()[0]
-            == 5
+            == 6
         )
 
     # saved[0] is the capability-probe persist (normcased checked_path); the final
