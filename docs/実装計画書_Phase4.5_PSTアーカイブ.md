@@ -224,9 +224,9 @@
 
 #### **C-3. `infrastructure/importers/readpst_locator.py`**
 
-- [ ] 同梱パス（`vendor/readpst/readpst.exe` 等）の絶対解決を実装する
-- [ ] `readpst -V` によるバージョン取得を実装する
-- [ ] 実行ファイル・依存DLLの欠落を `ConverterNotFound` へラップする
+- [x] 同梱パス（`vendor/readpst/readpst.exe` 等）の絶対解決を実装する
+- [x] `readpst -V` によるバージョン取得を実装する
+- [x] 実行ファイル・依存DLLの欠落を `ConverterNotFound` へラップする
 
 #### **C-4. `infrastructure/importers/readpst_runner.py`**
 
