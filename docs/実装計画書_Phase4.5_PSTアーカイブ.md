@@ -158,7 +158,7 @@
 - [x] MSYS2 に `mingw-w64-ucrt-x86_64-libpst` を導入し、`readpst.exe` / `lspst.exe` を取得する
 - [x] `ldd` 相当（`objdump -p` 等）で依存DLL（iconv / zlib 等）を列挙し、`vendor/readpst/` へ収集する
 - [ ] `tools/fetch_readpst.ps1` として取得手順をスクリプト化する（**Group H で実施**）
-- [ ] WSL または Linux CI コンテナに `pst-utils`（apt）を導入し、Windows版との出力差分（改行・ファイル名・文字コード）を確認する
+- [ ] WSL または Linux CI コンテナに `pst-utils`（apt）を導入し、Windows版との出力差分（改行・ファイル名・文字コード）を確認する (**WSLに`pst-utils`を導入。出力差分確認は保留**)
 
 #### **A-2. 実PSTでの実測（手元の実PSTを使用）**
 
