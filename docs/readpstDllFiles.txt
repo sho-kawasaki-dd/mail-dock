@@ -1,0 +1,60 @@
+$ pacman -Ql mingw-w64-ucrt-x86_64-libpst   | grep -Ei 'readpst|lspst|\.dll$|COPYING|LICENSE'
+
+mingw-w64-ucrt-x86_64-libpst /ucrt64/bin/libpst-4.dll
+mingw-w64-ucrt-x86_64-libpst /ucrt64/bin/lspst.exe
+mingw-w64-ucrt-x86_64-libpst /ucrt64/bin/readpst.exe
+mingw-w64-ucrt-x86_64-libpst /ucrt64/share/doc/libpst-0.6.76/COPYING
+mingw-w64-ucrt-x86_64-libpst /ucrt64/share/licenses/
+mingw-w64-ucrt-x86_64-libpst /ucrt64/share/licenses/libpst/
+mingw-w64-ucrt-x86_64-libpst /ucrt64/share/licenses/libpst/COPYING
+mingw-w64-ucrt-x86_64-libpst /ucrt64/share/man/man1/lspst.1.gz
+mingw-w64-ucrt-x86_64-libpst /ucrt64/share/man/man1/readpst.1.gz
+
+$ ldd /ucrt64/bin/readpst.exe ; ldd /ucrt64/bin/lspst.exe
+	ntdll.dll => /c/WINDOWS/SYSTEM32/ntdll.dll (0x7ffae97a0000)
+	KERNEL32.DLL => /c/WINDOWS/System32/KERNEL32.DLL (0x7ffae86c0000)
+	KERNELBASE.dll => /c/WINDOWS/System32/KERNELBASE.dll (0x7ffae69b0000)
+	ucrtbase.dll => /c/WINDOWS/System32/ucrtbase.dll (0x7ffae6eb0000)
+	libgcc_s_seh-1.dll => /ucrt64/bin/libgcc_s_seh-1.dll (0x7ffadec70000)
+	libpst-4.dll => /ucrt64/bin/libpst-4.dll (0x7ffadea10000)
+	libgsf-1-114.dll => /ucrt64/bin/libgsf-1-114.dll (0x7ffade420000)
+	libgobject-2.0-0.dll => /ucrt64/bin/libgobject-2.0-0.dll (0x7ffade3c0000)
+	libsystre-0.dll => /ucrt64/bin/libsystre-0.dll (0x7ffae1560000)
+	libwinpthread-1.dll => /ucrt64/bin/libwinpthread-1.dll (0x7ffadfe50000)
+	zlib1.dll => /ucrt64/bin/zlib1.dll (0x7ffadebc0000)
+	libiconv-2.dll => /ucrt64/bin/libiconv-2.dll (0x7ffade2a0000)
+	libbz2-1.dll => /ucrt64/bin/libbz2-1.dll (0x7ffadec50000)
+	libintl-8.dll => /ucrt64/bin/libintl-8.dll (0x7ffade240000)
+	ADVAPI32.dll => /c/WINDOWS/System32/ADVAPI32.dll (0x7ffae8320000)
+	msvcrt.dll => /c/WINDOWS/System32/msvcrt.dll (0x7ffae8200000)
+	sechost.dll => /c/WINDOWS/System32/sechost.dll (0x7ffae91b0000)
+	RPCRT4.dll => /c/WINDOWS/System32/RPCRT4.dll (0x7ffae8af0000)
+	libglib-2.0-0.dll => /ucrt64/bin/libglib-2.0-0.dll (0x7ffa7b770000)
+	ole32.dll => /c/WINDOWS/System32/ole32.dll (0x7ffae8da0000)
+	msvcp_win.dll => /c/WINDOWS/System32/msvcp_win.dll (0x7ffae7420000)
+	GDI32.dll => /c/WINDOWS/System32/GDI32.dll (0x7ffae8610000)
+	win32u.dll => /c/WINDOWS/System32/win32u.dll (0x7ffae6dc0000)
+	gdi32full.dll => /c/WINDOWS/System32/gdi32full.dll (0x7ffae72f0000)
+	USER32.dll => /c/WINDOWS/System32/USER32.dll (0x7ffae8920000)
+	combase.dll => /c/WINDOWS/System32/combase.dll (0x7ffae9260000)
+	SHELL32.dll => /c/WINDOWS/System32/SHELL32.dll (0x7ffae7a70000)
+	WS2_32.dll => /c/WINDOWS/System32/WS2_32.dll (0x7ffae96d0000)
+	libstdc++-6.dll => /ucrt64/bin/libstdc++-6.dll (0x7ffa7a940000)
+	libffi-8.dll => /ucrt64/bin/libffi-8.dll (0x7ffae1460000)
+	libtre-5.dll => /ucrt64/bin/libtre-5.dll (0x7ffadeb90000)
+	libgio-2.0-0.dll => /ucrt64/bin/libgio-2.0-0.dll (0x7ffa79610000)
+	DNSAPI.dll => /c/WINDOWS/SYSTEM32/DNSAPI.dll (0x7ffae50c0000)
+	SHLWAPI.dll => /c/WINDOWS/System32/SHLWAPI.dll (0x7ffae7960000)
+	DSPARSE.dll => /c/WINDOWS/SYSTEM32/DSPARSE.dll (0x7ffae59e0000)
+	IPHLPAPI.DLL => /c/WINDOWS/SYSTEM32/IPHLPAPI.DLL (0x7ffae5030000)
+	libxml2-16.dll => /ucrt64/bin/libxml2-16.dll (0x7ffa78df0000)
+	bcrypt.dll => /c/WINDOWS/SYSTEM32/bcrypt.dll (0x7ffae68a0000)
+	libgmodule-2.0-0.dll => /ucrt64/bin/libgmodule-2.0-0.dll (0x7ffae0d80000)
+	libpcre2-8-0.dll => /ucrt64/bin/libpcre2-8-0.dll (0x7ffade0a0000)
+	ntdll.dll => /c/WINDOWS/SYSTEM32/ntdll.dll (0x7ffae97a0000)
+	KERNEL32.DLL => /c/WINDOWS/System32/KERNEL32.DLL (0x7ffae86c0000)
+	KERNELBASE.dll => /c/WINDOWS/System32/KERNELBASE.dll (0x7ffae69b0000)
+	ucrtbase.dll => /c/WINDOWS/System32/ucrtbase.dll (0x7ffae6eb0000)
+	libpst-4.dll => /ucrt64/bin/libpst-4.dll (0x7ffadec60000)
+	libiconv-2.dll => /ucrt64/bin/libiconv-2.dll (0x7ffade350000)
+	zlib1.dll => /ucrt64/bin/zlib1.dll (0x7ffadebc0000)
