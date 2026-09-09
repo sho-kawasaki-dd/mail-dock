@@ -201,6 +201,15 @@ class BasePstImportRepository(ABC):
     """Repository port for PST import jobs and their staged items."""
 
     @abstractmethod
+    def get_import(self, import_id: int) -> MessageRecord | None: ...
+
+    @abstractmethod
+    def get_message(self, message_id: int) -> MessageRecord | None: ...
+
+    @abstractmethod
+    def list_folders(self, account_id: str) -> Sequence[MessageRecord]: ...
+
+    @abstractmethod
     def upsert_folder(self, folder: MessageRecord) -> Any: ...
 
     @abstractmethod
@@ -251,6 +260,9 @@ class BasePstImportRepository(ABC):
 
     @abstractmethod
     def activate_generation(self, import_id: int, replaces_id: int) -> None: ...
+
+    @abstractmethod
+    def rollback_generation_switch(self, import_id: int, replaces_id: int) -> None: ...
 
     @abstractmethod
     def restore_generation(self, import_id: int) -> None: ...

@@ -542,6 +542,16 @@ class PstManifestWriter(BasePstManifestWriter):
             {"schema_version": _SCHEMA_VERSION, "folders": cast(JSONValue, folders)},
         )
 
+    def read_import_manifest(self) -> Mapping[str, JSONValue]:
+        return _read_snapshot(self._directory / _IMPORT_FILENAME, True)
+
+    def read_folders_manifest(self) -> list[Mapping[str, JSONValue]]:
+        snapshot = _read_snapshot(self._directory / _FOLDERS_FILENAME, False)
+        folders = snapshot["folders"]
+        if not isinstance(folders, list):
+            raise ManifestCorruptError("PST folder manifest folders must be an array")
+        return [cast(Mapping[str, JSONValue], folder) for folder in folders]
+
     def append(self, event: Mapping[str, JSONValue]) -> None:
         payload = _validate_event(event)
         if payload["import_uuid"] != self._import_uuid:

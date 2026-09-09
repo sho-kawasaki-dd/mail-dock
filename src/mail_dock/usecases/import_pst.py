@@ -81,6 +81,16 @@ class StageBResult:
     remaining_count: int
 
 
+@dataclass(frozen=True)
+class GenerationVerification:
+    """Verified durable state that is safe to expose as the active generation."""
+
+    import_id: int
+    import_uuid: str
+    item_count: int
+    failed_count: int
+
+
 def _canonical_json(payload: object) -> bytes:
     return json.dumps(
         payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True, allow_nan=False
@@ -163,6 +173,252 @@ def _static_manifest_hash(
 
 def _timestamp() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _manifest_snapshot(manifest: BasePstManifestWriter) -> Mapping[str, JSONValue]:
+    reader = getattr(manifest, "read_import_manifest", None)
+    if not callable(reader):
+        raise UnreadableArchive("PST manifest cannot read read_import_manifest")
+    snapshot = reader()
+    if not isinstance(snapshot, Mapping):
+        raise UnreadableArchive("PST import manifest is invalid")
+    return snapshot
+
+
+def _verify_folder_snapshot(manifest: BasePstManifestWriter) -> None:
+    reader = getattr(manifest, "read_folders_manifest", None)
+    if not callable(reader):
+        raise UnreadableArchive("PST manifest cannot read read_folders_manifest")
+    folders = reader()
+    if not isinstance(folders, list):
+        raise UnreadableArchive("PST folder manifest is invalid")
+
+
+def verify_generation(
+    repository: BasePstImportRepository,
+    manifest: BasePstManifestWriter,
+    storage: BaseEmlStorage,
+    *,
+    import_id: int,
+    import_uuid: str,
+    allow_superseded: bool = False,
+) -> GenerationVerification:
+    """Verify the durable EML, manifest, and DB view of one PST generation."""
+
+    record = repository.get_import(import_id)
+    if record is None or str(record.get("import_uuid")) != import_uuid:
+        raise UnreadableArchive("PST generation does not exist")
+    valid_statuses = {"completed", "completed_with_errors"}
+    if allow_superseded:
+        valid_statuses.add("superseded")
+    if record.get("status") not in valid_statuses:
+        raise UnreadableArchive("PST generation is not complete")
+
+    snapshot = _manifest_snapshot(manifest)
+    if snapshot.get("import_uuid") != import_uuid:
+        raise UnreadableArchive("PST import manifest UUID does not match the DB")
+    if snapshot.get("account_id") != record.get("account_id"):
+        raise UnreadableArchive("PST import manifest account does not match the DB")
+    _verify_folder_snapshot(manifest)
+    folders = list(repository.list_folders(str(record["account_id"])))
+    folder_names = {str(folder.get("raw_name")) for folder in folders}
+
+    events = list(manifest.read_events())
+    discovered = _event_by_item(events, "item_discovered")
+    saved = _event_by_item(events, "item_saved")
+    ready_events = [event for event in events if event.get("event") == "import_ready"]
+    if not ready_events:
+        raise UnreadableArchive("PST generation has no import_ready event")
+
+    items = list(repository.list_items(import_id))
+    if len(discovered) != len(items) or set(discovered) != {
+        str(item.get("source_item_key")) for item in items
+    }:
+        raise UnreadableArchive("PST item manifest and DB inventory differ")
+    failed_count = 0
+    for item in items:
+        source_key = str(item.get("source_item_key"))
+        if str(item.get("folder_relative_path")) not in folder_names:
+            raise UnreadableArchive(f"PST folder is not registered: {source_key}")
+        if item.get("status") not in {"saved", "completed"}:
+            raise UnreadableArchive(f"PST item is not saved: {source_key}")
+        message_id = item.get("message_row_id")
+        saved_event = saved.get(source_key)
+        if not isinstance(message_id, int) or saved_event is None:
+            raise UnreadableArchive(f"PST item has no durable message: {source_key}")
+        if (
+            discovered[source_key].get("source_relative_path")
+            != item.get("source_relative_path")
+            or discovered[source_key].get("folder_relative_path")
+            != item.get("folder_relative_path")
+            or discovered[source_key].get("source_size_bytes")
+            != item.get("source_size_bytes")
+            or discovered[source_key].get("source_sha256")
+            != item.get("source_sha256")
+            or item.get("final_relative_path") != saved_event.get("final_relative_path")
+            or item.get("source_sha256") is None
+            or saved_event.get("file_hash") is None
+            or item.get("final_relative_path") is None
+        ):
+            raise UnreadableArchive(f"PST item storage metadata differs: {source_key}")
+        message = repository.get_message(message_id)
+        if message is None or any(
+            (
+                message.get("account_id") != record.get("account_id"),
+                message.get("remote_state") != "no_remote",
+                message.get("local_state") not in {"active", "trashed"},
+                message.get("relative_path") != saved_event.get("final_relative_path"),
+                message.get("file_hash") != saved_event.get("file_hash"),
+            )
+        ):
+            raise UnreadableArchive(f"PST message registration is invalid: {source_key}")
+        stored = storage.reuse(
+            str(item.get("final_relative_path")), str(saved_event.get("file_hash"))
+        )
+        if stored is None or stored.size_bytes != saved_event.get("size_bytes"):
+            raise UnreadableArchive(f"PST EML is missing or corrupt: {source_key}")
+        error_class = item.get("error_class")
+        if error_class is not None:
+            failed_count += 1
+            expected_event = (
+                "item_oversize" if error_class == "oversize" else "item_parse_failed"
+            )
+            if not any(
+                event.get("event") == expected_event
+                and event.get("source_item_key") == source_key
+                for event in events
+            ):
+                raise UnreadableArchive(f"PST item error is not in the manifest: {source_key}")
+
+    ready = ready_events[-1]
+    if ready.get("total_files") != len(items):
+        raise UnreadableArchive("PST import_ready count differs from the DB")
+    return GenerationVerification(import_id, import_uuid, len(items), failed_count)
+
+
+def recover_generation_switch(
+    repository: BasePstImportRepository,
+    manifest: BasePstManifestWriter,
+    *,
+    import_id: int,
+    import_uuid: str,
+    replaces_id: int,
+) -> None:
+    """Restore the old generation when a prepared switch lacks a commit event."""
+
+    events = list(manifest.read_events())
+    prepared = any(
+        event.get("event") == "generation_switch_prepared" for event in events
+    )
+    committed = any(
+        event.get("event") == "generation_switch_committed" for event in events
+    )
+    if prepared and not committed:
+        repository.rollback_generation_switch(import_id, replaces_id)
+
+
+def switch_generation(
+    repository: BasePstImportRepository,
+    manifest: BasePstManifestWriter,
+    storage: BaseEmlStorage,
+    *,
+    import_id: int,
+    import_uuid: str,
+    replaces_id: int,
+    replaces_import_uuid: str,
+) -> GenerationVerification:
+    """Atomically make a verified re-import visible and retire its predecessor."""
+
+    new_record = repository.get_import(import_id)
+    old_record = repository.get_import(replaces_id)
+    if (
+        new_record is None
+        or old_record is None
+        or new_record.get("is_active")
+        or old_record.get("is_active") != 1
+        or new_record.get("replaces_id") != replaces_id
+        or old_record.get("import_uuid") != replaces_import_uuid
+    ):
+        raise UnreadableArchive("PST generations are not an inactive replacement pair")
+    verification = verify_generation(
+        repository, manifest, storage, import_id=import_id, import_uuid=import_uuid
+    )
+    manifest.append(
+        {
+            "event": "generation_switch_prepared",
+            "import_uuid": import_uuid,
+            "timestamp": _timestamp(),
+            "replaces_import_uuid": replaces_import_uuid,
+        }
+    )
+    manifest.flush_and_sync()
+
+    repository.begin_batch()
+    try:
+        repository.activate_generation(import_id, replaces_id)
+        manifest.append(
+            {
+                "event": "generation_switch_committed",
+                "import_uuid": import_uuid,
+                "timestamp": _timestamp(),
+                "replaces_import_uuid": replaces_import_uuid,
+            }
+        )
+        manifest.flush_and_sync()
+        repository.commit_batch()
+    except Exception:
+        repository.rollback_batch()
+        raise
+
+    manifest.append(
+        {
+            "event": "generation_superseded",
+            "import_uuid": import_uuid,
+            "timestamp": _timestamp(),
+            "superseded_import_uuid": replaces_import_uuid,
+        }
+    )
+    manifest.flush_and_sync()
+    return verification
+
+
+def restore_generation(
+    repository: BasePstImportRepository,
+    manifest: BasePstManifestWriter,
+    storage: BaseEmlStorage,
+    *,
+    import_id: int,
+    import_uuid: str,
+    superseded_import_uuid: str,
+) -> GenerationVerification:
+    """Restore a superseded generation while keeping the switch transactional."""
+
+    verification = verify_generation(
+        repository,
+        manifest,
+        storage,
+        import_id=import_id,
+        import_uuid=import_uuid,
+        allow_superseded=True,
+    )
+    repository.begin_batch()
+    try:
+        repository.restore_generation(import_id)
+        manifest.append(
+            {
+                "event": "generation_restored",
+                "import_uuid": import_uuid,
+                "timestamp": _timestamp(),
+                "restored_import_uuid": import_uuid,
+                "superseded_import_uuid": superseded_import_uuid,
+            }
+        )
+        manifest.flush_and_sync()
+        repository.commit_batch()
+    except Exception:
+        repository.rollback_batch()
+        raise
+    return verification
 
 
 def _ensure_write_allowed(storage_state: StorageWriteGate | None) -> None:
@@ -858,6 +1114,7 @@ def check_import_capacity(
 
 
 __all__ = [
+    "GenerationVerification",
     "ImportCapacity",
     "ImportJobAction",
     "ImportJobDecision",
@@ -865,8 +1122,12 @@ __all__ = [
     "SourceFileSnapshot",
     "StageBResult",
     "check_import_capacity",
+    "recover_generation_switch",
     "resolve_import_job",
+    "restore_generation",
     "run_stage_b",
     "snapshot_source_file",
+    "switch_generation",
     "validate_source_snapshot",
+    "verify_generation",
 ]

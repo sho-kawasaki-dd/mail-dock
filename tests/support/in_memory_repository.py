@@ -504,6 +504,12 @@ class InMemoryPstImportRepository(BasePstImportRepository):
         self.messages: dict[int, dict[str, Any]] = {}
         self.contents: dict[int, dict[str, str | None]] = {}
         self.batch_open = False
+        self._batch_snapshot: tuple[
+            dict[int, dict[str, Any]],
+            dict[tuple[int, str], dict[str, Any]],
+            dict[int, dict[str, Any]],
+            dict[int, dict[str, str | None]],
+        ] | None = None
         self._next_import_id = 1
         self._next_folder_id = 1
         self._next_message_id = 1
@@ -519,6 +525,26 @@ class InMemoryPstImportRepository(BasePstImportRepository):
         value["id"] = import_id
         self.imports[import_id] = value
         return import_id
+
+    def get_import(self, import_id: int) -> MessageRecord | None:
+        record = self.imports.get(import_id)
+        return None if record is None else self._copy(record)
+
+    def get_message(self, message_id: int) -> MessageRecord | None:
+        record = self.messages.get(message_id)
+        return None if record is None else self._copy(record)
+
+    def list_folders(self, account_id: str) -> Sequence[MessageRecord]:
+        return [
+            {
+                "id": folder_id,
+                "account_id": account_id,
+                "raw_name": raw_name,
+                "display_name": raw_name.rsplit("/", 1)[-1],
+            }
+            for (folder_account, raw_name), folder_id in self.folders.items()
+            if folder_account == account_id
+        ]
 
     def upsert_folder(self, folder: MessageRecord) -> int:
         key = (str(folder["account_id"]), str(folder["raw_name"]))
@@ -606,21 +632,56 @@ class InMemoryPstImportRepository(BasePstImportRepository):
         if self.batch_open:
             raise RuntimeError("A database batch is already open")
         self.batch_open = True
+        self._batch_snapshot = (
+            deepcopy(self.imports),
+            deepcopy(self.items),
+            deepcopy(self.messages),
+            deepcopy(self.contents),
+        )
 
     def commit_batch(self) -> None:
         if not self.batch_open:
             raise RuntimeError("commit_batch called without begin_batch")
         self.batch_open = False
+        self._batch_snapshot = None
 
     def rollback_batch(self) -> None:
         if not self.batch_open:
             raise RuntimeError("rollback_batch called without begin_batch")
         self.batch_open = False
+        if self._batch_snapshot is not None:
+            self.imports, self.items, self.messages, self.contents = self._batch_snapshot
+        self._batch_snapshot = None
 
     def activate_generation(self, import_id: int, replaces_id: int) -> None:
         self.imports[replaces_id]["is_active"] = 0
         self.imports[replaces_id]["status"] = "superseded"
         self.imports[import_id]["is_active"] = 1
+        for (item_import_id, _), item in self.items.items():
+            if item_import_id == replaces_id and item.get("message_row_id") is not None:
+                message = self.messages[int(item["message_row_id"])]
+                message["local_state"] = "trashed"
+            elif item_import_id == import_id and item.get("message_row_id") is not None:
+                message = self.messages[int(item["message_row_id"])]
+                message["local_state"] = "active"
+
+    def rollback_generation_switch(self, import_id: int, replaces_id: int) -> None:
+        new_record = self.imports[import_id]
+        old_record = self.imports[replaces_id]
+        if new_record.get("is_active") == 1 and old_record.get("is_active") != 1:
+            old_record["is_active"] = 1
+            old_record["status"] = "completed"
+            new_record["is_active"] = 0
+            new_record["status"] = "completed"
+            for (item_import_id, _), item in self.items.items():
+                if item.get("message_row_id") is None:
+                    continue
+                message = self.messages[int(item["message_row_id"])]
+                message["local_state"] = "active" if item_import_id == replaces_id else "trashed"
+        elif new_record.get("is_active") != 1 and old_record.get("is_active") == 1:
+            return
+        else:
+            raise ValueError("PST generation switch has an invalid database state")
 
     def restore_generation(self, import_id: int) -> None:
         current = next(
@@ -632,3 +693,10 @@ class InMemoryPstImportRepository(BasePstImportRepository):
         current["status"] = "superseded"
         self.imports[import_id]["is_active"] = 1
         self.imports[import_id]["status"] = "completed"
+        for (item_import_id, _), item in self.items.items():
+            if item_import_id == int(current["id"]) and item.get("message_row_id") is not None:
+                message = self.messages[int(item["message_row_id"])]
+                message["local_state"] = "trashed"
+            elif item_import_id == import_id and item.get("message_row_id") is not None:
+                message = self.messages[int(item["message_row_id"])]
+                message["local_state"] = "active"

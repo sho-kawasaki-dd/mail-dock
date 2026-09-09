@@ -138,6 +138,29 @@ class SqlitePstImportRepository(BasePstImportRepository):
             }
         )
 
+    def get_import(self, import_id: int) -> MessageRecord | None:
+        with self._db_io("get PST import"):
+            cursor = self._conn().execute(
+                "SELECT * FROM pst_imports WHERE id = ?", (import_id,)
+            )
+            row = cursor.fetchone()
+            return None if row is None else self._row(cursor, cast(tuple[Any, ...], row))
+
+    def get_message(self, message_id: int) -> MessageRecord | None:
+        with self._db_io("get PST message"):
+            cursor = self._conn().execute("SELECT * FROM messages WHERE id = ?", (message_id,))
+            row = cursor.fetchone()
+            return None if row is None else self._row(cursor, cast(tuple[Any, ...], row))
+
+    def list_folders(self, account_id: str) -> Sequence[MessageRecord]:
+        with self._db_io("list PST folders"):
+            cursor = self._conn().execute(
+                "SELECT id, account_id, raw_name, display_name, uidvalidity, "
+                "last_seen_uid, is_sync_target FROM folders WHERE account_id = ? ORDER BY id",
+                (account_id,),
+            )
+            return self._rows(cursor)
+
     def create_import(self, record: MessageRecord) -> int:
         required = ("import_uuid", "account_id", "source_filename", "source_sha256", "status")
         missing = [column for column in required if record.get(column) is None]
@@ -296,16 +319,19 @@ class SqlitePstImportRepository(BasePstImportRepository):
     def activate_generation(self, import_id: int, replaces_id: int) -> None:
         def activate(connection: sqlite3.Connection) -> None:
             new_row = connection.execute(
-                "SELECT status FROM pst_imports WHERE id = ?", (import_id,)
+                "SELECT status, is_active, replaces_id FROM pst_imports WHERE id = ?",
+                (import_id,),
             ).fetchone()
             old_row = connection.execute(
-                "SELECT is_active FROM pst_imports WHERE id = ?", (replaces_id,)
+                "SELECT status, is_active FROM pst_imports WHERE id = ?", (replaces_id,)
             ).fetchone()
             if new_row is None or old_row is None:
                 raise ValueError("PST generation does not exist")
             if new_row[0] not in {"completed", "completed_with_errors"}:
                 raise ValueError("Only a completed PST generation can become active")
-            if not old_row[0]:
+            if new_row[1] or new_row[2] != replaces_id:
+                raise ValueError("The new PST generation is not an inactive replacement")
+            if not old_row[1] or old_row[0] not in {"completed", "completed_with_errors"}:
                 raise ValueError("The replaced PST generation is not active")
             connection.execute(
                 "UPDATE messages SET local_state = 'active', trashed_at = NULL "
@@ -332,18 +358,24 @@ class SqlitePstImportRepository(BasePstImportRepository):
     def restore_generation(self, import_id: int) -> None:
         def restore(connection: sqlite3.Connection) -> None:
             target = connection.execute(
-                "SELECT status, is_active FROM pst_imports WHERE id = ?", (import_id,)
+                "SELECT status, is_active, replaces_id FROM pst_imports WHERE id = ?",
+                (import_id,),
             ).fetchone()
-            if target is None or target[1]:
+            if target is None or target[1] or target[0] != "superseded":
                 raise ValueError("PST generation is not restorable")
             current = connection.execute(
-                "SELECT id FROM pst_imports WHERE is_active = 1 AND id != ? "
+                "SELECT id, status, replaces_id FROM pst_imports WHERE is_active = 1 AND id != ? "
                 "ORDER BY id DESC LIMIT 1",
                 (import_id,),
             ).fetchone()
             if current is None:
                 raise ValueError("No active PST generation to replace")
             current_id = int(current[0])
+            if current[2] != import_id or current[1] not in {
+                "completed",
+                "completed_with_errors",
+            }:
+                raise ValueError("PST generations are not an adjacent replacement pair")
             connection.execute(
                 "UPDATE messages SET local_state = 'active', trashed_at = NULL "
                 "WHERE id IN (SELECT message_row_id FROM pst_import_items WHERE import_id = ?)",
@@ -367,3 +399,43 @@ class SqlitePstImportRepository(BasePstImportRepository):
             )
 
         self._run_generation_change("restore PST generation", restore)
+
+    def rollback_generation_switch(self, import_id: int, replaces_id: int) -> None:
+        def rollback(connection: sqlite3.Connection) -> None:
+            new_row = connection.execute(
+                "SELECT status, is_active, replaces_id FROM pst_imports WHERE id = ?",
+                (import_id,),
+            ).fetchone()
+            old_row = connection.execute(
+                "SELECT status, is_active FROM pst_imports WHERE id = ?", (replaces_id,)
+            ).fetchone()
+            if new_row is None or old_row is None or new_row[2] != replaces_id:
+                raise ValueError("PST generations are not an adjacent replacement pair")
+            if new_row[1] and not old_row[1]:
+                connection.execute(
+                    "UPDATE messages SET local_state = 'active', trashed_at = NULL "
+                    "WHERE id IN (SELECT message_row_id FROM pst_import_items WHERE import_id = ?)",
+                    (replaces_id,),
+                )
+                connection.execute(
+                    "UPDATE messages SET local_state = 'trashed', "
+                    "trashed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
+                    "WHERE id IN (SELECT message_row_id FROM pst_import_items WHERE import_id = ?)",
+                    (import_id,),
+                )
+                connection.execute(
+                    "UPDATE pst_imports SET is_active = 0, status = 'completed' "
+                    "WHERE id = ?",
+                    (import_id,),
+                )
+                connection.execute(
+                    "UPDATE pst_imports SET is_active = 1, status = 'completed', "
+                    "superseded_at = NULL WHERE id = ?",
+                    (replaces_id,),
+                )
+            elif not new_row[1] and old_row[1]:
+                return
+            else:
+                raise ValueError("PST generation switch has an invalid database state")
+
+        self._run_generation_change("rollback PST generation switch", rollback)

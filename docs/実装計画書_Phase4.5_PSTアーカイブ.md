@@ -270,10 +270,10 @@
 
 #### **D-4. 世代交代**
 
-- [ ] 新世代の全EML・マニフェスト・DB登録の検証を実装する
-- [ ] `generation_switch_prepared` をfsync後、`activate_generation()` により単一DBトランザクションで新世代の有効化・旧世代の `superseded` 化・旧世代全件のゴミ箱化を行い、commit前に `generation_switch_committed` をfsyncする
-- [ ] committedイベントが無い停止時は旧世代を正として復旧し、失敗時に旧世代が一切変更されないことを保証する
-- [ ] 切替完了後の旧世代はPSTゴミ箱にだけ表示し、猶予中は `restore_generation()` によりアーカイブ単位で逆切替できるようにする。確定状態（復元旧世代: `is_active=1, status='completed'` かつ全メッセージ `local_state='active'`、退避現行世代: `is_active=0, status='superseded'` かつ全メッセージ `local_state='trashed'`）を単一DBトランザクションで切り替え、マニフェストに `generation_restored` を記録する
+- [x] 新世代の全EML・マニフェスト・DB登録の検証を実装する
+- [x] `generation_switch_prepared` をfsync後、`activate_generation()` により単一DBトランザクションで新世代の有効化・旧世代の `superseded` 化・旧世代全件のゴミ箱化を行い、commit前に `generation_switch_committed` をfsyncする
+- [x] committedイベントが無い停止時は旧世代を正として復旧し、失敗時に旧世代が一切変更されないことを保証する
+- [x] 切替完了後の旧世代はPSTゴミ箱にだけ表示し、猶予中は `restore_generation()` によりアーカイブ単位で逆切替できるようにする。確定状態（復元旧世代: `is_active=1, status='completed'` かつ全メッセージ `local_state='active'`、退避現行世代: `is_active=0, status='superseded'` かつ全メッセージ `local_state='trashed'`）を単一DBトランザクションで切り替え、マニフェストに `generation_restored` を記録する
 
 #### **D-5. 監査・切断対応**
 
@@ -284,12 +284,12 @@
 
 ### **3.5 グループE: 機能ガード（*Dと並行可、Bに依存*）**
 
-- [ ] `usecases/sync_mail.py::sync_account()` の入口で `provider_type=='pst_import'` を拒否する
-- [ ] `usecases/sync_folders.py::refresh_folders()` / `set_sync_target()` の入口で同様に拒否する
-- [ ] `usecases/delete_remote.py::dry_run()` / `execute()` の入口で同様に拒否する
-- [ ] 定期同期・起動時同期のアカウント列挙からPSTアカウントを除外する
-- [ ] CLI の `sync` / `folders` / `delete-remote` からPSTアカウントを対象外にする
-- [ ] 上記すべてが「UIで隠すだけでなく拒否される」ことを単体テストで固定する
+- [x] `usecases/sync_mail.py::sync_account()` の入口で `provider_type=='pst_import'` を拒否する
+- [x] `usecases/sync_folders.py::refresh_folders()` / `set_sync_target()` の入口で同様に拒否する
+- [x] `usecases/delete_remote.py::dry_run()` / `execute()` の入口で同様に拒否する
+- [x] 定期同期・起動時同期のアカウント列挙からPSTアカウントを除外する
+- [x] CLI の `sync` / `folders` / `delete-remote` からPSTアカウントを対象外にする
+- [x] 上記すべてが「UIで隠すだけでなく拒否される」ことを単体テストで固定する
 
 ---
 

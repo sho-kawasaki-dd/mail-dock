@@ -27,9 +27,11 @@ from mail_dock.usecases.import_pst import (
     check_import_capacity,
     read_stage_a_marker,
     resolve_import_job,
+    restore_generation,
     run_stage_a,
     run_stage_b,
     snapshot_source_file,
+    switch_generation,
     validate_source_snapshot,
 )
 from tests.support.in_memory_repository import InMemoryPstImportRepository
@@ -105,6 +107,19 @@ class _WriteGate:
         return self.allowed
 
 
+class _FailOnFlushManifest(PstManifestWriter):
+    def __init__(self, root: Path, import_uuid: str, fail_on: int) -> None:
+        super().__init__(root, import_uuid)
+        self._flush_count = 0
+        self._fail_on = fail_on
+
+    def flush_and_sync(self) -> None:
+        self._flush_count += 1
+        if self._flush_count == self._fail_on:
+            raise OSError("injected manifest fsync failure")
+        super().flush_and_sync()
+
+
 def _stage_a_import(tmp_path: Path) -> tuple[Path, InMemoryPstImportRepository, str, int]:
     source = tmp_path / "archive.pst"
     source.write_bytes(b"pst-content")
@@ -114,6 +129,55 @@ def _stage_a_import(tmp_path: Path) -> tuple[Path, InMemoryPstImportRepository, 
         _record(import_uuid, hashlib.sha256(b"pst-content").hexdigest(), status="new")
     )
     return source, repository, import_uuid, import_id
+
+
+def _complete_generation(
+    tmp_path: Path,
+    repository: InMemoryPstImportRepository,
+    source: Path,
+    import_uuid: str,
+    account_id: str,
+    *,
+    active: int = 0,
+    replaces_id: int | None = None,
+) -> int:
+    import_id = repository.create_import(
+        _record(
+            import_uuid,
+            hashlib.sha256(source.read_bytes()).hexdigest(),
+            status="new",
+            active=active,
+        )
+        | {"account_id": account_id, "replaces_id": replaces_id}
+    )
+    with PstManifestWriter(tmp_path, import_uuid) as manifest:
+        stage_a = run_stage_a(
+            repository,
+            manifest,
+            _FakeExtractor(),
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id=account_id,
+            source=source,
+            storage_root=tmp_path,
+            source_snapshot=snapshot_source_file(source, pst_storage=PST_STORAGE),
+            readpst_version="0.6.76",
+            options=ImportOptions("Archive", "cp932"),
+            pst_storage=PST_STORAGE,
+        )
+    with PstManifestWriter(tmp_path, import_uuid) as manifest:
+        run_stage_b(
+            repository,
+            manifest,
+            EmlStorage(tmp_path),
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id=account_id,
+            staging_root=stage_a.staging_root,
+            pst_storage=PST_STORAGE,
+        )
+    repository.imports[import_id]["is_active"] = active
+    return import_id
 
 
 def test_run_stage_a_publishes_inventory_and_atomic_marker(tmp_path: Path) -> None:
@@ -405,6 +469,146 @@ def test_run_stage_b_keeps_parse_failures_as_completed_with_errors(tmp_path: Pat
     assert any(
         event["event"] == "item_parse_failed"
         for event in PstManifestReader(tmp_path, import_uuid).read_all_events()
+    )
+
+
+def test_switch_generation_verifies_durable_state_and_records_lifecycle(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "archive.pst"
+    source.write_bytes(b"pst-content")
+    repository = InMemoryPstImportRepository()
+    old_uuid = "11111111-1111-4111-8111-111111111111"
+    new_uuid = "22222222-2222-4222-8222-222222222222"
+    old_id = _complete_generation(tmp_path, repository, source, old_uuid, "old-account", active=1)
+    new_id = _complete_generation(
+        tmp_path,
+        repository,
+        source,
+        new_uuid,
+        "new-account",
+        replaces_id=old_id,
+    )
+
+    with PstManifestWriter(tmp_path, new_uuid) as manifest:
+        verification = switch_generation(
+            repository,
+            manifest,
+            EmlStorage(tmp_path),
+            import_id=new_id,
+            import_uuid=new_uuid,
+            replaces_id=old_id,
+            replaces_import_uuid=old_uuid,
+        )
+
+    assert verification.item_count == 1
+    assert repository.imports[new_id]["is_active"] == 1
+    assert repository.imports[old_id]["status"] == "superseded"
+    old_message_id = next(
+        item["message_row_id"]
+        for (item_import_id, _), item in repository.items.items()
+        if item_import_id == old_id
+    )
+    assert repository.messages[old_message_id]["local_state"] == "trashed"
+    assert [
+        event["event"]
+        for event in PstManifestReader(tmp_path, new_uuid).read_all_events()
+        if str(event["event"]).startswith("generation_")
+    ] == ["generation_switch_prepared", "generation_switch_committed", "generation_superseded"]
+
+
+def test_switch_generation_rolls_back_when_committed_event_cannot_sync(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "archive.pst"
+    source.write_bytes(b"pst-content")
+    repository = InMemoryPstImportRepository()
+    old_uuid = "33333333-3333-4333-8333-333333333333"
+    new_uuid = "44444444-4444-4444-8444-444444444444"
+    old_id = _complete_generation(tmp_path, repository, source, old_uuid, "old-account", active=1)
+    new_id = _complete_generation(
+        tmp_path,
+        repository,
+        source,
+        new_uuid,
+        "new-account",
+        replaces_id=old_id,
+    )
+
+    manifest = _FailOnFlushManifest(tmp_path, new_uuid, fail_on=2)
+    with pytest.raises(OSError, match="fsync"):
+        switch_generation(
+            repository,
+            manifest,
+            EmlStorage(tmp_path),
+            import_id=new_id,
+            import_uuid=new_uuid,
+            replaces_id=old_id,
+            replaces_import_uuid=old_uuid,
+        )
+    manifest.close()
+
+    assert repository.imports[old_id]["is_active"] == 1
+    assert repository.imports[old_id]["status"] == "completed"
+    assert repository.imports[new_id]["is_active"] == 0
+    assert repository.imports[new_id]["status"] == "completed"
+
+
+def test_restore_generation_reverses_visibility_and_records_event(tmp_path: Path) -> None:
+    source = tmp_path / "archive.pst"
+    source.write_bytes(b"pst-content")
+    repository = InMemoryPstImportRepository()
+    old_uuid = "55555555-5555-4555-8555-555555555555"
+    new_uuid = "66666666-6666-4666-8666-666666666666"
+    old_id = _complete_generation(tmp_path, repository, source, old_uuid, "old-account", active=1)
+    new_id = _complete_generation(
+        tmp_path,
+        repository,
+        source,
+        new_uuid,
+        "new-account",
+        replaces_id=old_id,
+    )
+    with PstManifestWriter(tmp_path, new_uuid) as manifest:
+        switch_generation(
+            repository,
+            manifest,
+            EmlStorage(tmp_path),
+            import_id=new_id,
+            import_uuid=new_uuid,
+            replaces_id=old_id,
+            replaces_import_uuid=old_uuid,
+        )
+
+    with PstManifestWriter(tmp_path, old_uuid) as manifest:
+        restore_generation(
+            repository,
+            manifest,
+            EmlStorage(tmp_path),
+            import_id=old_id,
+            import_uuid=old_uuid,
+            superseded_import_uuid=new_uuid,
+        )
+
+    assert repository.imports[old_id]["is_active"] == 1
+    assert repository.imports[old_id]["status"] == "completed"
+    assert repository.imports[new_id]["is_active"] == 0
+    assert repository.imports[new_id]["status"] == "superseded"
+    old_message_id = next(
+        item["message_row_id"]
+        for (item_import_id, _), item in repository.items.items()
+        if item_import_id == old_id
+    )
+    new_message_id = next(
+        item["message_row_id"]
+        for (item_import_id, _), item in repository.items.items()
+        if item_import_id == new_id
+    )
+    assert repository.messages[old_message_id]["local_state"] == "active"
+    assert repository.messages[new_message_id]["local_state"] == "trashed"
+    assert any(
+        event["event"] == "generation_restored"
+        for event in PstManifestReader(tmp_path, old_uuid).read_all_events()
     )
 
 
