@@ -22,6 +22,7 @@ from typing import BinaryIO, cast
 
 from mail_dock.domain.errors import ManifestCorruptError
 from mail_dock.domain.ports import (
+    BaseManifestWriter,
     BasePstManifestReader,
     BasePstManifestWriter,
     JSONValue,
@@ -509,7 +510,7 @@ def _validate_transition(
     return True
 
 
-class PstManifestWriter(BasePstManifestWriter):
+class PstManifestWriter(BasePstManifestWriter, BaseManifestWriter):
     """Write one immutable PST snapshot pair and its append-only event log."""
 
     def __init__(self, root: Path, import_uuid: str) -> None:
@@ -518,9 +519,11 @@ class PstManifestWriter(BasePstManifestWriter):
         self._import_uuid = import_uuid
         self._directory = root / "manifests" / "pst" / import_uuid
         self._handle: BinaryIO | None = None
-        self._events = list(read_events(self._directory / _ITEMS_FILENAME)) if (
-            self._directory / _ITEMS_FILENAME
-        ).is_file() else []
+        self._events = (
+            list(read_events(self._directory / _ITEMS_FILENAME))
+            if (self._directory / _ITEMS_FILENAME).is_file()
+            else []
+        )
 
     def _write_snapshot(self, filename: str, payload: Mapping[str, JSONValue]) -> None:
         if filename == _IMPORT_FILENAME:
@@ -530,6 +533,14 @@ class PstManifestWriter(BasePstManifestWriter):
                 _with_content_hash({"folders": list(cast(Sequence[JSONValue], payload["folders"]))})
             )
         _atomic_write_json(self._directory / filename, validated, self._root)
+
+    @property
+    def import_uuid(self) -> str:
+        return self._import_uuid
+
+    def checkpoint(self, sequence: int, batch_id: str) -> None:
+        del sequence, batch_id
+        raise ValueError("PST manifests do not support IMAP checkpoints")
 
     def write_import_manifest(self, snapshot: Mapping[str, JSONValue]) -> None:
         payload = dict(snapshot)
@@ -612,7 +623,14 @@ class PstManifestReader(BasePstManifestReader):
         return [cast(Mapping[str, JSONValue], folder) for folder in folders]
 
     def read_all_events(self) -> Iterator[Mapping[str, JSONValue]]:
-        return read_events(self._directory / _ITEMS_FILENAME)
+        events: list[Mapping[str, JSONValue]] = []
+        try:
+            for event in read_events(self._directory / _ITEMS_FILENAME):
+                _validate_transition(event, events)
+                events.append(event)
+        except ValueError as error:
+            raise ManifestCorruptError(str(error)) from error
+        return iter(events)
 
 
 def repair_tail(path: Path) -> int:

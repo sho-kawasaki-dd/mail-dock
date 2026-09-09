@@ -115,8 +115,7 @@ class SqlitePstImportRepository(BasePstImportRepository):
         if cursor.description is None:
             return {}
         return {
-            str(column[0]): value
-            for column, value in zip(cursor.description, row, strict=True)
+            str(column[0]): value for column, value in zip(cursor.description, row, strict=True)
         }
 
     def _rows(self, cursor: sqlite3.Cursor) -> list[MessageRecord]:
@@ -145,9 +144,7 @@ class SqlitePstImportRepository(BasePstImportRepository):
 
     def get_import(self, import_id: int) -> MessageRecord | None:
         with self._db_io("get PST import"):
-            cursor = self._conn().execute(
-                "SELECT * FROM pst_imports WHERE id = ?", (import_id,)
-            )
+            cursor = self._conn().execute("SELECT * FROM pst_imports WHERE id = ?", (import_id,))
             row = cursor.fetchone()
             return None if row is None else self._row(cursor, cast(tuple[Any, ...], row))
 
@@ -170,12 +167,16 @@ class SqlitePstImportRepository(BasePstImportRepository):
 
     def get_import_uuid_for_message(self, message_id: int) -> str | None:
         with self._db_io("get PST generation for message"):
-            row = self._conn().execute(
-                "SELECT imports.import_uuid FROM pst_import_items AS items "
-                "JOIN pst_imports AS imports ON imports.id = items.import_id "
-                "WHERE items.message_row_id = ? ORDER BY items.import_id DESC LIMIT 1",
-                (message_id,),
-            ).fetchone()
+            row = (
+                self._conn()
+                .execute(
+                    "SELECT imports.import_uuid FROM pst_import_items AS items "
+                    "JOIN pst_imports AS imports ON imports.id = items.import_id "
+                    "WHERE items.message_row_id = ? ORDER BY items.import_id DESC LIMIT 1",
+                    (message_id,),
+                )
+                .fetchone()
+            )
             return None if row is None else str(row[0])
 
     def list_folders(self, account_id: str) -> Sequence[MessageRecord]:
@@ -298,8 +299,7 @@ class SqlitePstImportRepository(BasePstImportRepository):
         with self._db_io("list PST import items"):
             return self._rows(
                 self._conn().execute(
-                    "SELECT * FROM pst_import_items WHERE import_id = ? "
-                    "ORDER BY source_item_key",
+                    "SELECT * FROM pst_import_items WHERE import_id = ? ORDER BY source_item_key",
                     (import_id,),
                 )
             )
@@ -375,9 +375,7 @@ class SqlitePstImportRepository(BasePstImportRepository):
                 "superseded_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
                 (replaces_id,),
             )
-            connection.execute(
-                "UPDATE pst_imports SET is_active = 1 WHERE id = ?", (import_id,)
-            )
+            connection.execute("UPDATE pst_imports SET is_active = 1 WHERE id = ?", (import_id,))
 
         self._run_generation_change("activate PST generation", activate)
 
@@ -450,8 +448,7 @@ class SqlitePstImportRepository(BasePstImportRepository):
                     (import_id,),
                 )
                 connection.execute(
-                    "UPDATE pst_imports SET is_active = 0, status = 'completed' "
-                    "WHERE id = ?",
+                    "UPDATE pst_imports SET is_active = 0, status = 'completed' WHERE id = ?",
                     (import_id,),
                 )
                 connection.execute(

@@ -587,6 +587,29 @@ class SqliteMessageRepository(BaseMessageRepository):
             )
         return int(row[0]) if row else 0
 
+    def count_generation_path_references(
+        self,
+        account_id: str,
+        import_uuid: str,
+        relative_path: str,
+        exclude_message_id: Any,
+    ) -> int:
+        with self._db_io("count PST generation path references"):
+            row = (
+                self._conn()
+                .execute(
+                    "SELECT COUNT(*) FROM messages AS messages "
+                    "JOIN pst_import_items AS items ON items.message_row_id = messages.id "
+                    "JOIN pst_imports AS imports ON imports.id = items.import_id "
+                    "WHERE messages.account_id = ? AND imports.import_uuid = ? "
+                    "AND messages.relative_path = ? "
+                    "AND messages.id != ? AND messages.local_state != 'purged'",
+                    (account_id, import_uuid, relative_path, exclude_message_id),
+                )
+                .fetchone()
+            )
+        return int(row[0]) if row else 0
+
     def delete_message_contents(self, message_id: Any) -> None:
         with self._db_io("delete message contents"):
             self._conn().execute("DELETE FROM message_contents WHERE message_id = ?", (message_id,))

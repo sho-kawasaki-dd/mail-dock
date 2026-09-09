@@ -17,8 +17,10 @@ from mail_dock.infrastructure.database.connection import checkpoint_truncate, co
 from mail_dock.infrastructure.database.fts_maintenance import integrity_check
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
 from mail_dock.infrastructure.database.migrator import migrate
+from mail_dock.infrastructure.database.pst_import_repository import SqlitePstImportRepository
 from mail_dock.infrastructure.storage.detach import storage_io
-from mail_dock.usecases.reindex import ReindexProgress, ReindexResult, reindex
+from mail_dock.infrastructure.storage.pst_manifest import PstManifestReader
+from mail_dock.usecases.reindex import ReindexProgress, ReindexResult, reindex, reindex_pst
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -71,12 +73,6 @@ def rebuild_database(
     connection: sqlite3.Connection | None = None
     results: list[ReindexResult] = []
     try:
-        pst_manifest_root = database_path.parent / "manifests" / "pst"
-        if pst_manifest_root.is_dir():
-            _LOGGER.warning(
-                "Skipping unsupported PST manifests during reindex: path=%s",
-                pst_manifest_root,
-            )
         connection = connect(temporary_path, journal_mode=journal_mode)
         migrate(connection, temporary_path)
         repository = SqliteMessageRepository(connection)
@@ -91,6 +87,14 @@ def rebuild_database(
             results.append(result)
             if result.cancelled:
                 return _combine_results(results)
+        results.extend(
+            _rebuild_pst_manifests(
+                connection,
+                storage,
+                database_path.parent,
+                cancel=cancel,
+            )
+        )
         checkpoint_truncate(connection)
         _verify_database(connection)
         checkpoint_truncate(connection)
@@ -111,6 +115,112 @@ def rebuild_database(
         _remove_temporary_database(temporary_path)
 
     return _combine_results(results)
+
+
+def _rebuild_pst_manifests(
+    connection: sqlite3.Connection,
+    storage: BaseEmlStorage,
+    storage_root: Path,
+    *,
+    cancel: CancelToken | None,
+) -> list[ReindexResult]:
+    """Rebuild valid PST generations without guessing from orphaned files."""
+
+    manifest_root = storage_root / "manifests" / "pst"
+    if not manifest_root.is_dir():
+        return []
+
+    descriptors: dict[str, tuple[PstManifestReader, str | None]] = {}
+    superseded_at: dict[str, str | None] = {}
+    for directory in sorted(path for path in manifest_root.iterdir() if path.is_dir()):
+        try:
+            reader = PstManifestReader(storage_root, directory.name)
+            snapshot = reader.read_import_manifest()
+            import_uuid = snapshot.get("import_uuid")
+            if not isinstance(import_uuid, str):
+                raise ValueError("missing import_uuid")
+            replaces_uuid: str | None = None
+            for event in reader.read_all_events():
+                if event.get("event") == "generation_switch_committed":
+                    candidate = event.get("replaces_import_uuid")
+                    if isinstance(candidate, str):
+                        replaces_uuid = candidate
+                        superseded_at[candidate] = (
+                            event.get("timestamp")
+                            if isinstance(event.get("timestamp"), str)
+                            else None
+                        )
+                elif event.get("event") == "generation_restored":
+                    candidate = event.get("superseded_import_uuid")
+                    if isinstance(candidate, str):
+                        superseded_at[candidate] = (
+                            event.get("timestamp")
+                            if isinstance(event.get("timestamp"), str)
+                            else None
+                        )
+            descriptors[import_uuid] = (reader, replaces_uuid)
+        except (OSError, TypeError, ValueError) as error:
+            _LOGGER.warning(
+                "Skipping unsupported PST manifests during reindex: path=%s error=%s",
+                directory,
+                error,
+            )
+
+    if not descriptors:
+        return []
+
+    repository = SqliteMessageRepository(connection)
+    pst_repository = SqlitePstImportRepository(connection)
+    pending = set(descriptors)
+    rebuilt: dict[str, int] = {}
+    superseded = set(superseded_at)
+    results: list[ReindexResult] = []
+    while pending:
+        progress = False
+        for import_uuid in sorted(pending):
+            reader, replaces_uuid = descriptors[import_uuid]
+            if replaces_uuid is not None and replaces_uuid not in rebuilt:
+                if replaces_uuid not in descriptors:
+                    _LOGGER.warning(
+                        "Skipping PST generation with missing predecessor: %s", import_uuid
+                    )
+                    pending.remove(import_uuid)
+                    progress = True
+                continue
+            is_active = import_uuid not in superseded
+            try:
+                result = reindex_pst(
+                    repository,
+                    pst_repository,
+                    storage,
+                    reader,
+                    status="completed" if is_active else "superseded",
+                    is_active=is_active,
+                    replaces_id=rebuilt.get(replaces_uuid) if replaces_uuid else None,
+                    superseded_at=superseded_at.get(import_uuid),
+                    cancel=cancel,
+                )
+            except (OSError, TypeError, ValueError, StorageError) as error:
+                _LOGGER.warning(
+                    "Skipping unsupported PST manifests during reindex: uuid=%s error=%s",
+                    import_uuid,
+                    error,
+                )
+                pending.remove(import_uuid)
+                progress = True
+                continue
+            results.append(result)
+            row = connection.execute(
+                "SELECT id FROM pst_imports WHERE import_uuid = ?", (import_uuid,)
+            ).fetchone()
+            if row is not None:
+                rebuilt[import_uuid] = int(row[0])
+            pending.remove(import_uuid)
+            progress = True
+        if not progress:
+            _LOGGER.warning("Could not order PST generations for reindex: %s", sorted(pending))
+            break
+    return results
 
 
 def _combine_results(results: list[ReindexResult]) -> ReindexResult:

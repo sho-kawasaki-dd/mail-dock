@@ -204,6 +204,12 @@ class BasePstManifestWriter(ABC):
         """Release writer resources, if the implementation owns any."""
         return None
 
+    @property
+    def import_uuid(self) -> str | None:
+        """Return the generation UUID when the writer is generation-scoped."""
+
+        return None
+
 
 class BasePstManifestReader(ABC):
     """Read-only port for one PST import generation."""

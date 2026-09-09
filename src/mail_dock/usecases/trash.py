@@ -12,6 +12,7 @@ from mail_dock.domain.errors import StorageDetachedError
 from mail_dock.domain.ports import (
     BaseManifestReader,
     BaseManifestWriter,
+    BasePstManifestWriter,
     BasePurgeStorage,
     JSONValue,
 )
@@ -166,7 +167,7 @@ def list_startup_purge_candidates(
 
 
 def _purge_event(
-    event: str,
+    event_name: str,
     record: Mapping[str, Any],
     *,
     relative_path: str,
@@ -174,13 +175,14 @@ def _purge_event(
     timestamp: str,
     shared_reference_count: int,
     physical_delete: bool,
+    import_uuid: str | None = None,
 ) -> dict[str, JSONValue]:
     account_id = record.get("account_id")
     source_item_key = record.get("source_item_key")
     if not isinstance(account_id, str) or not isinstance(source_item_key, str):
         raise ValueError("purge requires account_id and source_item_key")
-    return {
-        "event": event,
+    event: dict[str, JSONValue] = {
+        "event": event_name,
         "account_id": account_id,
         "source_item_key": source_item_key,
         "relative_path": relative_path,
@@ -189,6 +191,9 @@ def _purge_event(
         "shared_reference_count": shared_reference_count,
         "physical_delete": physical_delete,
     }
+    if import_uuid is not None:
+        event["import_uuid"] = import_uuid
+    return event
 
 
 def _audit_entry(
@@ -239,7 +244,7 @@ def _finish_purge_database(
 def _complete_purge(
     repo: BaseMessageRepository,
     storage: BasePurgeStorage,
-    manifest: BaseManifestWriter,
+    manifest: BaseManifestWriter | BasePstManifestWriter,
     record: Mapping[str, Any],
     *,
     timestamp: str,
@@ -250,6 +255,7 @@ def _complete_purge(
     relative_path = record.get("relative_path")
     file_hash = record.get("file_hash")
     account_id = record.get("account_id")
+    import_uuid = getattr(manifest, "import_uuid", None)
     if (
         message_id is None
         or not isinstance(relative_path, str)
@@ -260,7 +266,12 @@ def _complete_purge(
     ):
         return False, False, None
 
-    shared_reference_count = repo.count_path_references(account_id, relative_path, message_id)
+    if isinstance(import_uuid, str):
+        shared_reference_count = repo.count_generation_path_references(
+            account_id, import_uuid, relative_path, message_id
+        )
+    else:
+        shared_reference_count = repo.count_path_references(account_id, relative_path, message_id)
     physical_delete = shared_reference_count == 0
     if intended_physical_delete is not None:
         physical_delete = physical_delete and intended_physical_delete
@@ -275,6 +286,7 @@ def _complete_purge(
                 timestamp=timestamp,
                 shared_reference_count=shared_reference_count,
                 physical_delete=physical_delete,
+                import_uuid=import_uuid if isinstance(import_uuid, str) else None,
             )
         )
         manifest.flush_and_sync()
@@ -293,6 +305,7 @@ def _complete_purge(
             timestamp=timestamp,
             shared_reference_count=shared_reference_count,
             physical_delete=physical_delete,
+            import_uuid=import_uuid if isinstance(import_uuid, str) else None,
         )
     )
     manifest.flush_and_sync()
@@ -304,7 +317,7 @@ def _complete_purge(
 def purge(
     repo: BaseMessageRepository,
     storage: BasePurgeStorage,
-    manifest: BaseManifestWriter,
+    manifest: BaseManifestWriter | BasePstManifestWriter,
     *,
     message_ids: Iterable[Any],
     storage_state: StorageWriteGate,

@@ -206,14 +206,28 @@ def _run_startup_purge(context: AppContext, parent: Any = None) -> PurgeResult |
     physical_paths: list[str] = []
     shared_paths: list[str] = []
     total_size_bytes = 0
-    records_by_account: dict[str, list[Any]] = {}
+    pst_repository = context.create_pst_import_repository()
+    records_by_manifest: dict[tuple[str, str], list[Any]] = {}
     for record in candidates:
         account_id = record.get("account_id")
         message_id = record.get("id")
         if isinstance(account_id, str) and message_id is not None:
-            records_by_account.setdefault(account_id, []).append(message_id)
-    for account_id, message_ids in records_by_account.items():
-        manifest = context.create_manifest_writer(account_id)
+            if record.get("remote_state") == "no_remote":
+                import_uuid = pst_repository.get_import_uuid_for_message(int(message_id))
+                if isinstance(import_uuid, str):
+                    key = ("pst", import_uuid)
+                else:
+                    continue
+            else:
+                key = ("imap", account_id)
+            records_by_manifest.setdefault(key, []).append(message_id)
+    for kind, manifest_id in records_by_manifest:
+        message_ids = records_by_manifest[(kind, manifest_id)]
+        manifest = (
+            context.create_pst_manifest_writer(manifest_id)
+            if kind == "pst"
+            else context.create_manifest_writer(manifest_id)
+        )
         try:
             result = purge(
                 repository,

@@ -307,10 +307,10 @@
 
 ### **3.7 グループG: 整合性・再構築・ゴミ箱の対応（*Dに依存*）**
 
-- [ ] [reindex.py](../src/mail_dock/infrastructure/database/reindex.py) の `manifests/pst` スキップを解除し、`import.json`（アカウントID・表示名・作成日時等）/ `folders.json`（フォルダ名対応）/ `items.jsonl` からPST擬似アカウント・フォルダ・メッセージ・`pst_imports`/`pst_import_items`・purge墓標・監査イベントの完全再構築を実装する
-- [ ] `verify.py` の `orphan_scan()` / `verify_manifest()` をPSTマニフェストに対応させる。対応イベントの無い孤児は隔離し、推測登録しない
-- [ ] 出自によりIMAPまたはPSTのマニフェストwriterを選ぶルーターを追加し、実削除（purge）時に `purge_intent` / `purged` イベントを正しく永続化する（個別メッセージの通常ゴミ箱移動・復元はマニフェストへ記録せずDB `local_state` のみで管理）。PSTの参照カウントは同一世代内だけを対象とし、新旧世代のpurgeが互いのEMLへ影響しないことを確認する
-- [ ] エクスポート（`export_message.py` / `export_mbox.py` / `export_attachments.py`）がPST由来メッセージでも動作することを確認する
+- [x] [reindex.py](../src/mail_dock/infrastructure/database/reindex.py) の `manifests/pst` スキップを解除し、`import.json`（アカウントID・表示名・作成日時等）/ `folders.json`（フォルダ名対応）/ `items.jsonl` からPST擬似アカウント・フォルダ・メッセージ・`pst_imports`/`pst_import_items`・purge墓標・監査イベントの完全再構築を実装する
+- [x] `verify.py` の `orphan_scan()` / `verify_manifest()` をPSTマニフェストに対応させる。対応イベントの無い孤児は隔離し、推測登録しない
+- [x] 出自によりIMAPまたはPSTのマニフェストwriterを選ぶルーターを追加し、実削除（purge）時に `purge_intent` / `purged` イベントを正しく永続化する（個別メッセージの通常ゴミ箱移動・復元はマニフェストへ記録せずDB `local_state` のみで管理）。PSTの参照カウントは同一世代内だけを対象とし、新旧世代のpurgeが互いのEMLへ影響しないことを確認する
+- [x] エクスポート（`export_message.py` / `export_mbox.py` / `export_attachments.py`）がPST由来メッセージでも動作することを確認する
 
 ---
 

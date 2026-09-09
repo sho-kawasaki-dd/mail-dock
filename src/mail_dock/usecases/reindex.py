@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -11,8 +12,18 @@ from typing import Any, cast
 from mail_dock.domain.errors import OperationCancelledError, StorageError
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.messages import ParsedMessage
-from mail_dock.domain.ports import BaseEmlStorage, BaseManifestReader, JSONValue
-from mail_dock.domain.repository import BaseMessageRepository, MessageContents, MessageRecord
+from mail_dock.domain.ports import (
+    BaseEmlStorage,
+    BaseManifestReader,
+    BasePstManifestReader,
+    JSONValue,
+)
+from mail_dock.domain.repository import (
+    BaseMessageRepository,
+    BasePstImportRepository,
+    MessageContents,
+    MessageRecord,
+)
 from mail_dock.infrastructure.parsing.eml_parser import parse_eml
 from mail_dock.infrastructure.parsing.headers import to_utc_iso8601
 
@@ -453,4 +464,239 @@ def reindex(
     )
 
 
-__all__ = ["ReindexProgress", "ReindexResult", "reindex"]
+def _pst_events_by_item(
+    events: list[Mapping[str, JSONValue]], event_name: str
+) -> dict[str, Mapping[str, JSONValue]]:
+    return {
+        str(event["source_item_key"]): event
+        for event in events
+        if event.get("event") == event_name
+        and isinstance(event.get("source_item_key"), str)
+    }
+
+
+def reindex_pst(
+    repo: BaseMessageRepository,
+    pst_repo: BasePstImportRepository,
+    storage: BaseEmlStorage,
+    manifest_reader: BasePstManifestReader,
+    *,
+    status: str = "completed",
+    is_active: bool = True,
+    replaces_id: int | None = None,
+    superseded_at: str | None = None,
+    cancel: CancelToken | None = None,
+) -> ReindexResult:
+    """Rebuild one PST generation from its durable snapshots and event log."""
+
+    token = cancel or CancelToken()
+    snapshot = manifest_reader.read_import_manifest()
+    folders_snapshot = manifest_reader.read_folders_manifest()
+    events = list(manifest_reader.read_all_events())
+    account_id = _text(snapshot, "account_id")
+    import_uuid = _text(snapshot, "import_uuid")
+    display_name = _text(snapshot, "display_name")
+    source_filename = _text(snapshot, "source_filename")
+    source_sha256 = _text(snapshot, "source_sha256")
+    if None in (account_id, import_uuid, display_name, source_filename, source_sha256):
+        raise StorageError("PST import manifest is missing identity fields")
+
+    discovered = _pst_events_by_item(events, "item_discovered")
+    saved = _pst_events_by_item(events, "item_saved")
+    parse_failed = _pst_events_by_item(events, "item_parse_failed")
+    oversize = _pst_events_by_item(events, "item_oversize")
+    purged = {
+        str(event["source_item_key"])
+        for event in events
+        if event.get("event") == "purged" and isinstance(event.get("source_item_key"), str)
+    }
+    if not discovered:
+        raise StorageError("PST manifest has no item inventory")
+
+    repo.upsert_account(
+        {
+            "id": account_id,
+            "provider_type": "pst_import",
+            "display_name": display_name,
+            "host": "",
+            "port": 993,
+            "username": source_filename,
+            "is_enabled": 1,
+        }
+    )
+    import_id = pst_repo.create_import(
+        {
+            "import_uuid": import_uuid,
+            "account_id": account_id,
+            "source_filename": source_filename,
+            "source_sha256": source_sha256,
+            "source_size_bytes": snapshot.get("source_size_bytes"),
+            "source_mtime": snapshot.get("source_mtime"),
+            "readpst_version": snapshot.get("readpst_version"),
+            "options_json": json.dumps(snapshot.get("options", {}), ensure_ascii=False),
+            "status": status,
+            "is_active": int(is_active),
+            "replaces_id": replaces_id,
+            "superseded_at": superseded_at,
+            "total_files": len(discovered),
+            "ingested_count": len(saved),
+            "failed_count": len(parse_failed) + len(oversize),
+            "finished_at": snapshot.get("created_at"),
+        }
+    )
+
+    folder_ids: dict[str, Any] = {}
+    for folder in folders_snapshot:
+        token.raise_if_cancelled()
+        raw_name = _text(folder, "raw_name")
+        folder_display_name = _text(folder, "display_name")
+        if raw_name is None or folder_display_name is None:
+            raise StorageError("PST folder manifest contains an invalid folder")
+        folder_ids[raw_name] = repo.upsert_folder(
+            {
+                "account_id": account_id,
+                "raw_name": raw_name,
+                "display_name": folder_display_name,
+                "uidvalidity": None,
+                "last_seen_uid": 0,
+                "is_sync_target": 0,
+            }
+        )
+
+    contents_count = 0
+    purged_count = 0
+    skipped_count = 0
+    message_count = 0
+    for source_item_key, discovered_event in discovered.items():
+        token.raise_if_cancelled()
+        saved_event = saved.get(source_item_key)
+        folder_name = _text(discovered_event, "folder_relative_path")
+        source_relative_path = _text(discovered_event, "source_relative_path")
+        source_hash = _text(discovered_event, "source_sha256")
+        final_path = None if saved_event is None else _text(saved_event, "final_relative_path")
+        file_hash = None if saved_event is None else _text(saved_event, "file_hash")
+        if (
+            saved_event is None
+            or folder_name is None
+            or source_relative_path is None
+            or source_hash is None
+            or final_path is None
+            or file_hash is None
+            or folder_name not in folder_ids
+        ):
+            skipped_count += 1
+            continue
+
+        raw: bytes | None = None
+        if source_item_key not in purged:
+            try:
+                raw = storage.read_verified(final_path, file_hash)
+            except (FileNotFoundError, StorageError):
+                skipped_count += 1
+                continue
+        parsed = parse_eml(raw, None) if raw is not None else ParsedMessage()
+        parse_error = parse_failed.get(source_item_key) or oversize.get(source_item_key)
+        local_state = (
+            "purged"
+            if source_item_key in purged
+            else "active"
+            if is_active
+            else "trashed"
+        )
+        message: MessageRecord = {
+            "account_id": account_id,
+            "folder_id": folder_ids[folder_name],
+            "message_id": parsed.message_id,
+            "content_key": parsed.content_key or f"sha256:{file_hash[:32]}",
+            "source_item_key": source_item_key,
+            "uid": None,
+            "uidvalidity": None,
+            "remote_state": "no_remote",
+            "moved_to_folder_id": None,
+            "local_state": local_state,
+            "relative_path": None if source_item_key in purged else final_path,
+            "file_hash": file_hash,
+            "subject": parsed.subject,
+            "sender": parsed.sender,
+            "recipient": parsed.recipient,
+            "cc": parsed.cc,
+            "date_sent": to_utc_iso8601(parsed.date_sent) if parsed.date_sent else None,
+            "internal_date": None,
+            "size_bytes": saved_event.get("size_bytes"),
+            "has_attachment": int(parsed.has_attachment),
+            "imap_flags": None,
+            "flags_seen_at": None,
+            "last_seen_at": None,
+            "in_reply_to": parsed.in_reply_to,
+            "references_ids": parsed.references_ids,
+            "thread_key": parsed.thread_key,
+        }
+        contents: MessageContents | None = None
+        if raw is not None and parsed.parse_error is None and parse_error is None:
+            contents = _message_contents(parsed)
+            contents_count += 1
+        message_id = pst_repo.add_message(message, contents)
+        pst_repo.upsert_import_item(
+            {
+                "import_id": import_id,
+                "source_item_key": source_item_key,
+                "source_relative_path": source_relative_path,
+                "folder_relative_path": folder_name,
+                "source_size_bytes": discovered_event.get("source_size_bytes"),
+                "source_sha256": source_hash,
+                "final_relative_path": final_path,
+                "message_row_id": message_id,
+                "status": "saved",
+                "error_class": (
+                    "oversize"
+                    if source_item_key in oversize
+                    else "parse"
+                    if source_item_key in parse_failed
+                    else None
+                ),
+                "error_message": (
+                    parse_error.get("error_message") if parse_error is not None else None
+                ),
+                "attempt_count": 1,
+            }
+        )
+        message_count += 1
+        if source_item_key in purged:
+            purged_count += 1
+
+    for event in events:
+        event_name = event.get("event")
+        if event_name == "purged":
+            operation = "local_purge"
+        elif event_name == "generation_restored":
+            operation = "pst_restore_generation"
+        elif event_name in {"generation_superseded", "generation_switch_committed"}:
+            operation = "pst_supersede"
+        elif event_name == "import_abandoned":
+            operation = "pst_import_abandon"
+        elif event_name == "import_ready":
+            operation = "pst_import"
+        else:
+            continue
+        repo.record_audit(
+            {
+                "occurred_at": event.get("timestamp", snapshot.get("created_at")),
+                "operation": operation,
+                "account_id": account_id,
+                "detail": f"reconstructed from PST {event_name} event",
+            }
+        )
+
+    return ReindexResult(
+        1,
+        len(folder_ids),
+        message_count,
+        contents_count,
+        purged_count,
+        skipped_count,
+        (),
+        False,
+    )
+
+
+__all__ = ["ReindexProgress", "ReindexResult", "reindex", "reindex_pst"]

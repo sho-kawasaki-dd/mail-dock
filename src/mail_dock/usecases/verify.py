@@ -14,8 +14,14 @@ from typing import Any
 
 from mail_dock.domain.errors import ManifestCorruptError, OperationCancelledError
 from mail_dock.domain.fetcher import CancelToken
-from mail_dock.domain.ports import BaseIntegrityStorage, BaseManifestReader, JSONValue
+from mail_dock.domain.ports import (
+    BaseIntegrityStorage,
+    BaseManifestReader,
+    BasePstManifestReader,
+    JSONValue,
+)
 from mail_dock.domain.repository import BaseMessageRepository, MessageRecord
+from mail_dock.infrastructure.storage.pst_manifest import PstManifestReader
 
 _LOGGER = logging.getLogger(__name__)
 _CRC_SEPARATOR = b"|CRC32:"
@@ -410,7 +416,7 @@ def orphan_scan(
     *,
     cancel: CancelToken | None = None,
     on_progress: Callable[[VerifyProgress], None] | None = None,
-    manifest_reader: BaseManifestReader | None = None,
+    manifest_reader: BaseManifestReader | BasePstManifestReader | None = None,
 ) -> OrphanScanResult:
     """Find EMLs absent from the DB and quarantine those without provenance."""
 
@@ -429,9 +435,9 @@ def orphan_scan(
     fetch_events: dict[str, Mapping[str, JSONValue]] = {}
     if manifest_reader is not None:
         for event in manifest_reader.read_all_events():
-            if event.get("event") != "fetch":
+            if event.get("event") not in {"fetch", "item_saved"}:
                 continue
-            event_path = event.get("relative_path")
+            event_path = event.get("relative_path", event.get("final_relative_path"))
             if isinstance(event_path, str):
                 fetch_events[event_path] = event
 
@@ -538,7 +544,16 @@ def verify_manifest(root: Any, *, cancel: CancelToken | None = None) -> Manifest
     """Validate manifest CRCs and repair only malformed final records."""
 
     token = _token(cancel)
-    paths = tuple(sorted(root.expanduser().resolve().glob("manifests/imap/*/events-*.jsonl")))
+    resolved_root = root.expanduser().resolve()
+    paths = tuple(
+        sorted(
+            (
+                *resolved_root.glob("manifests/imap/*/events-*.jsonl"),
+                *resolved_root.glob("manifests/pst/*/items.jsonl"),
+            ),
+            key=str,
+        )
+    )
     files_checked = 0
     records_checked = 0
     repaired_bytes = 0
@@ -551,6 +566,9 @@ def verify_manifest(root: Any, *, cancel: CancelToken | None = None) -> Manifest
             cancelled = True
             break
         file_records, file_repaired_bytes = _verify_manifest_file(path)
+        if path.parent.parent.name == "pst":
+            import_uuid = path.parent.name
+            tuple(PstManifestReader(resolved_root, import_uuid).read_all_events())
         files_checked += 1
         records_checked += file_records
         repaired_bytes += file_repaired_bytes
