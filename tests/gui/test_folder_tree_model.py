@@ -8,6 +8,7 @@ from mail_dock.presentation import strings
 from mail_dock.presentation.models.folder_tree_model import (
     FolderTreeModel,
     build_mail_account_roots,
+    build_pst_archive_roots,
 )
 
 pytestmark = pytest.mark.gui
@@ -87,3 +88,81 @@ def test_model_replaces_extensible_roots(qtbot: object) -> None:
 
     assert model.rowCount(QModelIndex()) == 2
     assert not model.parent(model.index(0, 0)).isValid()
+
+
+def test_pst_tree_shows_only_active_completed_generations(qtbot: object) -> None:
+    del qtbot
+    model = FolderTreeModel(
+        build_pst_archive_roots(
+            [
+                {
+                    "id": 1,
+                    "account_id": "pst-active",
+                    "display_name": "現行PST",
+                    "status": "completed",
+                    "is_active": 1,
+                },
+                {
+                    "id": 2,
+                    "account_id": "pst-old",
+                    "display_name": "旧PST",
+                    "status": "superseded",
+                    "is_active": 0,
+                },
+                {
+                    "id": 3,
+                    "account_id": "pst-running",
+                    "display_name": "処理中PST",
+                    "status": "ingesting",
+                    "is_active": 0,
+                },
+            ],
+            [
+                {
+                    "id": 20,
+                    "account_id": "pst-active",
+                    "display_name": "受信箱",
+                },
+                {
+                    "id": 21,
+                    "account_id": "pst-old",
+                    "display_name": "旧受信箱",
+                },
+            ],
+        )
+    )
+    root = model.index(0, 0)
+
+    assert model.data(root) == strings.TREE_ROOT_PST_ARCHIVES
+    assert model.rowCount(root) == 3
+    archive = model.index(1, 0, root)
+    folder = model.index(0, 0, archive)
+    assert model.data(archive) == "現行PST"
+    assert model.data(folder) == "受信箱"
+    assert model.data(model.index(2, 0, root)) == strings.TREE_PST_TRASH
+    assert model.filter_for_index(folder) == MessageFilter(
+        account_ids=("pst-active",), folder_ids=(20,)
+    )
+
+
+def test_pst_tree_parent_round_trip_for_archive_folder(qtbot: object) -> None:
+    del qtbot
+    model = FolderTreeModel(
+        build_pst_archive_roots(
+            [
+                {
+                    "id": 7,
+                    "account_id": "pst-7",
+                    "display_name": "アーカイブ",
+                    "status": "completed_with_errors",
+                    "is_active": True,
+                }
+            ],
+            [{"id": 70, "account_id": "pst-7", "display_name": "Inbox"}],
+        )
+    )
+    archive = model.index(1, 0, model.index(0, 0))
+    folder = model.index(0, 0, archive)
+
+    assert model.parent(folder) == archive
+    assert model.index_for_key("pst-folder:70") == folder

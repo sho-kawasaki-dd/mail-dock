@@ -144,6 +144,18 @@ class BaseMessageRepository(ABC):
         self, account_id: str, relative_path: str, exclude_message_id: Any
     ) -> int: ...
 
+    def count_generation_path_references(
+        self,
+        account_id: str,
+        import_uuid: str,
+        relative_path: str,
+        exclude_message_id: Any,
+    ) -> int:
+        """Count references within one PST generation."""
+
+        del import_uuid
+        return self.count_path_references(account_id, relative_path, exclude_message_id)
+
     @abstractmethod
     def delete_message_contents(self, message_id: Any) -> None: ...
 
@@ -206,8 +218,19 @@ class BasePstImportRepository(ABC):
     @abstractmethod
     def get_import(self, import_id: int) -> MessageRecord | None: ...
 
+    def list_imports(self) -> Sequence[MessageRecord]:
+        """Return PST generations for presentation and recovery views."""
+
+        return ()
+
     @abstractmethod
     def get_message(self, message_id: int) -> MessageRecord | None: ...
+
+    def get_import_uuid_for_message(self, message_id: int) -> str | None:
+        """Return the PST generation containing a message, when applicable."""
+
+        del message_id
+        return None
 
     @abstractmethod
     def list_folders(self, account_id: str) -> Sequence[MessageRecord]: ...

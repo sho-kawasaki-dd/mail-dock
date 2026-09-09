@@ -23,7 +23,17 @@ from PySide6.QtCore import (
 from mail_dock.domain.search import MessageFilter
 from mail_dock.presentation import strings
 
-FolderTreeNodeKind = Literal["root", "all_accounts", "account", "folder", "trash", "custom"]
+FolderTreeNodeKind = Literal[
+    "root",
+    "all_accounts",
+    "account",
+    "folder",
+    "trash",
+    "pst_archive",
+    "pst_folder",
+    "pst_trash",
+    "custom",
+]
 _EMPTY_INDEX = QModelIndex()
 
 
@@ -69,7 +79,10 @@ def build_mail_account_root(
     account_nodes: list[FolderTreeNode] = []
     folders_by_account: dict[str, list[FolderTreeNode]] = {}
     account_ids = {
-        str(account_id) for account in accounts if (account_id := _account_id(account)) is not None
+        str(account_id)
+        for account in accounts
+        if account.get("provider_type") != "pst_import"
+        and (account_id := _account_id(account)) is not None
     }
 
     for folder in folders:
@@ -92,7 +105,7 @@ def build_mail_account_root(
 
     for account in accounts:
         account_id = _account_id(account)
-        if account_id is None:
+        if account_id is None or account.get("provider_type") == "pst_import":
             continue
         account_name = _display_name(account, fallback=account_id)
         account_nodes.append(
@@ -134,6 +147,103 @@ def build_mail_account_roots(
     """Return the mail-account root in the model's extensible root format."""
 
     return (build_mail_account_root(accounts, folders),)
+
+
+def build_pst_archive_root(
+    imports: Sequence[Mapping[str, object]],
+    folders: Sequence[Mapping[str, object]],
+) -> FolderTreeNode:
+    """Build the normal PST archive branch from visible generations."""
+
+    visible_imports = [
+        record
+        for record in imports
+        if record.get("is_active") in (1, True, "1")
+        and record.get("status") in {"completed", "completed_with_errors"}
+    ]
+    visible_account_ids = {
+        account_id
+        for record in visible_imports
+        if isinstance(account_id := record.get("account_id"), str) and account_id
+    }
+    folders_by_account: dict[str, list[FolderTreeNode]] = {}
+    for folder in folders:
+        account_id = folder.get("account_id")
+        folder_id = folder.get("id")
+        if (
+            not isinstance(account_id, str)
+            or account_id not in visible_account_ids
+            or isinstance(folder_id, bool)
+            or not isinstance(folder_id, int)
+        ):
+            continue
+        folders_by_account.setdefault(account_id, []).append(
+            FolderTreeNode(
+                key=f"pst-folder:{folder_id}",
+                display_name=_display_name(folder, fallback=f"folder-{folder_id}"),
+                kind="pst_folder",
+                account_id=account_id,
+                folder_id=folder_id,
+                message_filter=MessageFilter(account_ids=(account_id,), folder_ids=(folder_id,)),
+            )
+        )
+
+    archive_nodes: list[FolderTreeNode] = []
+    for record in visible_imports:
+        account_id = record.get("account_id")
+        import_id = record.get("id")
+        if not isinstance(account_id, str) or not isinstance(import_id, int):
+            continue
+        archive_nodes.append(
+            FolderTreeNode(
+                key=f"pst-archive:{import_id}",
+                display_name=_display_name(
+                    record, fallback=str(record.get("source_filename", account_id))
+                ),
+                kind="pst_archive",
+                account_id=account_id,
+                children=tuple(folders_by_account.get(account_id, ())),
+                message_filter=MessageFilter(account_ids=(account_id,)),
+            )
+        )
+
+    all_archives = FolderTreeNode(
+        key="all-pst-archives",
+        display_name=strings.FILTER_ALL_PST_ARCHIVES,
+        kind="custom",
+        message_filter=MessageFilter(account_ids=tuple(sorted(visible_account_ids))),
+    )
+    trash_accounts = tuple(
+        str(record["account_id"])
+        for record in imports
+        if record.get("status") == "superseded"
+        and isinstance(record.get("account_id"), str)
+    )
+    pst_trash = FolderTreeNode(
+        key="pst-trash",
+        display_name=strings.TREE_PST_TRASH,
+        kind="pst_trash",
+        message_filter=MessageFilter(
+            account_ids=trash_accounts,
+            local_states=frozenset({"trashed"}),
+        ),
+    )
+    return FolderTreeNode(
+        key="pst-archives",
+        display_name=strings.TREE_ROOT_PST_ARCHIVES,
+        kind="root",
+        children=(all_archives, *archive_nodes, pst_trash),
+        message_filter=MessageFilter(account_ids=tuple(sorted(visible_account_ids))),
+    )
+
+
+def build_pst_archive_roots(
+    imports: Sequence[Mapping[str, object]],
+    folders: Sequence[Mapping[str, object]],
+) -> tuple[FolderTreeNode, ...]:
+    """Return the PST root in the model's extensible root format."""
+
+    return (build_pst_archive_root(imports, folders),)
 
 
 class FolderTreeModel(QAbstractItemModel):
@@ -251,9 +361,13 @@ class FolderTreeModel(QAbstractItemModel):
         node = item.value
         if node.message_filter is not None:
             return node.message_filter
-        if node.kind == "account" and node.account_id is not None:
+        if node.kind in {"account", "pst_archive"} and node.account_id is not None:
             return MessageFilter(account_ids=(node.account_id,))
-        if node.kind == "folder" and node.account_id is not None and node.folder_id is not None:
+        if (
+            node.kind in {"folder", "pst_folder"}
+            and node.account_id is not None
+            and node.folder_id is not None
+        ):
             return MessageFilter(account_ids=(node.account_id,), folder_ids=(node.folder_id,))
         if node.kind in {"root", "all_accounts"}:
             return MessageFilter()

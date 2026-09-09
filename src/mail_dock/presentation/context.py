@@ -29,8 +29,10 @@ from mail_dock.domain.ports import (
 from mail_dock.domain.repository import MessageRecord
 from mail_dock.domain.search import BaseSearchRepository
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
+from mail_dock.infrastructure.database.pst_import_repository import SqlitePstImportRepository
 from mail_dock.infrastructure.database.search_repository import SqliteSearchRepository
 from mail_dock.infrastructure.fetchers.onamae_imap import OnamaeImapFetcher
+from mail_dock.infrastructure.importers.readpst_importer import ReadPstImporter
 from mail_dock.infrastructure.security.keyring_store import (
     KeyringBackendStatus,
     backend_name,
@@ -43,6 +45,8 @@ from mail_dock.infrastructure.storage.capabilities import (
 )
 from mail_dock.infrastructure.storage.eml_storage import EmlStorage
 from mail_dock.infrastructure.storage.manifest import ManifestReader, ManifestWriter
+from mail_dock.infrastructure.storage.pst_import_storage import PstImportStorage
+from mail_dock.infrastructure.storage.pst_manifest import PstManifestWriter
 from mail_dock.usecases.register_account import load_credentials
 
 if TYPE_CHECKING:
@@ -185,6 +189,26 @@ class AppContext:
         return _CombinedManifestReader(
             tuple(self.create_manifest_reader(account_id) for account_id in sorted(account_ids))
         )
+
+    def create_pst_import_repository(self) -> SqlitePstImportRepository:
+        """Create the PST repository on the calling worker thread."""
+
+        return SqlitePstImportRepository(self.connection_manager)
+
+    def create_pst_import_storage(self) -> PstImportStorage:
+        """Create the filesystem adapter used by PST import stages."""
+
+        return PstImportStorage()
+
+    def create_pst_manifest_writer(self, import_uuid: str) -> PstManifestWriter:
+        """Create a generation-scoped PST manifest writer."""
+
+        return PstManifestWriter(self.storage_root, import_uuid)
+
+    def create_pst_importer(self) -> ReadPstImporter:
+        """Create the bundled readpst adapter for the import wizard."""
+
+        return ReadPstImporter()
 
     def rebuild_database(
         self,

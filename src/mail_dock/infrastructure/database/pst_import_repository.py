@@ -151,11 +151,32 @@ class SqlitePstImportRepository(BasePstImportRepository):
             row = cursor.fetchone()
             return None if row is None else self._row(cursor, cast(tuple[Any, ...], row))
 
+    def list_imports(self) -> Sequence[MessageRecord]:
+        """Return all PST generations with their account display names."""
+
+        with self._db_io("list PST imports"):
+            cursor = self._conn().execute(
+                "SELECT pst_imports.*, accounts.display_name AS display_name "
+                "FROM pst_imports JOIN accounts ON accounts.id = pst_imports.account_id "
+                "ORDER BY pst_imports.id"
+            )
+            return self._rows(cursor)
+
     def get_message(self, message_id: int) -> MessageRecord | None:
         with self._db_io("get PST message"):
             cursor = self._conn().execute("SELECT * FROM messages WHERE id = ?", (message_id,))
             row = cursor.fetchone()
             return None if row is None else self._row(cursor, cast(tuple[Any, ...], row))
+
+    def get_import_uuid_for_message(self, message_id: int) -> str | None:
+        with self._db_io("get PST generation for message"):
+            row = self._conn().execute(
+                "SELECT imports.import_uuid FROM pst_import_items AS items "
+                "JOIN pst_imports AS imports ON imports.id = items.import_id "
+                "WHERE items.message_row_id = ? ORDER BY items.import_id DESC LIMIT 1",
+                (message_id,),
+            ).fetchone()
+            return None if row is None else str(row[0])
 
     def list_folders(self, account_id: str) -> Sequence[MessageRecord]:
         with self._db_io("list PST folders"):

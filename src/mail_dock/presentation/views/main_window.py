@@ -56,6 +56,7 @@ from mail_dock.presentation.errors import user_message
 from mail_dock.presentation.models.folder_tree_model import (
     FolderTreeModel,
     build_mail_account_roots,
+    build_pst_archive_roots,
 )
 from mail_dock.presentation.models.message_table_model import MessageTableModel
 from mail_dock.presentation.threads.query_worker import QueryWorker
@@ -176,6 +177,10 @@ class MainWindow(QMainWindow):
             ),
             connection_manager=context.connection_manager,
             operation_gate=self._operation_gate,
+            pst_import_repository=getattr(context, "create_pst_import_repository", None),
+            pst_import_storage=getattr(context, "create_pst_import_storage", None),
+            pst_importer=getattr(context, "create_pst_importer", None),
+            pst_manifest_factory=getattr(context, "create_pst_manifest_writer", None),
         )
         self.query_worker.start()
         self.sync_worker.start()
@@ -334,6 +339,7 @@ class MainWindow(QMainWindow):
         self.export_attachments_action = QAction(strings.MAIN_MENU_EXPORT_ATTACHMENTS, self)
         self.delete_remote_action = QAction(strings.MAIN_MENU_DELETE_REMOTE, self)
         self.delete_remote_action.setEnabled(False)
+        self.import_pst_action = QAction(strings.MAIN_MENU_IMPORT_PST, self)
         self.restore_trash_action = QAction(strings.MAIN_MENU_RESTORE_TRASH, self)
         self.purge_trash_action = QAction(strings.MAIN_MENU_PURGE_TRASH, self)
         self.restore_trash_action.setEnabled(False)
@@ -365,6 +371,8 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
         file_menu = self.menuBar().addMenu(strings.MAIN_MENU_FILE)
+        file_menu.addAction(self.import_pst_action)
+        file_menu.addSeparator()
         file_menu.addAction(self.export_eml_action)
         file_menu.addAction(self.export_mbox_action)
         file_menu.addAction(self.export_attachments_action)
@@ -397,6 +405,7 @@ class MainWindow(QMainWindow):
         self.export_mbox_action.triggered.connect(self._export_mbox)
         self.export_attachments_action.triggered.connect(self._export_attachments)
         self.delete_remote_action.triggered.connect(self._start_remote_delete)
+        self.import_pst_action.triggered.connect(self._show_import_pst_wizard)
         self.restore_trash_action.triggered.connect(self._restore_selected_from_trash)
         self.purge_trash_action.triggered.connect(self._purge_selected_from_trash)
         self.thread_view_action.triggered.connect(self.detail_view.request_thread)
@@ -780,6 +789,7 @@ class MainWindow(QMainWindow):
         if selected_filter is not None:
             self.message_list_viewmodel.set_filters(selected_filter)
         self._update_message_actions()
+        self._update_tree_actions()
 
     def _selected_message_ids(self) -> tuple[int, ...]:
         selection_model = self.message_list_view.selectionModel()
@@ -799,6 +809,30 @@ class MainWindow(QMainWindow):
     def _update_message_actions(self) -> None:
         self._update_trash_actions()
         self._update_remote_delete_action()
+
+    def _selected_tree_node(self) -> Any | None:
+        return self.folder_tree_model.data(
+            self.folder_tree_view.currentIndex(), self.folder_tree_model.NodeRole
+        )
+
+    def _is_pst_selection(self) -> bool:
+        node = self._selected_tree_node()
+        kind = getattr(node, "kind", None)
+        key = getattr(node, "key", None)
+        return kind in {"pst_archive", "pst_folder", "pst_trash"} or (
+            isinstance(key, str) and (key == "pst-archives" or key == "all-pst-archives")
+        )
+
+    def _update_tree_actions(self) -> None:
+        pst_selected = self._is_pst_selection()
+        self.sync_action.setVisible(not pst_selected)
+        self.delete_remote_action.setVisible(not pst_selected)
+        sync_enabled = not pst_selected and self._sync_token is None
+        refresh_enabled = not pst_selected and self._folder_refresh_token is None
+        self.sync_action.setEnabled(sync_enabled)
+        self.refresh_folders_action.setEnabled(refresh_enabled)
+        if self._tray_sync_action is not None:
+            self._tray_sync_action.setEnabled(sync_enabled)
 
     def _update_trash_actions(self) -> None:
         selected_id = self.message_list_viewmodel.selected_message_id
@@ -830,7 +864,10 @@ class MainWindow(QMainWindow):
 
     def _update_remote_delete_action(self) -> None:
         selected = bool(self._selected_message_ids())
-        if self._storage_write_gate.state is not StorageState.ATTACHED:
+        if self._is_pst_selection():
+            enabled = False
+            reason = strings.REMOTE_DELETE_DISABLED_PST
+        elif self._storage_write_gate.state is not StorageState.ATTACHED:
             enabled = False
             reason = strings.REMOTE_DELETE_DISABLED_STORAGE
         elif self._file_token is not None:
@@ -895,6 +932,8 @@ class MainWindow(QMainWindow):
         self._status_label.setText(strings.STATUS_LOADING)
 
     def _sync_selected_account(self) -> None:
+        if self._is_pst_selection():
+            return
         if (
             self._sync_token is not None
             or self._folder_refresh_token is not None
@@ -924,6 +963,8 @@ class MainWindow(QMainWindow):
         self._start_sync(self.sync_worker.sync_account(account_ids[0]))
 
     def _refresh_selected_account(self) -> None:
+        if self._is_pst_selection():
+            return
         if (
             self._sync_token is not None
             or self._folder_refresh_token is not None
@@ -1027,10 +1068,19 @@ class MainWindow(QMainWindow):
         previous_key = self._current_folder_tree_key()
         self.folder_tree_model.set_roots(
             build_mail_account_roots(snapshot.accounts, snapshot.folders)
+            + build_pst_archive_roots(snapshot.pst_imports, snapshot.folders)
         )
         # set_roots() resets the view, collapsing every branch and clearing selection.
         self.folder_tree_view.expandAll()
         self._restore_folder_tree_selection(previous_key)
+        self._update_tree_actions()
+
+    def _show_import_pst_wizard(self) -> None:
+        from mail_dock.presentation.views.import_wizard import ImportWizard
+
+        wizard = ImportWizard(self.context, self.sync_worker, self)
+        wizard.exec()
+        self.sync_worker.load_folder_tree()
 
     def _current_folder_tree_key(self) -> str | None:
         node = self.folder_tree_model.data(
@@ -1596,6 +1646,7 @@ class MainWindow(QMainWindow):
         if isinstance(state, StorageState):
             self._storage_write_gate.state = state
         self._update_trash_actions()
+        self._update_tree_actions()
 
         if state in {StorageState.DETACHED, StorageState.DETACHED_BY_USER}:
             if state is StorageState.DETACHED_BY_USER:

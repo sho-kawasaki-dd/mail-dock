@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -15,6 +17,7 @@ from mail_dock.domain.errors import (
     DatabaseError,
     FetchError,
     MailDockError,
+    OperationCancelledError,
     StorageDetachedError,
 )
 from mail_dock.domain.fetcher import BaseMailFetcher, CancelToken
@@ -23,9 +26,15 @@ from mail_dock.domain.ports import (
     BaseEmlStorage,
     BaseManifestWriter,
     BaseMessageRenderer,
+    BasePstImportStorage,
+    BasePstManifestWriter,
     BasePurgeStorage,
 )
-from mail_dock.domain.repository import BaseMessageRepository, MessageRecord
+from mail_dock.domain.repository import (
+    BaseMessageRepository,
+    BasePstImportRepository,
+    MessageRecord,
+)
 from mail_dock.presentation.errors import user_message
 from mail_dock.presentation.threads.worker import OperationGate, Worker, _Task, operation_gate
 from mail_dock.usecases.account_guards import is_pst_account
@@ -42,6 +51,17 @@ from mail_dock.usecases.export_attachments import (
 )
 from mail_dock.usecases.export_mbox import ExportMboxProgress, export_mbox
 from mail_dock.usecases.export_message import export_eml
+from mail_dock.usecases.import_pst import (
+    ImportJobAction,
+    ImportJobDecision,
+    StageBResult,
+    check_import_capacity,
+    resolve_import_job,
+    run_stage_a,
+    run_stage_b,
+    snapshot_source_file,
+    switch_generation,
+)
 from mail_dock.usecases.reparse import ReparseResult, reparse_messages
 from mail_dock.usecases.save_attachment import (
     commit_attachment_save,
@@ -78,6 +98,8 @@ SyncOperation = Literal[
     "audit_log",
     "force_fetch",
     "reparse",
+    "pst_import",
+    "pst_import_decision",
 ]
 RepositoryFactory = Callable[[], BaseMessageRepository]
 FetcherFactory = Callable[[MessageRecord], BaseMailFetcher]
@@ -87,6 +109,39 @@ ManifestFactory = Callable[[str], BaseManifestWriter]
 SyncAccountUseCase = Callable[..., SyncResult]
 RefreshFoldersUseCase = Callable[..., FolderRefreshResult]
 Clock = Callable[[], float]
+PstImportRepositoryFactory = Callable[[], BasePstImportRepository]
+PstImportStorageFactory = Callable[[], BasePstImportStorage]
+PstImporterFactory = Callable[[], Any]
+
+
+@dataclass(frozen=True)
+class PstImportProgress:
+    """Progress emitted while Stage A or Stage B processes staged files."""
+
+    stage: str
+    processed_count: int
+    total_count: int | None = None
+
+
+@dataclass(frozen=True)
+class PstImportResult:
+    """Presentation-safe summary of a completed PST generation import."""
+
+    status: str
+    import_id: int
+    imported_count: int
+    failed_count: int
+    skipped_count: int = 0
+    reimported: bool = False
+
+
+@dataclass(frozen=True)
+class PstImportDecisionRequest:
+    """Existing-job choices that must be confirmed by the wizard."""
+
+    source_sha256: str
+    has_incomplete: bool
+    has_completed: bool
 
 
 @dataclass(frozen=True)
@@ -104,6 +159,7 @@ class FolderTreeSnapshot:
 
     accounts: tuple[MessageRecord, ...]
     folders: tuple[MessageRecord, ...]
+    pst_imports: tuple[MessageRecord, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -129,6 +185,8 @@ class _SyncTaskResult:
         | DeleteResult
         | tuple[MessageRecord, ...]
         | ReparseResult
+        | PstImportResult
+        | PstImportDecisionRequest
     )
 
 
@@ -152,6 +210,9 @@ class SyncWorker(Worker):
     failures_for_review_result = Signal(object)
     failure_action_result = Signal(object)
     audit_log_result = Signal(object)
+    pst_import_result = Signal(object)
+    pst_import_decision_required = Signal(object)
+    pst_import_cancelled = Signal(object)
 
     def __init__(
         self,
@@ -166,6 +227,10 @@ class SyncWorker(Worker):
         sync_options: SyncOptions | None = None,
         connection_manager: Any | None = None,
         operation_gate: OperationGate | None = None,
+        pst_import_repository: Callable[[], BasePstImportRepository] | None = None,
+        pst_import_storage: PstImportStorageFactory | None = None,
+        pst_importer: PstImporterFactory | None = None,
+        pst_manifest_factory: Callable[[str], BasePstManifestWriter] | None = None,
         clock: Clock = time.monotonic,
     ) -> None:
         super().__init__(connection_manager)
@@ -179,6 +244,10 @@ class SyncWorker(Worker):
         self._sync_options = sync_options or SyncOptions()
         self._clock = clock
         self._operation_gate = operation_gate
+        self._pst_import_repository_factory = pst_import_repository
+        self._pst_import_storage_factory = pst_import_storage
+        self._pst_importer_factory = pst_importer
+        self._pst_manifest_factory = pst_manifest_factory
         self._operations_by_token: dict[CancelToken, SyncOperation] = {}
 
         self.task_failed.connect(self._on_task_failed)
@@ -275,7 +344,10 @@ class SyncWorker(Worker):
             token.raise_if_cancelled()
             return _SyncTaskResult(
                 "refresh_folders",
-                _FolderRefreshTaskResult(result, _folder_tree_snapshot(repository)),
+                _FolderRefreshTaskResult(
+                    result,
+                    _folder_tree_snapshot(repository, self._pst_import_repository_factory),
+                ),
             )
 
         return self._submit_operation("refresh_folders", operation)
@@ -364,10 +436,202 @@ class SyncWorker(Worker):
         def operation(_token: CancelToken) -> _SyncTaskResult:
             return _SyncTaskResult(
                 "refresh_folders",
-                _folder_tree_snapshot(self._repository_factory()),
+                _folder_tree_snapshot(
+                    self._repository_factory(), self._pst_import_repository_factory
+                ),
             )
 
         return self._submit_operation("refresh_folders", operation)
+
+    def import_pst(
+        self,
+        source: Path,
+        *,
+        display_name: str,
+        charset: str,
+        include_deleted: bool,
+        decision: ImportJobDecision | str | None = None,
+        retained_bytes: int = 0,
+        free_space: Callable[[Path], int] | None = None,
+        check_free_space: Callable[[Path], object] | None = None,
+    ) -> CancelToken:
+        """Queue the complete PST import lifecycle on the single writer."""
+
+        def operation(token: CancelToken) -> _SyncTaskResult:
+            if self._pst_import_repository_factory is None:
+                raise RuntimeError("PST import repository is not configured")
+            if (
+                self._pst_import_storage_factory is None
+                or self._pst_importer_factory is None
+                or self._pst_manifest_factory is None
+            ):
+                raise RuntimeError("PST import infrastructure is not configured")
+            repository = self._pst_import_repository_factory()
+            pst_storage = self._pst_import_storage_factory()
+            importer = self._pst_importer_factory()
+            source_snapshot = snapshot_source_file(source, pst_storage=pst_storage, cancel=token)
+            if free_space is not None and check_free_space is not None:
+                check_import_capacity(
+                    cast(Any, self._storage_factory()).root,
+                    source_snapshot.size_bytes,
+                    retained_bytes=retained_bytes,
+                    check_free_space=check_free_space,
+                    free_space=free_space,
+                )
+            resolution = resolve_import_job(
+                repository,
+                source_snapshot.source_sha256,
+                decision=decision,
+            )
+            if resolution.action is ImportJobAction.CANCEL:
+                raise OperationCancelledError("PST import was cancelled")
+            if resolution.action in {
+                ImportJobAction.NEEDS_INCOMPLETE_DECISION,
+                ImportJobAction.NEEDS_REIMPORT_DECISION,
+            }:
+                return _SyncTaskResult(
+                    "pst_import_decision",
+                    PstImportDecisionRequest(
+                        source_snapshot.source_sha256,
+                        bool(resolution.incomplete_records),
+                        resolution.import_record is not None,
+                    ),
+                )
+
+            if resolution.action is ImportJobAction.DISCARD_INCOMPLETE:
+                storage_root = cast(Any, self._storage_factory()).root
+                for incomplete in resolution.incomplete_records:
+                    incomplete_id = incomplete.get("id")
+                    incomplete_uuid = incomplete.get("import_uuid")
+                    if not isinstance(incomplete_id, int) or not isinstance(incomplete_uuid, str):
+                        continue
+                    abandoned_manifest = self._pst_manifest_factory(incomplete_uuid)
+                    try:
+                        abandoned_manifest.append(
+                            {
+                                "event": "import_abandoned",
+                                "import_uuid": incomplete_uuid,
+                                "timestamp": datetime.now(UTC).isoformat(),
+                                "reason": "user_discarded_incomplete_import",
+                            }
+                        )
+                        abandoned_manifest.flush_and_sync()
+                    finally:
+                        _close_manifest(abandoned_manifest)
+                    repository.update_import_status(
+                        incomplete_id,
+                        "abandoned",
+                        staging_path=None,
+                    )
+                    pst_storage.remove_staging(
+                        pst_storage.staging_root(storage_root, incomplete_uuid)
+                    )
+
+            import_record = resolution.import_record
+            reimported = resolution.action is ImportJobAction.REIMPORT
+            if resolution.action is ImportJobAction.RESUME and import_record is not None:
+                import_id = int(import_record["id"])
+                import_uuid = str(import_record["import_uuid"])
+                account_id = str(import_record["account_id"])
+            else:
+                import_uuid = str(uuid.uuid4())
+                account_id = (
+                    f"pst_{source_snapshot.source_sha256[:12]}_{import_uuid.replace('-', '')[:8]}"
+                )
+                self._repository_factory().upsert_account(
+                    {
+                        "id": account_id,
+                        "provider_type": "pst_import",
+                        "display_name": display_name,
+                        "is_enabled": 0,
+                    }
+                )
+                import_id = repository.create_import(
+                    {
+                        "import_uuid": import_uuid,
+                        "account_id": account_id,
+                        "source_filename": pst_storage.source_filename(source),
+                        "source_sha256": source_snapshot.source_sha256,
+                        "source_size_bytes": source_snapshot.size_bytes,
+                        "source_mtime": source_snapshot.mtime_ns,
+                        "status": "extracting",
+                        "is_active": 0 if reimported else 1,
+                        "replaces_id": resolution.replaces_id,
+                    }
+                )
+
+            pst_manifest = self._pst_manifest_factory(import_uuid)
+            try:
+                from mail_dock.domain.importer import ImportOptions
+
+                options = ImportOptions(display_name, charset, include_deleted)
+                if resolution.action is not ImportJobAction.RESUME:
+                    get_version = getattr(importer, "get_version", None)
+                    if not callable(get_version):
+                        raise RuntimeError("PST importer does not expose its converter version")
+                    readpst_version = str(get_version())
+                    run_stage_a(
+                        repository,
+                        pst_manifest,
+                        importer,
+                        import_id=import_id,
+                        import_uuid=import_uuid,
+                        account_id=account_id,
+                        source=source,
+                        storage_root=cast(Any, self._storage_factory()).root,
+                        source_snapshot=source_snapshot,
+                        readpst_version=readpst_version,
+                        options=options,
+                        cancel=token,
+                        on_progress=lambda count: self.progress.emit(
+                            PstImportProgress("stage_a", count)
+                        ),
+                        pst_storage=pst_storage,
+                    )
+                stage_b: StageBResult = run_stage_b(
+                    repository,
+                    pst_manifest,
+                    self._storage_factory(),
+                    import_id=import_id,
+                    import_uuid=import_uuid,
+                    account_id=account_id,
+                    staging_root=pst_storage.staging_root(
+                        cast(Any, self._storage_factory()).root, import_uuid
+                    ),
+                    cancel=token,
+                    storage_state=None,
+                    pst_storage=pst_storage,
+                )
+                if reimported and resolution.replaces_id is not None and resolution.import_record:
+                    old_uuid = str(resolution.import_record["import_uuid"])
+                    old_manifest = self._pst_manifest_factory(old_uuid)
+                    try:
+                        switch_generation(
+                            repository,
+                            pst_manifest,
+                            self._storage_factory(),
+                            import_id=import_id,
+                            import_uuid=import_uuid,
+                            replaces_id=resolution.replaces_id,
+                            replaces_import_uuid=old_uuid,
+                        )
+                    finally:
+                        _close_manifest(old_manifest)
+                return _SyncTaskResult(
+                    "pst_import",
+                    PstImportResult(
+                        stage_b.status,
+                        import_id,
+                        stage_b.ingested_count,
+                        stage_b.failed_count,
+                        stage_b.remaining_count,
+                        reimported,
+                    ),
+                )
+            finally:
+                _close_manifest(pst_manifest)
+
+        return self._submit_operation("pst_import", operation)
 
     def prepare_attachment_save(
         self,
@@ -515,20 +779,41 @@ class SyncWorker(Worker):
         def operation(_token: CancelToken) -> _SyncTaskResult:
             repository = self._repository_factory()
             storage = cast(BasePurgeStorage, self._storage_factory())
-            records_by_account: dict[str, list[int]] = {}
+            pst_repository = (
+                self._pst_import_repository_factory()
+                if self._pst_import_repository_factory is not None
+                else None
+            )
+            records_by_manifest: dict[tuple[str, str], list[int]] = {}
             for message_id in message_ids:
                 record = repository.get_message(message_id)
                 account_id = record.get("account_id") if record is not None else None
                 if isinstance(account_id, str):
-                    records_by_account.setdefault(account_id, []).append(message_id)
+                    if record is not None and record.get("remote_state") == "no_remote":
+                        import_uuid = (
+                            pst_repository.get_import_uuid_for_message(message_id)
+                            if pst_repository is not None
+                            else None
+                        )
+                        if not isinstance(import_uuid, str):
+                            continue
+                        key = ("pst", import_uuid)
+                    else:
+                        key = ("imap", account_id)
+                    records_by_manifest.setdefault(key, []).append(message_id)
 
             purged_ids: list[Any] = []
             skipped_ids: list[Any] = []
             physical_paths: list[str] = []
             shared_paths: list[str] = []
             total_size_bytes = 0
-            for account_id, account_message_ids in records_by_account.items():
-                manifest = self._manifest_factory(account_id)
+            for kind, manifest_id in records_by_manifest:
+                account_message_ids = records_by_manifest[(kind, manifest_id)]
+                manifest = (
+                    self._pst_manifest_factory(manifest_id)
+                    if kind == "pst" and self._pst_manifest_factory is not None
+                    else self._manifest_factory(manifest_id)
+                )
                 try:
                     result = purge(
                         repository,
@@ -715,6 +1000,10 @@ class SyncWorker(Worker):
             self.delete_dry_run_result.emit(value.value)
         elif value.operation == "remote_delete":
             self.remote_delete_result.emit(value.value)
+        elif value.operation == "pst_import":
+            self.pst_import_result.emit(value.value)
+        elif value.operation == "pst_import_decision":
+            self.pst_import_decision_required.emit(value.value)
         elif value.operation == "failures_for_review":
             self.failures_for_review_result.emit(value.value)
         elif value.operation == "audit_log":
@@ -748,6 +1037,8 @@ class SyncWorker(Worker):
     def _emit_task_cancelled(self, task: _Task) -> None:
         if self._operations_by_token.get(task.token) == "sync":
             self.sync_result.emit(SyncResult(0, 0, 0, 0, True))
+        elif self._operations_by_token.get(task.token) == "pst_import":
+            self.pst_import_cancelled.emit(task.token)
         super()._emit_task_cancelled(task)
 
     def _on_task_failed(self, token: object, _error: object) -> None:
@@ -803,13 +1094,16 @@ def _add_sync_results(left: SyncResult, right: SyncResult) -> SyncResult:
     )
 
 
-def _close_manifest(manifest: BaseManifestWriter) -> None:
+def _close_manifest(manifest: BaseManifestWriter | BasePstManifestWriter) -> None:
     close = getattr(manifest, "close", None)
     if callable(close):
         close()
 
 
-def _folder_tree_snapshot(repository: BaseMessageRepository) -> FolderTreeSnapshot:
+def _folder_tree_snapshot(
+    repository: BaseMessageRepository,
+    pst_import_repository: Callable[[], BasePstImportRepository] | None = None,
+) -> FolderTreeSnapshot:
     """Read all tree data while the repository's worker thread owns the DB."""
 
     accounts = tuple(repository.list_accounts())
@@ -819,7 +1113,13 @@ def _folder_tree_snapshot(repository: BaseMessageRepository) -> FolderTreeSnapsh
         if (account_id := _account_id(account)) is not None
         for folder in repository.list_folders(account_id)
     )
-    return FolderTreeSnapshot(accounts=accounts, folders=folders)
+    pst_imports: tuple[MessageRecord, ...] = ()
+    if pst_import_repository is not None:
+        pst_repository = pst_import_repository()
+        list_imports = getattr(pst_repository, "list_imports", None)
+        if callable(list_imports):
+            pst_imports = tuple(list_imports())
+    return FolderTreeSnapshot(accounts=accounts, folders=folders, pst_imports=pst_imports)
 
 
 def _required_string(record: MessageRecord, key: str) -> str:
