@@ -502,6 +502,7 @@ class InMemoryPstImportRepository(BasePstImportRepository):
         self.items: dict[tuple[int, str], dict[str, Any]] = {}
         self.folders: dict[tuple[str, str], int] = {}
         self.messages: dict[int, dict[str, Any]] = {}
+        self.audit_log: list[dict[str, Any]] = []
         self.contents: dict[int, dict[str, str | None]] = {}
         self.batch_open = False
         self._batch_snapshot: tuple[
@@ -517,6 +518,11 @@ class InMemoryPstImportRepository(BasePstImportRepository):
     @staticmethod
     def _copy(record: MessageRecord) -> dict[str, Any]:
         return deepcopy(dict(record))
+
+    def record_audit(self, entry: MessageRecord) -> None:
+        if entry.get("operation") is None:
+            raise ValueError("Audit operation is required")
+        self.audit_log.append(self._copy(entry))
 
     def create_import(self, record: MessageRecord) -> int:
         import_id = self._next_import_id

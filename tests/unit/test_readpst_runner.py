@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from mail_dock.domain.errors import ConverterFailed, OperationCancelledError
+from mail_dock.domain.errors import ConverterFailed, OperationCancelledError, StorageDetachedError
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.importer import ImportOptions
 from mail_dock.infrastructure.importers.readpst_runner import ReadPstRunner
@@ -141,6 +141,32 @@ def test_runner_terminates_then_kills_unresponsive_process_on_cancel(
             tmp_path / "staging",
             cancel=token,
             on_progress=cancel_after_first_sample,
+        )
+
+    assert process.terminated is True
+    assert process.killed is True
+
+
+def test_runner_terminates_then_kills_on_storage_detach(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    process = _FakeProcess(None)
+    monkeypatch.setattr(
+        "mail_dock.infrastructure.importers.readpst_runner.subprocess.Popen",
+        lambda *args, **kwargs: process,
+    )
+
+    def fail_when_detached(_count: int) -> None:
+        raise StorageDetachedError("storage detached")
+
+    with pytest.raises(StorageDetachedError, match="detached"):
+        ReadPstRunner(
+            tmp_path / "readpst", poll_interval_seconds=0.001, cancel_timeout_seconds=0
+        ).run(
+            tmp_path / "source.pst",
+            tmp_path / "staging",
+            cancel=CancelToken(),
+            on_progress=fail_when_detached,
         )
 
     assert process.terminated is True

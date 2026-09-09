@@ -26,6 +26,7 @@ from mail_dock.usecases.import_pst import (
     ImportJobDecision,
     check_import_capacity,
     read_stage_a_marker,
+    reconcile_detached_import,
     resolve_import_job,
     restore_generation,
     run_stage_a,
@@ -296,6 +297,73 @@ def test_run_stage_a_does_not_write_or_delete_after_detach(tmp_path: Path) -> No
     assert stage_root.exists()
     assert repository.imports[import_id]["status"] == "extracting"
 
+    gate.allowed = True
+    with PstManifestWriter(tmp_path, import_uuid) as manifest:
+        assert (
+            reconcile_detached_import(
+                repository,
+                manifest,
+                PST_STORAGE,
+                import_id=import_id,
+                import_uuid=import_uuid,
+                storage_root=tmp_path,
+                storage_state=gate,
+            )
+            is False
+        )
+    assert not stage_root.exists()
+    assert repository.imports[import_id]["status"] == "suspect"
+    assert repository.audit_log[-1]["operation"] == "pst_import_abandon"
+
+
+def test_reconcile_detached_import_rebuilds_inventory_for_resume(tmp_path: Path) -> None:
+    source, repository, import_uuid, import_id = _stage_a_import(tmp_path)
+    with PstManifestWriter(tmp_path, import_uuid) as manifest:
+        stage_a = run_stage_a(
+            repository,
+            manifest,
+            _FakeExtractor(),
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id="pst-account",
+            source=source,
+            storage_root=tmp_path,
+            source_snapshot=snapshot_source_file(source, pst_storage=PST_STORAGE),
+            readpst_version="0.6.76",
+            options=ImportOptions("Archive", "cp932"),
+            pst_storage=PST_STORAGE,
+        )
+
+    repository.items.clear()
+    repository.imports[import_id]["status"] = "ingesting"
+    gate = _WriteGate()
+    with PstManifestWriter(tmp_path, import_uuid) as manifest:
+        reconciled = reconcile_detached_import(
+                repository,
+                manifest,
+                PST_STORAGE,
+                import_id=import_id,
+                import_uuid=import_uuid,
+                storage_root=tmp_path,
+                storage_state=gate,
+            )
+        assert reconciled is True, repository.audit_log
+
+    assert repository.imports[import_id]["status"] == "cancelled_resumable"
+    assert list(repository.items) == [(import_id, "Store/Inbox/1.eml")]
+    with PstManifestWriter(tmp_path, import_uuid) as manifest:
+        result = run_stage_b(
+            repository,
+            manifest,
+            EmlStorage(tmp_path),
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id="pst-account",
+            staging_root=stage_a.staging_root,
+            pst_storage=PST_STORAGE,
+        )
+    assert result.status == "completed"
+
 
 def test_run_stage_b_saves_messages_in_batches_and_removes_staging(tmp_path: Path) -> None:
     source, repository, import_uuid, import_id = _stage_a_import(tmp_path)
@@ -504,6 +572,7 @@ def test_switch_generation_verifies_durable_state_and_records_lifecycle(
     assert verification.item_count == 1
     assert repository.imports[new_id]["is_active"] == 1
     assert repository.imports[old_id]["status"] == "superseded"
+    assert repository.audit_log[-1]["operation"] == "pst_supersede"
     old_message_id = next(
         item["message_row_id"]
         for (item_import_id, _), item in repository.items.items()
@@ -606,6 +675,7 @@ def test_restore_generation_reverses_visibility_and_records_event(tmp_path: Path
     )
     assert repository.messages[old_message_id]["local_state"] == "active"
     assert repository.messages[new_message_id]["local_state"] == "trashed"
+    assert repository.audit_log[-1]["operation"] == "pst_restore_generation"
     assert any(
         event["event"] == "generation_restored"
         for event in PstManifestReader(tmp_path, old_uuid).read_all_events()

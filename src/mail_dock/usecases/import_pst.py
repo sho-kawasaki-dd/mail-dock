@@ -59,6 +59,22 @@ class StorageWriteGate(Protocol):
     def is_write_allowed(self) -> bool: ...
 
 
+def _record_pst_audit(
+    repository: BasePstImportRepository,
+    operation: str,
+    account_id: str,
+    detail: str,
+) -> None:
+    repository.record_audit(
+        {
+            "occurred_at": _timestamp(),
+            "operation": operation,
+            "account_id": account_id,
+            "detail": detail,
+        }
+    )
+
+
 @dataclass(frozen=True)
 class StageAResult:
     """Durable inventory produced after a successful readpst extraction."""
@@ -317,6 +333,176 @@ def recover_generation_switch(
         repository.rollback_generation_switch(import_id, replaces_id)
 
 
+def _reconcile_suspect_import(
+    repository: BasePstImportRepository,
+    manifest: BasePstManifestWriter,
+    pst_storage: BasePstImportStorage,
+    *,
+    import_id: int,
+    import_uuid: str,
+    account_id: str,
+    staging_root: os.PathLike[str],
+    reason: str,
+    storage_state: StorageWriteGate,
+) -> None:
+    """Discard an untrustworthy detached-stage result after reattachment."""
+
+    _ensure_write_allowed(storage_state)
+    manifest.append(
+        {
+            "event": "import_abandoned",
+            "import_uuid": import_uuid,
+            "timestamp": _timestamp(),
+            "reason": f"suspect:{reason}",
+        }
+    )
+    manifest.flush_and_sync()
+    _ensure_write_allowed(storage_state)
+    repository.update_import_status(
+        import_id,
+        "suspect",
+        staging_path=None,
+        finished_at=_timestamp(),
+        error_message=reason,
+    )
+    _record_pst_audit(
+        repository,
+        "pst_import_abandon",
+        account_id,
+        f"import_uuid={import_uuid}; reason=suspect:{reason}",
+    )
+    _remove_staging(pst_storage, staging_root, storage_state)
+
+
+def reconcile_detached_import(
+    repository: BasePstImportRepository,
+    manifest: BasePstManifestWriter,
+    pst_storage: BasePstImportStorage,
+    *,
+    import_id: int,
+    import_uuid: str,
+    storage_root: os.PathLike[str],
+    storage_state: StorageWriteGate,
+) -> bool:
+    """Adjudicate a PST import left behind by a storage detach.
+
+    A valid Stage A marker and matching inventory are the only evidence that
+    can be resumed.  The database is rebuilt from the durable item events;
+    missing or inconsistent evidence is marked ``suspect`` and discarded.
+    """
+
+    _ensure_write_allowed(storage_state)
+    record = repository.get_import(import_id)
+    if record is None or str(record.get("import_uuid")) != import_uuid:
+        raise UnreadableArchive("PST import does not exist")
+    account_id = str(record.get("account_id", ""))
+    staging_root = pst_storage.staging_root(storage_root, import_uuid)
+    try:
+        marker_path = pst_storage.marker_path(staging_root)
+        marker = read_stage_a_marker(marker_path, pst_storage)
+        if marker.get("import_uuid") != import_uuid:
+            raise UnreadableArchive("Stage A marker import_uuid does not match the import")
+        expected_relative = pst_storage.relative_path(
+            pst_storage.normalize_path(storage_root), staging_root
+        )
+        if marker.get("staging_relative_path") != expected_relative:
+            raise UnreadableArchive("Stage A marker points outside the expected staging path")
+        items, folders = pst_storage.scan_staging(staging_root)
+        inventory_sha256 = _inventory_hash(items)
+        snapshot = dict(_manifest_snapshot(manifest))
+        folder_reader = getattr(manifest, "read_folders_manifest", None)
+        if not callable(folder_reader):
+            raise UnreadableArchive("PST manifest cannot read read_folders_manifest")
+        raw_folders = folder_reader()
+        if not isinstance(raw_folders, list):
+            raise UnreadableArchive("PST folder manifest is invalid")
+        folder_snapshot = [cast(Mapping[str, JSONValue], folder) for folder in raw_folders]
+        static_manifest_sha256 = _static_manifest_hash(
+            snapshot, [dict(folder) for folder in folder_snapshot]
+        )
+        if (
+            marker.get("total_files") != len(items)
+            or marker.get("inventory_sha256") != inventory_sha256
+            or marker.get("static_manifest_sha256") != static_manifest_sha256
+            or folder_snapshot != folders
+        ):
+            raise UnreadableArchive("PST Stage A inventory does not match its marker")
+        events = list(manifest.read_events())
+        discovered = _event_by_item(events, "item_discovered")
+        if set(discovered) != {str(item["source_item_key"]) for item in items}:
+            raise UnreadableArchive("PST Stage A item events do not match the inventory")
+        ready = [event for event in events if event.get("event") == "import_ready"]
+        if not ready or ready[-1].get("total_files") != len(items):
+            raise UnreadableArchive("PST Stage A has no matching import_ready event")
+    except (OSError, TypeError, ValueError, UnreadableArchive) as error:
+        _reconcile_suspect_import(
+            repository,
+            manifest,
+            pst_storage,
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id=account_id,
+            staging_root=staging_root,
+            reason=str(error),
+            storage_state=storage_state,
+        )
+        return False
+
+    existing = {
+        str(item.get("source_item_key")): item for item in repository.list_items(import_id)
+    }
+    saved_events = _event_by_item(events, "item_saved")
+    _ensure_write_allowed(storage_state)
+    repository.begin_batch()
+    try:
+        ingested_count = 0
+        for item in items:
+            source_key = str(item["source_item_key"])
+            current = existing.get(source_key)
+            saved = saved_events.get(source_key)
+            message_id = current.get("message_row_id") if current is not None else None
+            preserve_saved = (
+                saved is not None
+                and isinstance(message_id, int)
+                and repository.get_message(message_id) is not None
+            )
+            restored = {
+                "import_id": import_id,
+                **item,
+                "status": "saved" if preserve_saved else "discovered",
+                "final_relative_path": (
+                    saved.get("final_relative_path") if preserve_saved and saved else None
+                ),
+                "message_row_id": message_id if preserve_saved else None,
+                "error_class": current.get("error_class") if preserve_saved and current else None,
+                "error_message": (
+                    current.get("error_message") if preserve_saved and current else None
+                ),
+                "attempt_count": int(current.get("attempt_count") or 0) if current else 0,
+            }
+            _ensure_write_allowed(storage_state)
+            repository.upsert_import_item(restored)
+            if preserve_saved:
+                ingested_count += 1
+        _ensure_write_allowed(storage_state)
+        repository.update_import_status(
+            import_id,
+            "cancelled_resumable",
+            total_files=len(items),
+            ingested_count=ingested_count,
+            failed_count=sum(1 for item in existing.values() if item.get("error_class")),
+            staging_path=str(staging_root),
+            finished_at=None,
+            error_message=None,
+        )
+        _ensure_write_allowed(storage_state)
+        repository.commit_batch()
+    except Exception:
+        repository.rollback_batch()
+        raise
+    return True
+
+
 def switch_generation(
     repository: BasePstImportRepository,
     manifest: BasePstManifestWriter,
@@ -326,6 +512,7 @@ def switch_generation(
     import_uuid: str,
     replaces_id: int,
     replaces_import_uuid: str,
+    storage_state: StorageWriteGate | None = None,
 ) -> GenerationVerification:
     """Atomically make a verified re-import visible and retire its predecessor."""
 
@@ -343,6 +530,7 @@ def switch_generation(
     verification = verify_generation(
         repository, manifest, storage, import_id=import_id, import_uuid=import_uuid
     )
+    _ensure_write_allowed(storage_state)
     manifest.append(
         {
             "event": "generation_switch_prepared",
@@ -353,9 +541,12 @@ def switch_generation(
     )
     manifest.flush_and_sync()
 
+    _ensure_write_allowed(storage_state)
     repository.begin_batch()
     try:
+        _ensure_write_allowed(storage_state)
         repository.activate_generation(import_id, replaces_id)
+        _ensure_write_allowed(storage_state)
         manifest.append(
             {
                 "event": "generation_switch_committed",
@@ -364,12 +555,15 @@ def switch_generation(
                 "replaces_import_uuid": replaces_import_uuid,
             }
         )
+        _ensure_write_allowed(storage_state)
         manifest.flush_and_sync()
+        _ensure_write_allowed(storage_state)
         repository.commit_batch()
     except Exception:
         repository.rollback_batch()
         raise
 
+    _ensure_write_allowed(storage_state)
     manifest.append(
         {
             "event": "generation_superseded",
@@ -378,7 +572,15 @@ def switch_generation(
             "superseded_import_uuid": replaces_import_uuid,
         }
     )
+    _ensure_write_allowed(storage_state)
     manifest.flush_and_sync()
+    _ensure_write_allowed(storage_state)
+    _record_pst_audit(
+        repository,
+        "pst_supersede",
+        str(new_record["account_id"]),
+        f"import_uuid={import_uuid}; superseded_import_uuid={replaces_import_uuid}",
+    )
     return verification
 
 
@@ -390,6 +592,7 @@ def restore_generation(
     import_id: int,
     import_uuid: str,
     superseded_import_uuid: str,
+    storage_state: StorageWriteGate | None = None,
 ) -> GenerationVerification:
     """Restore a superseded generation while keeping the switch transactional."""
 
@@ -401,9 +604,12 @@ def restore_generation(
         import_uuid=import_uuid,
         allow_superseded=True,
     )
+    _ensure_write_allowed(storage_state)
     repository.begin_batch()
     try:
+        _ensure_write_allowed(storage_state)
         repository.restore_generation(import_id)
+        _ensure_write_allowed(storage_state)
         manifest.append(
             {
                 "event": "generation_restored",
@@ -413,11 +619,23 @@ def restore_generation(
                 "superseded_import_uuid": superseded_import_uuid,
             }
         )
+        _ensure_write_allowed(storage_state)
         manifest.flush_and_sync()
+        _ensure_write_allowed(storage_state)
         repository.commit_batch()
     except Exception:
         repository.rollback_batch()
         raise
+    restored_record = repository.get_import(import_id)
+    if restored_record is None:
+        raise UnreadableArchive("Restored PST generation does not exist")
+    _ensure_write_allowed(storage_state)
+    _record_pst_audit(
+        repository,
+        "pst_restore_generation",
+        str(restored_record["account_id"]),
+        f"import_uuid={import_uuid}; superseded_import_uuid={superseded_import_uuid}",
+    )
     return verification
 
 
@@ -462,6 +680,16 @@ def _abandon_stage_a(
         staging_path=None,
         finished_at=_timestamp(),
         error_message=str(error),
+    )
+    _ensure_write_allowed(storage_state)
+    abandoned_record = repository.get_import(import_id)
+    if abandoned_record is None:
+        raise UnreadableArchive("Abandoned PST import does not exist")
+    _record_pst_audit(
+        repository,
+        "pst_import_abandon",
+        str(abandoned_record.get("account_id", "")),
+        f"import_uuid={import_uuid}; reason={reason}",
     )
     _remove_staging(pst_storage, staging_root, storage_state)
 
@@ -539,6 +767,19 @@ def run_stage_a(
         )
         manifest.write_import_manifest(import_snapshot)
         manifest.flush_and_sync()
+        _ensure_write_allowed(storage_state)
+        import_record = repository.get_import(import_id)
+        operation = (
+            "pst_reimport"
+            if import_record and import_record.get("replaces_id")
+            else "pst_import"
+        )
+        _record_pst_audit(
+            repository,
+            operation,
+            account_id,
+            f"import_uuid={import_uuid}; source={import_snapshot['source_filename']}",
+        )
         token.raise_if_cancelled()
 
         def report(count: int) -> None:
@@ -575,9 +816,11 @@ def run_stage_a(
             )
         manifest.flush_and_sync()
 
+        _ensure_write_allowed(storage_state)
         repository.begin_batch()
         try:
             for item in items:
+                _ensure_write_allowed(storage_state)
                 repository.upsert_import_item(
                     {
                         "import_id": import_id,
@@ -586,6 +829,7 @@ def run_stage_a(
                         "attempt_count": 0,
                     }
                 )
+            _ensure_write_allowed(storage_state)
             repository.commit_batch()
         except Exception:
             repository.rollback_batch()
@@ -1122,6 +1366,7 @@ __all__ = [
     "SourceFileSnapshot",
     "StageBResult",
     "check_import_capacity",
+    "reconcile_detached_import",
     "recover_generation_switch",
     "resolve_import_job",
     "restore_generation",

@@ -122,6 +122,11 @@ class SqlitePstImportRepository(BasePstImportRepository):
     def _rows(self, cursor: sqlite3.Cursor) -> list[MessageRecord]:
         return [self._row(cursor, cast(tuple[Any, ...], row)) for row in cursor.fetchall()]
 
+    def record_audit(self, entry: MessageRecord) -> None:
+        """Write PST lifecycle audit records through the shared message repository."""
+
+        self._message_repository.record_audit(entry)
+
     def upsert_folder(self, folder: MessageRecord) -> int:
         account_id = folder.get("account_id")
         raw_name = folder.get("raw_name")

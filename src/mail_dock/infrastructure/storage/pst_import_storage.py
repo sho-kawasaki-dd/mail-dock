@@ -172,6 +172,8 @@ class PstImportStorage(BasePstImportStorage):
                 ) from error
             for entry in entries:
                 candidate = Path(entry.path)
+                if candidate == root / _STAGE_MARKER_NAME:
+                    continue
                 try:
                     metadata = entry.stat(follow_symlinks=False)
                 except OSError:

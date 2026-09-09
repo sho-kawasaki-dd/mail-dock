@@ -278,7 +278,7 @@
 #### **D-5. 監査・切断対応**
 
 - [ ] `audit_log` へ `pst_import` / `pst_reimport` / `pst_supersede` / `pst_import_abandon` を記録する
-- [ ] `StorageDetachedError` 検知時はreadpstプロセスを `terminate()`→`kill()` し、切断中にDB・マニフェスト・stagingへ書込まない。再接続後にマーカー・インベントリ・イベントを調停し、マーカーなし/不正は `suspect`（再抽出）、正常なマーカーはマニフェストをDBへ再適用して通常再開とする
+- [x] `StorageDetachedError` 検知時はreadpstプロセスを `terminate()`→`kill()` し、切断中にDB・マニフェスト・stagingへ書込まない。再接続後にマーカー・インベントリ・イベントを調停し、マーカーなし/不正は `suspect`（再抽出）、正常なマーカーはマニフェストをDBへ再適用して通常再開とする
 
 ---
 

@@ -201,6 +201,9 @@ class BasePstImportRepository(ABC):
     """Repository port for PST import jobs and their staged items."""
 
     @abstractmethod
+    def record_audit(self, entry: MessageRecord) -> None: ...
+
+    @abstractmethod
     def get_import(self, import_id: int) -> MessageRecord | None: ...
 
     @abstractmethod
