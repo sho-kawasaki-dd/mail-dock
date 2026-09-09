@@ -16,7 +16,12 @@ from mail_dock.domain.fetcher import RemoteFolder
 from mail_dock.domain.messages import StoredEml
 from mail_dock.domain.ports import BaseEmlStorage, BaseManifestReader, BaseManifestWriter, JSONValue
 from mail_dock.domain.storage_state import StorageState, StorageStateMachine
-from mail_dock.usecases.delete_remote import dry_run, execute, reconcile_uncertain_deletes
+from mail_dock.usecases.delete_remote import (
+    DeleteCandidate,
+    dry_run,
+    execute,
+    reconcile_uncertain_deletes,
+)
 from tests.support.fake_fetcher import FakeFetcher
 from tests.support.in_memory_repository import InMemoryMessageRepository
 
@@ -196,6 +201,41 @@ def test_dry_run_excludes_invalid_eml_and_missing_contents() -> None:
         3: "message_contents_missing",
         4: "eml_missing",
     }
+
+
+def test_remote_delete_rejects_pst_archive_messages() -> None:
+    repository = InMemoryMessageRepository()
+    path = _record(repository, message_id=1, raw=b"pst message")
+    repository.accounts["account"]["provider_type"] = "pst_import"
+    storage = MemoryStorage({path: b"pst message"})
+    state = StorageStateMachine(StorageState.ATTACHED)
+
+    with pytest.raises(PermanentError, match="PST archive account"):
+        dry_run(repository, storage, message_ids=(1,), storage_state=state)
+
+    with pytest.raises(PermanentError, match="PST archive account"):
+        execute(
+            DeleteFetcher(),
+            repository,
+            storage,
+            MemoryManifest(),
+            plan=(
+                DeleteCandidate(
+                    message_id=1,
+                    account_id="account",
+                    folder_raw_name="INBOX",
+                    uid=1,
+                    uidvalidity=42,
+                    subject="Subject 1",
+                    date_sent="2026-08-27T00:00:00+00:00",
+                    internal_date="2026-08-27T00:00:00+00:00",
+                    size_bytes=len(b"pst message"),
+                    relative_path=path,
+                    file_hash=hashlib.sha256(b"pst message").hexdigest(),
+                ),
+            ),
+            storage_state=state,
+        )
 
 
 def test_execute_records_intent_then_completion_and_updates_state() -> None:

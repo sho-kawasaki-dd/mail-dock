@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from mail_dock.domain.fetcher import BaseMailFetcher
 from mail_dock.domain.ports import BaseManifestReader, BaseManifestWriter
 from mail_dock.domain.repository import BaseMessageRepository
+from mail_dock.usecases.account_guards import ensure_imap_account
 from mail_dock.usecases.snapshots import record_folder_snapshot
 
 _LOGGER = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ def refresh_folders(
 ) -> FolderRefreshResult:
     """Refresh folder metadata without enabling newly discovered folders."""
 
+    ensure_imap_account(repo, account_id)
     existing = {str(folder["raw_name"]): folder for folder in repo.list_folders(account_id)}
     remote_folders = fetcher.list_folders()
     remote_raw_names: set[str] = set()
@@ -83,6 +85,7 @@ def set_sync_target(
 ) -> None:
     """Enable or disable synchronization for one known folder."""
 
+    ensure_imap_account(repo, account_id)
     folder = next(
         (item for item in repo.list_folders(account_id) if item.get("raw_name") == raw_name),
         None,

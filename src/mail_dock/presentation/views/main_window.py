@@ -81,6 +81,7 @@ from mail_dock.presentation.views.dialogs.failure_review_dialog import FailureRe
 from mail_dock.presentation.views.dialogs.integrity_dialog import IntegrityDialog
 from mail_dock.presentation.views.dialogs.settings_dialog import SettingsDialog
 from mail_dock.presentation.views.message_list import MessageListSearchBar, MessageListView
+from mail_dock.usecases.account_guards import is_pst_account
 from mail_dock.usecases.delete_remote import DeleteDryRunResult, DeleteResult
 from mail_dock.usecases.export_attachments import ExportAttachmentsProgress, ExportAttachmentsResult
 from mail_dock.usecases.export_mbox import ExportMboxProgress
@@ -626,6 +627,7 @@ class MainWindow(QMainWindow):
                 account_id
                 for account in accounts
                 if account.get("is_enabled", 1) not in (False, 0, "0")
+                and not is_pst_account(account)
                 and isinstance(account_id := account.get("id", account.get("account_id")), str)
                 and account_id
             )

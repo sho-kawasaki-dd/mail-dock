@@ -87,6 +87,7 @@ from mail_dock.infrastructure.storage.storage_root import (
     resolve_root,
 )
 from mail_dock.infrastructure.storage.storage_root import initialize_root as initialize_root
+from mail_dock.usecases.account_guards import ensure_imap_account, is_pst_account
 from mail_dock.usecases.register_account import (
     list_accounts,
     load_credentials,
@@ -1017,6 +1018,7 @@ def _run_folders_command(
     storage_root: Path,
 ) -> None:
     account_id = args.account
+    ensure_imap_account(repo, account_id)
     if args.refresh:
         account = _account_by_id(repo, account_id)
         with (
@@ -1065,7 +1067,11 @@ def _run_sync_command(
 ) -> int:
     accounts = list(repo.list_accounts())
     if args.account is not None:
-        accounts = [_account_by_id(repo, args.account)]
+        account = _account_by_id(repo, args.account)
+        ensure_imap_account(repo, _account_id(account))
+        accounts = [account]
+    else:
+        accounts = [account for account in accounts if not is_pst_account(account)]
     if not accounts:
         raise DatabaseError("No accounts are registered")
 

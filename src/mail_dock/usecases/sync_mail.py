@@ -25,6 +25,7 @@ from mail_dock.domain.ports import BaseEmlStorage, BaseManifestWriter, JSONValue
 from mail_dock.domain.repository import BaseMessageRepository, MessageContents, MessageRecord
 from mail_dock.infrastructure.parsing.eml_parser import parse_eml
 from mail_dock.infrastructure.parsing.headers import to_utc_iso8601
+from mail_dock.usecases.account_guards import ensure_imap_account
 from mail_dock.usecases.retry import with_retry
 from mail_dock.usecases.snapshots import folder_snapshot_event
 
@@ -352,6 +353,7 @@ def sync_account(
     failures which abort the run after already completed work is committed.
     """
 
+    ensure_imap_account(repo, account_id)
     token = cancel or CancelToken()
     stats = _MutableStats(started_at=time.monotonic())
     targets = [dict(folder) for folder in repo.list_sync_targets(account_id)]

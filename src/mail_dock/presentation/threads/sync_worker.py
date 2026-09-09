@@ -28,6 +28,7 @@ from mail_dock.domain.ports import (
 from mail_dock.domain.repository import BaseMessageRepository, MessageRecord
 from mail_dock.presentation.errors import user_message
 from mail_dock.presentation.threads.worker import OperationGate, Worker, _Task, operation_gate
+from mail_dock.usecases.account_guards import is_pst_account
 from mail_dock.usecases.delete_remote import (
     DeleteDryRunResult,
     DeleteResult,
@@ -213,7 +214,9 @@ class SyncWorker(Worker):
             account_ids = [
                 account_id
                 for account in repository.list_accounts()
-                if _is_enabled_account(account) and (account_id := _account_id(account))
+                if _is_enabled_account(account)
+                and not is_pst_account(account)
+                and (account_id := _account_id(account))
             ]
             aggregate = SyncResult(0, 0, 0, 0, False)
             for account_id in account_ids:

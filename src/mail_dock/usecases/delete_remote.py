@@ -18,6 +18,7 @@ from mail_dock.domain.errors import (
 from mail_dock.domain.fetcher import BaseMailFetcher
 from mail_dock.domain.ports import BaseEmlStorage, BaseManifestReader, BaseManifestWriter, JSONValue
 from mail_dock.domain.repository import BaseMessageRepository, MessageRecord
+from mail_dock.usecases.account_guards import ensure_imap_account, ensure_imap_message
 
 _LOGGER = logging.getLogger(__name__)
 DEFAULT_DELETE_BATCH_LIMIT = 1000
@@ -229,13 +230,17 @@ def dry_run(
 ) -> DeleteDryRunResult:
     """Build a deletion plan after verifying every local prerequisite."""
 
+    selected_message_ids = tuple(message_ids)
+    selected_records = [repo.get_message(message_id) for message_id in selected_message_ids]
+    for record in selected_records:
+        if record is not None:
+            ensure_imap_message(repo, record)
     if not storage_state.is_remote_delete_allowed():
         raise StorageDetachedError("Remote deletion requires attached storage")
 
     candidates: list[DeleteCandidate] = []
     exclusions: list[DeleteExclusion] = []
-    for message_id in message_ids:
-        record = repo.get_message(message_id)
+    for message_id, record in zip(selected_message_ids, selected_records, strict=True):
         if record is None:
             exclusions.append(DeleteExclusion(message_id, "message_not_found"))
             continue
@@ -325,6 +330,9 @@ def execute(
 ) -> DeleteResult:
     """Execute a reviewed plan while recording recoverable operation states."""
 
+    items = _plan_items(plan)
+    for item in items:
+        ensure_imap_account(repo, item.account_id)
     if not storage_state.is_remote_delete_allowed():
         raise StorageDetachedError("Remote deletion requires attached storage")
     if mode not in {"trash", "expunge"}:
@@ -332,7 +340,6 @@ def execute(
     if delete_batch_limit <= 0:
         raise ValueError("delete_batch_limit must be positive")
 
-    items = _plan_items(plan)
     if len(items) > delete_batch_limit:
         raise ValueError(f"delete plan exceeds the batch limit ({delete_batch_limit})")
     if mode == "expunge" and not fetcher.supports_uid_expunge():

@@ -44,6 +44,14 @@ class _Repository:
         ]
 
 
+class _RepositoryWithPst(_Repository):
+    def list_accounts(self) -> list[dict[str, object]]:
+        return [
+            {"id": "account-1", "display_name": "仕事", "provider_type": "onamae_imap"},
+            {"id": "pst-1", "display_name": "PST", "provider_type": "pst_import"},
+        ]
+
+
 class _SearchRepository:
     def list_messages(
         self,
@@ -141,6 +149,12 @@ class _Context:
         self.settings = settings
 
 
+class _ContextWithPst(_Context):
+    @staticmethod
+    def create_message_repository() -> BaseMessageRepository:
+        return cast(BaseMessageRepository, _RepositoryWithPst())
+
+
 class _CredentialStore:
     def get_password(self, _account_id: str) -> str | None:
         return "stored-password"
@@ -194,6 +208,14 @@ def test_main_window_builds_three_panes_and_prevents_sync_reentry(qtbot: Any) ->
     window.start_startup_sync()
 
     assert calls == [True]
+    window.stop_workers()
+
+
+def test_startup_sync_account_list_excludes_pst_archives(qtbot: Any) -> None:
+    window = MainWindow(cast(Any, _ContextWithPst()))
+    qtbot.addWidget(window)
+
+    assert window._enabled_account_ids() == ("account-1",)
     window.stop_workers()
 
 

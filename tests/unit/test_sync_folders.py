@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import logging
 
+import pytest
+
+from mail_dock.domain.errors import PermanentError
 from mail_dock.domain.fetcher import RemoteFolder
 from mail_dock.usecases.sync_folders import refresh_folders, set_sync_target
+from mail_dock.usecases.sync_mail import SyncOptions, sync_account
 from tests.support.fake_fetcher import FakeFetcher
 from tests.support.in_memory_repository import InMemoryMessageRepository
 
@@ -64,3 +68,29 @@ def test_set_sync_target_delegates_to_repository() -> None:
     set_sync_target(repository, "account", "INBOX", True)
 
     assert repository.list_sync_targets("account")[0]["raw_name"] == "INBOX"
+
+
+def test_pst_accounts_are_rejected_by_folder_use_cases() -> None:
+    repository = InMemoryMessageRepository()
+    repository.upsert_account({"id": "pst-account", "provider_type": "pst_import"})
+    fetcher = FakeFetcher(folders=(RemoteFolder("INBOX", "Inbox"),))
+
+    with pytest.raises(PermanentError, match="PST archive account"):
+        refresh_folders(fetcher, repository, "pst-account")
+    with pytest.raises(PermanentError, match="PST archive account"):
+        set_sync_target(repository, "pst-account", "INBOX", True)
+
+
+def test_pst_accounts_are_rejected_by_sync_use_case() -> None:
+    repository = InMemoryMessageRepository()
+    repository.upsert_account({"id": "pst-account", "provider_type": "pst_import"})
+
+    with pytest.raises(PermanentError, match="PST archive account"):
+        sync_account(
+            FakeFetcher(),
+            repository,
+            object(),  # type: ignore[arg-type]
+            object(),  # type: ignore[arg-type]
+            account_id="pst-account",
+            options=SyncOptions(),
+        )

@@ -29,9 +29,19 @@ class _Repository:
         return [{"id": "account-1"}]
 
 
-def _worker(*, sync_usecase: Any, clock: Any = lambda: 0.0) -> SyncWorker:
+class _RepositoryWithPst:
+    def list_accounts(self) -> list[dict[str, object]]:
+        return [
+            {"id": "account-1", "provider_type": "onamae_imap"},
+            {"id": "pst-1", "provider_type": "pst_import"},
+        ]
+
+
+def _worker(
+    *, sync_usecase: Any, clock: Any = lambda: 0.0, repository: Any | None = None
+) -> SyncWorker:
     return SyncWorker(
-        cast(BaseMessageRepository, _Repository()),
+        cast(BaseMessageRepository, repository or _Repository()),
         lambda _account: cast(BaseMailFetcher, _Fetcher()),
         cast(Any, lambda: cast(BaseEmlStorage, object())),
         cast(Any, lambda _account_id: cast(BaseManifestWriter, object())),
@@ -86,5 +96,28 @@ def test_running_sync_observes_direct_token_cancellation(qtbot: Any) -> None:
         qtbot.waitUntil(cancelled.is_set, timeout=2_000)
         qtbot.waitUntil(lambda: bool(results), timeout=2_000)
         assert results == [SyncResult(0, 0, 0, 0, True)]
+    finally:
+        worker.stop()
+
+
+def test_sync_all_accounts_skips_pst_archives(qtbot: Any) -> None:
+    called: list[str] = []
+
+    def sync_usecase(*args: Any, **kwargs: Any) -> SyncResult:
+        called.append(str(kwargs["account_id"]))
+        return SyncResult(0, 0, 0, 0, False)
+
+    worker = _worker(
+        sync_usecase=sync_usecase,
+        repository=_RepositoryWithPst(),
+    )
+    results: list[object] = []
+    worker.sync_result.connect(results.append)
+    worker.start()
+
+    try:
+        worker.sync_all_accounts()
+        qtbot.waitUntil(lambda: bool(results), timeout=2_000)
+        assert called == ["account-1"]
     finally:
         worker.stop()
