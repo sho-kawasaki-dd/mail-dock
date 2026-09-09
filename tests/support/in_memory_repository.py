@@ -500,10 +500,12 @@ class InMemoryPstImportRepository(BasePstImportRepository):
     def __init__(self) -> None:
         self.imports: dict[int, dict[str, Any]] = {}
         self.items: dict[tuple[int, str], dict[str, Any]] = {}
+        self.folders: dict[tuple[str, str], int] = {}
         self.messages: dict[int, dict[str, Any]] = {}
         self.contents: dict[int, dict[str, str | None]] = {}
         self.batch_open = False
         self._next_import_id = 1
+        self._next_folder_id = 1
         self._next_message_id = 1
 
     @staticmethod
@@ -517,6 +519,15 @@ class InMemoryPstImportRepository(BasePstImportRepository):
         value["id"] = import_id
         self.imports[import_id] = value
         return import_id
+
+    def upsert_folder(self, folder: MessageRecord) -> int:
+        key = (str(folder["account_id"]), str(folder["raw_name"]))
+        folder_id = self.folders.get(key)
+        if folder_id is None:
+            folder_id = self._next_folder_id
+            self._next_folder_id += 1
+            self.folders[key] = folder_id
+        return folder_id
 
     def update_import_status(
         self,

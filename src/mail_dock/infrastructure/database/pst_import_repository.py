@@ -122,6 +122,22 @@ class SqlitePstImportRepository(BasePstImportRepository):
     def _rows(self, cursor: sqlite3.Cursor) -> list[MessageRecord]:
         return [self._row(cursor, cast(tuple[Any, ...], row)) for row in cursor.fetchall()]
 
+    def upsert_folder(self, folder: MessageRecord) -> int:
+        account_id = folder.get("account_id")
+        raw_name = folder.get("raw_name")
+        display_name = folder.get("display_name")
+        if not all(
+            isinstance(value, str) and value for value in (account_id, raw_name, display_name)
+        ):
+            raise ValueError("PST folder account_id, raw_name, and display_name are required")
+        return self._message_repository.upsert_folder(
+            {
+                "account_id": account_id,
+                "raw_name": raw_name,
+                "display_name": display_name,
+            }
+        )
+
     def create_import(self, record: MessageRecord) -> int:
         required = ("import_uuid", "account_id", "source_filename", "source_sha256", "status")
         missing = [column for column in required if record.get(column) is None]

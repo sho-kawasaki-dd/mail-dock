@@ -556,6 +556,9 @@ class PstManifestWriter(BasePstManifestWriter):
             self._handle.write(encoded)
         self._events.append(payload)
 
+    def read_events(self) -> list[Mapping[str, JSONValue]]:
+        return list(self._events)
+
     def flush_and_sync(self) -> None:
         if self._handle is not None:
             with storage_io():

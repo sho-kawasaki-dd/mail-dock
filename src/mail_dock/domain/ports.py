@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from abc import ABC, abstractmethod
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from datetime import datetime
 
 from mail_dock.domain.messages import AttachmentSavePlan, RenderedMessage, SavedFile, StoredEml
@@ -183,6 +183,12 @@ class BasePstManifestWriter(ABC):
     @abstractmethod
     def append(self, event: Mapping[str, JSONValue]) -> None:
         """Append a validated PST lifecycle or item event without syncing."""
+        pass
+
+    def read_events(self) -> Sequence[Mapping[str, JSONValue]]:
+        """Return already durable events for idempotent import resumption."""
+
+        return ()
 
     @abstractmethod
     def flush_and_sync(self) -> None:

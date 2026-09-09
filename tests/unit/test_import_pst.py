@@ -15,6 +15,7 @@ from mail_dock.domain.errors import (
 )
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.importer import ArchiveInfo, BaseArchiveImporter, ExtractResult, ImportOptions
+from mail_dock.infrastructure.storage.eml_storage import EmlStorage
 from mail_dock.infrastructure.storage.pst_manifest import (
     PstManifestReader,
     PstManifestWriter,
@@ -26,6 +27,7 @@ from mail_dock.usecases.import_pst import (
     read_stage_a_marker,
     resolve_import_job,
     run_stage_a,
+    run_stage_b,
     snapshot_source_file,
     validate_source_snapshot,
 )
@@ -80,7 +82,12 @@ class _FakeExtractor(BaseArchiveImporter):
         if self.action == "cancelled":
             raise OperationCancelledError("fake extraction cancelled")
         (staging / "Store" / "Inbox").mkdir(parents=True)
-        (staging / "Store" / "Inbox" / "1.eml").write_bytes(b"Subject: test\n\nbody\n")
+        content = (
+            b"Subject: test\nContent-Transfer-Encoding: base64\n\nnot-base64\n"
+            if self.action == "malformed"
+            else b"Subject: test\n\nbody\n"
+        )
+        (staging / "Store" / "Inbox" / "1.eml").write_bytes(content)
         if self.before_progress is not None:
             self.before_progress()
         on_progress(1)
@@ -217,6 +224,173 @@ def test_run_stage_a_does_not_write_or_delete_after_detach(tmp_path: Path) -> No
     stage_root = tmp_path / "tmp" / "pstimp" / "12345678"
     assert stage_root.exists()
     assert repository.imports[import_id]["status"] == "extracting"
+
+
+def test_run_stage_b_saves_messages_in_batches_and_removes_staging(tmp_path: Path) -> None:
+    source, repository, import_uuid, import_id = _stage_a_import(tmp_path)
+    with PstManifestWriter(tmp_path, import_uuid) as manifest:
+        stage_a = run_stage_a(
+            repository,
+            manifest,
+            _FakeExtractor(),
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id="pst-account",
+            source=source,
+            storage_root=tmp_path,
+            source_snapshot=snapshot_source_file(source),
+            readpst_version="0.6.76",
+            options=ImportOptions("Archive", "cp932"),
+        )
+
+    with PstManifestWriter(tmp_path, import_uuid) as manifest:
+        result = run_stage_b(
+            repository,
+            manifest,
+            EmlStorage(tmp_path),
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id="pst-account",
+            staging_root=stage_a.staging_root,
+            batch_size=1,
+        )
+
+    assert result.status == "completed"
+    assert result.ingested_count == 1
+    assert not stage_a.staging_root.exists()
+    item = repository.items[(import_id, "Store/Inbox/1.eml")]
+    assert item["status"] == "saved"
+    assert repository.messages[1]["remote_state"] == "no_remote"
+    assert repository.messages[1]["date_sent"] is None
+    events = list(PstManifestReader(tmp_path, import_uuid).read_all_events())
+    assert [event["event"] for event in events][-1] == "item_saved"
+
+
+def test_run_stage_b_reuses_durable_saved_event_on_resume(tmp_path: Path) -> None:
+    source, repository, import_uuid, import_id = _stage_a_import(tmp_path)
+    with PstManifestWriter(tmp_path, import_uuid) as manifest:
+        stage_a = run_stage_a(
+            repository,
+            manifest,
+            _FakeExtractor(),
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id="pst-account",
+            source=source,
+            storage_root=tmp_path,
+            source_snapshot=snapshot_source_file(source),
+            readpst_version="0.6.76",
+            options=ImportOptions("Archive", "cp932"),
+        )
+        stored = EmlStorage(tmp_path).save_from_file(
+            "pst-account", None, stage_a.staging_root / "Store/Inbox/1.eml"
+        )
+        manifest.append(
+            {
+                "event": "item_saved",
+                "import_uuid": import_uuid,
+                "timestamp": "2025-01-01T00:00:00+00:00",
+                "source_item_key": "Store/Inbox/1.eml",
+                "final_relative_path": stored.relative_path,
+                "file_hash": stored.file_hash,
+                "size_bytes": stored.size_bytes,
+            }
+        )
+        manifest.flush_and_sync()
+
+    with PstManifestWriter(tmp_path, import_uuid) as manifest:
+        result = run_stage_b(
+            repository,
+            manifest,
+            EmlStorage(tmp_path),
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id="pst-account",
+            staging_root=stage_a.staging_root,
+        )
+
+    assert result.status == "completed"
+    saved_events = [
+        event
+        for event in PstManifestReader(tmp_path, import_uuid).read_all_events()
+        if event["event"] == "item_saved"
+    ]
+    assert len(saved_events) == 1
+
+
+def test_run_stage_b_cancellation_keeps_resumable_staging(tmp_path: Path) -> None:
+    source, repository, import_uuid, import_id = _stage_a_import(tmp_path)
+    with PstManifestWriter(tmp_path, import_uuid) as manifest:
+        stage_a = run_stage_a(
+            repository,
+            manifest,
+            _FakeExtractor(),
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id="pst-account",
+            source=source,
+            storage_root=tmp_path,
+            source_snapshot=snapshot_source_file(source),
+            readpst_version="0.6.76",
+            options=ImportOptions("Archive", "cp932"),
+        )
+
+    token = CancelToken()
+    token.cancel()
+    with PstManifestWriter(tmp_path, import_uuid) as manifest, pytest.raises(
+        OperationCancelledError
+    ):
+        run_stage_b(
+            repository,
+            manifest,
+            EmlStorage(tmp_path),
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id="pst-account",
+            staging_root=stage_a.staging_root,
+            cancel=token,
+        )
+
+    assert repository.imports[import_id]["status"] == "cancelled_resumable"
+    assert stage_a.staging_root.exists()
+
+
+def test_run_stage_b_keeps_parse_failures_as_completed_with_errors(tmp_path: Path) -> None:
+    source, repository, import_uuid, import_id = _stage_a_import(tmp_path)
+    with PstManifestWriter(tmp_path, import_uuid) as manifest:
+        stage_a = run_stage_a(
+            repository,
+            manifest,
+            _FakeExtractor("malformed"),
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id="pst-account",
+            source=source,
+            storage_root=tmp_path,
+            source_snapshot=snapshot_source_file(source),
+            readpst_version="0.6.76",
+            options=ImportOptions("Archive", "cp932"),
+        )
+
+    with PstManifestWriter(tmp_path, import_uuid) as manifest:
+        result = run_stage_b(
+            repository,
+            manifest,
+            EmlStorage(tmp_path),
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id="pst-account",
+            staging_root=stage_a.staging_root,
+        )
+
+    assert result.status == "completed_with_errors"
+    assert result.failed_count == 1
+    assert repository.items[(import_id, "Store/Inbox/1.eml")]["error_class"] == "parse"
+    assert not stage_a.staging_root.exists()
+    assert any(
+        event["event"] == "item_parse_failed"
+        for event in PstManifestReader(tmp_path, import_uuid).read_all_events()
+    )
 
 
 def test_snapshot_hashes_in_chunks_and_validate_detects_source_change(tmp_path: Path) -> None:

@@ -260,13 +260,13 @@
 
 #### **D-3. 項目確定とStage B（取込）**
 
-- [ ] staging全走査で各項目の `source_item_key`・相対パス・フォルダ対応・サイズ・ハッシュを固定し、`pst_import_items` と `item_discovered` イベントへ書き込んでfsyncする。`folder_relative_path` は**実際にディスク上に存在する名前**を記録し、正規化や元名の推測を行わない（P-10～P-12）
-- [ ] 通常ファイル以外、symlink、junction/reparse point、`Path(p).resolve()` がstagingルート外の項目はスキップし、警告ログを残す
-- [ ] `total_files` とインベントリハッシュを確定し、`import_ready` をfsyncした後に `stageA_done.json` を原子的に配置して `status='ready_to_ingest'` とする
-- [ ] Stage Bで未完了項目のみを対象とし、1通ごとのコミットを禁止してバッチ単位（100〜500件ごと、または一定時間・一定サイズごと）で処理する。各項目を `EmlStorage.save_from_file()` によるストリーミングで保存 → `items.jsonl` イベント追記 → バッチ単位で `flush_and_sync()` → 同一トランザクションで `messages` / `message_contents` / 項目状態・集計値をcommitする。失敗時はrollbackし、マニフェストから未完了バッチを再適用する
-- [ ] `Date` 未解釈は `internal_date=NULL` / `unknown/` へ、100MB超は `oversize` 記録＋本文解析スキップとする
-- [ ] キャンセル・アプリ終了時は `cancelled_resumable` とし、staging・項目マニフェストを保持する
-- [ ] 全項目成功で `completed`（staging削除）、解析失敗のみ残存で `completed_with_errors`（staging削除）、未保存項目残存で `failed_resumable`（staging保持）とする
+- [x] staging全走査で各項目の `source_item_key`・相対パス・フォルダ対応・サイズ・ハッシュを固定し、`pst_import_items` と `item_discovered` イベントへ書き込んでfsyncする。`folder_relative_path` は**実際にディスク上に存在する名前**を記録し、正規化や元名の推測を行わない（P-10～P-12）
+- [x] 通常ファイル以外、symlink、junction/reparse point、`Path(p).resolve()` がstagingルート外の項目はスキップし、警告ログを残す
+- [x] `total_files` とインベントリハッシュを確定し、`import_ready` をfsyncした後に `stageA_done.json` を原子的に配置して `status='ready_to_ingest'` とする
+- [x] Stage Bで未完了項目のみを対象とし、1通ごとのコミットを禁止してバッチ単位（100〜500件ごと、または一定時間・一定サイズごと）で処理する。各項目を `EmlStorage.save_from_file()` によるストリーミングで保存 → `items.jsonl` イベント追記 → バッチ単位で `flush_and_sync()` → 同一トランザクションで `messages` / `message_contents` / 項目状態・集計値をcommitする。失敗時はrollbackし、マニフェストから未完了バッチを再適用する
+- [x] `Date` 未解釈は `internal_date=NULL` / `unknown/` へ、100MB超は `oversize` 記録＋本文解析スキップとする
+- [x] キャンセル・アプリ終了時は `cancelled_resumable` とし、staging・項目マニフェストを保持する
+- [x] 全項目成功で `completed`（staging削除）、解析失敗のみ残存で `completed_with_errors`（staging削除）、未保存項目残存で `failed_resumable`（staging保持）とする
 
 #### **D-4. 世代交代**
 

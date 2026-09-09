@@ -201,6 +201,9 @@ class BasePstImportRepository(ABC):
     """Repository port for PST import jobs and their staged items."""
 
     @abstractmethod
+    def upsert_folder(self, folder: MessageRecord) -> Any: ...
+
+    @abstractmethod
     def create_import(self, record: MessageRecord) -> int: ...
 
     @abstractmethod

@@ -9,10 +9,12 @@ import os
 import shutil
 import stat
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from email import policy
+from email.parser import BytesHeaderParser
 from enum import StrEnum
 from pathlib import Path
 from typing import Protocol, cast
@@ -26,13 +28,22 @@ from mail_dock.domain.errors import (
 )
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.importer import ExtractResult, ImportOptions
-from mail_dock.domain.ports import BasePstManifestWriter, JSONValue
-from mail_dock.domain.repository import BasePstImportRepository, MessageRecord
+from mail_dock.domain.messages import ParsedMessage
+from mail_dock.domain.ports import BaseEmlStorage, BasePstManifestWriter, JSONValue
+from mail_dock.domain.repository import (
+    BasePstImportRepository,
+    MessageContents,
+    MessageRecord,
+)
+from mail_dock.infrastructure.parsing.eml_parser import parse_eml
+from mail_dock.infrastructure.parsing.headers import parse_date_header, to_utc_iso8601
 
 _HASH_LENGTH = hashlib.sha256().digest_size * 2
 _CHUNK_SIZE = 1024 * 1024
 _STAGE_SCHEMA_VERSION = 1
 _STAGE_MARKER_NAME = "stageA_done.json"
+_MAX_PARSE_SIZE = 100 * 1024 * 1024
+_DATE_HEADER_LIMIT = 64 * 1024
 _REPARSE_POINT = 0x400
 _COMPLETE_STATUSES = frozenset({"completed", "completed_with_errors"})
 _INCOMPLETE_STATUSES = frozenset(
@@ -77,6 +88,17 @@ class StageAResult:
     total_files: int
     inventory_sha256: str
     static_manifest_sha256: str
+
+
+@dataclass(frozen=True)
+class StageBResult:
+    """Outcome of one resumable PST ingestion run."""
+
+    status: str
+    processed_count: int
+    ingested_count: int
+    failed_count: int
+    remaining_count: int
 
 
 def _canonical_json(payload: object) -> bytes:
@@ -527,6 +549,303 @@ def run_stage_a(
         raise
 
 
+def _stage_item_path(staging_root: Path, relative_path: str) -> Path:
+    candidate = (staging_root / Path(relative_path)).resolve()
+    try:
+        candidate.relative_to(staging_root.resolve())
+    except ValueError as error:
+        raise UnreadableArchive(f"PST staging item escapes its root: {relative_path}") from error
+    if not candidate.is_file():
+        raise UnreadableArchive(f"PST staging item is missing: {relative_path}")
+    return candidate
+
+
+def _message_contents(parsed: ParsedMessage) -> MessageContents:
+    return {
+        "subject_norm": parsed.subject,
+        "sender_norm": parsed.sender,
+        "body_text": parsed.body_text,
+        "attachment_names": "\n".join(
+            attachment.filename
+            for attachment in parsed.attachments
+            if attachment.filename is not None and not attachment.is_inline
+        ),
+    }
+
+
+def _bounded_date(source_path: Path) -> datetime | None:
+    try:
+        with source_path.open("rb") as source_file:
+            prefix = source_file.read(_DATE_HEADER_LIMIT)
+    except OSError as error:
+        raise UnreadableArchive(f"Could not read PST staging item: {source_path}") from error
+    if b"\n\n" not in prefix and b"\r\n\r\n" not in prefix:
+        return None
+    header = BytesHeaderParser(policy=policy.default).parsebytes(prefix)
+    return parse_date_header(header.get("Date"), None)
+
+
+def _stage_b_message(
+    item: MessageRecord,
+    account_id: str,
+    folder_id: object,
+    stored_path: str,
+    file_hash: str,
+    size_bytes: int,
+    parsed: ParsedMessage,
+) -> tuple[dict[str, object], MessageContents | None]:
+    message = {
+        "account_id": account_id,
+        "folder_id": folder_id,
+        "message_id": parsed.message_id,
+        "content_key": parsed.content_key or f"sha256:{file_hash[:32]}",
+        "source_item_key": item["source_item_key"],
+        "remote_state": "no_remote",
+        "local_state": "active",
+        "relative_path": stored_path,
+        "file_hash": file_hash,
+        "subject": parsed.subject,
+        "sender": parsed.sender,
+        "recipient": parsed.recipient,
+        "cc": parsed.cc,
+        "date_sent": to_utc_iso8601(parsed.date_sent) if parsed.date_sent else None,
+        "size_bytes": size_bytes,
+        "has_attachment": int(parsed.has_attachment),
+        "in_reply_to": parsed.in_reply_to,
+        "references_ids": parsed.references_ids,
+        "thread_key": parsed.thread_key,
+    }
+    contents = None if parsed.parse_error is not None else _message_contents(parsed)
+    return message, contents
+
+
+def _event_by_item(
+    events: Sequence[Mapping[str, JSONValue]], event_name: str
+) -> dict[str, Mapping[str, JSONValue]]:
+    return {
+        str(event["source_item_key"]): event
+        for event in events
+        if event.get("event") == event_name and isinstance(event.get("source_item_key"), str)
+    }
+
+
+def run_stage_b(
+    repository: BasePstImportRepository,
+    manifest: BasePstManifestWriter,
+    storage: BaseEmlStorage,
+    *,
+    import_id: int,
+    import_uuid: str,
+    account_id: str,
+    staging_root: Path,
+    batch_size: int = 100,
+    cancel: CancelToken | None = None,
+    storage_state: StorageWriteGate | None = None,
+) -> StageBResult:
+    """Ingest staged EML files in durable, resumable database batches."""
+
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    token = cancel or CancelToken()
+    root = Path(staging_root).expanduser().resolve()
+    marker = read_stage_a_marker(_stage_marker_path(root))
+    if marker["import_uuid"] != import_uuid:
+        raise UnreadableArchive("Stage A marker import_uuid does not match the import")
+    items = list(repository.list_incomplete_items(import_id))
+    saved_events = _event_by_item(manifest.read_events(), "item_saved")
+    parse_failed_events = _event_by_item(manifest.read_events(), "item_parse_failed")
+    oversize_events = _event_by_item(manifest.read_events(), "item_oversize")
+    processed_count = 0
+
+    _ensure_write_allowed(storage_state)
+    repository.update_import_status(import_id, "ingesting", staging_path=str(root))
+    try:
+        for offset in range(0, len(items), batch_size):
+            token.raise_if_cancelled()
+            batch = items[offset : offset + batch_size]
+            prepared: list[
+                tuple[dict[str, object], dict[str, object], MessageContents | None, str]
+            ] = []
+            for item in batch:
+                token.raise_if_cancelled()
+                source_key = str(item["source_item_key"])
+                source_path = _stage_item_path(root, str(item["source_relative_path"]))
+                source_size = int(item.get("source_size_bytes") or source_path.stat().st_size)
+                oversize = source_size > _MAX_PARSE_SIZE
+                parsed = ParsedMessage() if oversize else parse_eml(source_path.read_bytes(), None)
+                if not oversize:
+                    parsed = replace(parsed, date_sent=_bounded_date(source_path))
+                saved_event = saved_events.get(source_key)
+                if saved_event is None:
+                    _ensure_write_allowed(storage_state)
+                    stored = storage.save_from_file(account_id, parsed.date_sent, source_path)
+                    if stored.file_hash != str(item["source_sha256"]):
+                        raise UnreadableArchive(f"PST staging hash changed: {source_key}")
+                    stored_path = stored.relative_path
+                    stored_hash = stored.file_hash
+                    stored_size = stored.size_bytes
+                    saved_event = {
+                        "event": "item_saved",
+                        "import_uuid": import_uuid,
+                        "timestamp": _timestamp(),
+                        "source_item_key": source_key,
+                        "final_relative_path": stored_path,
+                        "file_hash": stored_hash,
+                        "size_bytes": stored_size,
+                    }
+                    _ensure_write_allowed(storage_state)
+                    manifest.append(saved_event)
+                    saved_events[source_key] = saved_event
+                else:
+                    stored_path = str(saved_event["final_relative_path"])
+                    stored_hash = str(saved_event["file_hash"])
+                    stored_size_value = saved_event["size_bytes"]
+                    if not isinstance(stored_size_value, int) or isinstance(
+                        stored_size_value, bool
+                    ):
+                        raise UnreadableArchive(f"PST saved event size is invalid: {source_key}")
+                    stored_size = stored_size_value
+
+                parse_failed = not oversize and parsed.parse_error is not None
+                if parse_failed and source_key not in parse_failed_events:
+                    parse_event: dict[str, JSONValue] = {
+                        "event": "item_parse_failed",
+                        "import_uuid": import_uuid,
+                        "timestamp": _timestamp(),
+                        "source_item_key": source_key,
+                        "error_class": "parse",
+                        "error_message": parsed.parse_error or "message parsing failed",
+                    }
+                    _ensure_write_allowed(storage_state)
+                    manifest.append(parse_event)
+                    parse_failed_events[source_key] = parse_event
+                if oversize and source_key not in oversize_events:
+                    oversize_event: dict[str, JSONValue] = {
+                        "event": "item_oversize",
+                        "import_uuid": import_uuid,
+                        "timestamp": _timestamp(),
+                        "source_item_key": source_key,
+                        "error_class": "oversize",
+                        "error_message": "EML exceeds the 100 MiB parse limit",
+                        "source_size_bytes": source_size,
+                    }
+                    _ensure_write_allowed(storage_state)
+                    manifest.append(oversize_event)
+                    oversize_events[source_key] = oversize_event
+
+                folder_name = str(item.get("folder_relative_path") or ".")
+                message, contents = _stage_b_message(
+                    item,
+                    account_id,
+                    0,
+                    stored_path,
+                    stored_hash,
+                    stored_size,
+                    parsed,
+                )
+                item_update: dict[str, object] = {
+                    **dict(item),
+                    "status": "saved",
+                    "final_relative_path": stored_path,
+                    "message_row_id": None,
+                    "error_class": "oversize" if oversize else "parse" if parse_failed else None,
+                    "error_message": (
+                        "EML exceeds the 100 MiB parse limit"
+                        if oversize
+                        else parsed.parse_error if parse_failed else None
+                    ),
+                    "attempt_count": int(item.get("attempt_count") or 0) + 1,
+                }
+                prepared.append((item_update, message, contents, folder_name))
+
+            _ensure_write_allowed(storage_state)
+            manifest.flush_and_sync()
+            repository.begin_batch()
+            try:
+                for item_update, message, contents, folder_name in prepared:
+                    folder_id = repository.upsert_folder(
+                        {
+                            "account_id": account_id,
+                            "raw_name": folder_name,
+                            "display_name": (
+                                Path(folder_name).name if folder_name != "." else "."
+                            ),
+                        }
+                    )
+                    message["folder_id"] = folder_id
+                    message_id = repository.add_message(message, contents)
+                    item_update["message_row_id"] = message_id
+                    repository.upsert_import_item(item_update)
+                batch_items = list(repository.list_items(import_id))
+                batch_ingested = sum(
+                    1
+                    for item in batch_items
+                    if item.get("status") in {"saved", "completed"}
+                )
+                batch_failed = sum(
+                    1
+                    for item in batch_items
+                    if item.get("error_class") in {"parse", "oversize"}
+                )
+                repository.update_import_status(
+                    import_id,
+                    "ingesting",
+                    total_files=len(batch_items),
+                    ingested_count=batch_ingested,
+                    failed_count=batch_failed,
+                    staging_path=str(root),
+                    finished_at=None,
+                )
+                repository.commit_batch()
+            except Exception:
+                repository.rollback_batch()
+                raise
+            processed_count += len(batch)
+
+        all_items = list(repository.list_items(import_id))
+        ingested_count = sum(
+            1 for item in all_items if item.get("status") in {"saved", "completed"}
+        )
+        failed_count = sum(
+            1 for item in all_items if item.get("error_class") in {"parse", "oversize"}
+        )
+        remaining_count = len(all_items) - ingested_count
+        final_status = (
+            "failed_resumable"
+            if remaining_count
+            else "completed_with_errors" if failed_count else "completed"
+        )
+        _ensure_write_allowed(storage_state)
+        repository.update_import_status(
+            import_id,
+            final_status,
+            total_files=len(all_items),
+            ingested_count=ingested_count,
+            failed_count=failed_count,
+            staging_path=str(root) if remaining_count else None,
+            finished_at=_timestamp() if not remaining_count else None,
+        )
+        if not remaining_count:
+            _remove_staging(root, storage_state)
+        return StageBResult(
+            final_status, processed_count, ingested_count, failed_count, remaining_count
+        )
+    except OperationCancelledError:
+        _ensure_write_allowed(storage_state)
+        repository.update_import_status(
+            import_id, "cancelled_resumable", staging_path=str(root), finished_at=None
+        )
+        raise
+    except StorageDetachedError:
+        raise
+    except Exception as error:
+        _ensure_write_allowed(storage_state)
+        repository.update_import_status(
+            import_id, "failed_resumable", staging_path=str(root), error_message=str(error)
+        )
+        raise
+
+
 @dataclass(frozen=True)
 class SourceFileSnapshot:
     """Immutable identity captured for a PST before extraction begins."""
@@ -763,8 +1082,10 @@ __all__ = [
     "ImportJobDecision",
     "ImportJobResolution",
     "SourceFileSnapshot",
+    "StageBResult",
     "check_import_capacity",
     "resolve_import_job",
+    "run_stage_b",
     "snapshot_source_file",
     "validate_source_snapshot",
 ]
