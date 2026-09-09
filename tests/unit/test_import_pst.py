@@ -16,6 +16,7 @@ from mail_dock.domain.errors import (
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.importer import ArchiveInfo, BaseArchiveImporter, ExtractResult, ImportOptions
 from mail_dock.infrastructure.storage.eml_storage import EmlStorage
+from mail_dock.infrastructure.storage.pst_import_storage import PstImportStorage
 from mail_dock.infrastructure.storage.pst_manifest import (
     PstManifestReader,
     PstManifestWriter,
@@ -32,6 +33,8 @@ from mail_dock.usecases.import_pst import (
     validate_source_snapshot,
 )
 from tests.support.in_memory_repository import InMemoryPstImportRepository
+
+PST_STORAGE = PstImportStorage()
 
 
 def _record(
@@ -115,7 +118,7 @@ def _stage_a_import(tmp_path: Path) -> tuple[Path, InMemoryPstImportRepository, 
 
 def test_run_stage_a_publishes_inventory_and_atomic_marker(tmp_path: Path) -> None:
     source, repository, import_uuid, import_id = _stage_a_import(tmp_path)
-    snapshot = snapshot_source_file(source)
+    snapshot = snapshot_source_file(source, pst_storage=PST_STORAGE, chunk_size=3)
     options = ImportOptions("Archive", "cp932")
     with PstManifestWriter(tmp_path, import_uuid) as manifest:
         result = run_stage_a(
@@ -130,11 +133,12 @@ def test_run_stage_a_publishes_inventory_and_atomic_marker(tmp_path: Path) -> No
             source_snapshot=snapshot,
             readpst_version="0.6.76",
             options=options,
+            pst_storage=PST_STORAGE,
         )
 
     assert result.staging_root == tmp_path / "tmp" / "pstimp" / "12345678"
-    assert result.marker_path.is_file()
-    marker = read_stage_a_marker(result.marker_path)
+    assert Path(result.marker_path).is_file()
+    marker = read_stage_a_marker(result.marker_path, PST_STORAGE)
     assert marker["total_files"] == 1
     assert marker["inventory_sha256"] == result.inventory_sha256
     assert repository.imports[import_id]["status"] == "ready_to_ingest"
@@ -164,9 +168,10 @@ def test_run_stage_a_failure_marks_abandoned_and_discards_staging(tmp_path: Path
                 account_id="pst_account",
                 source=source,
                 storage_root=tmp_path,
-                source_snapshot=snapshot_source_file(source),
+                source_snapshot=snapshot_source_file(source, pst_storage=PST_STORAGE),
                 readpst_version="0.6.76",
                 options=ImportOptions("Archive", "cp932"),
+                pst_storage=PST_STORAGE,
             )
 
     stage_root = tmp_path / "tmp" / "pstimp" / "12345678"
@@ -190,9 +195,10 @@ def test_run_stage_a_cancellation_marks_abandoned_and_discards_staging(tmp_path:
             account_id="pst_account",
             source=source,
             storage_root=tmp_path,
-            source_snapshot=snapshot_source_file(source),
+            source_snapshot=snapshot_source_file(source, pst_storage=PST_STORAGE),
             readpst_version="0.6.76",
             options=ImportOptions("Archive", "cp932"),
+            pst_storage=PST_STORAGE,
         )
 
     assert not (tmp_path / "tmp" / "pstimp" / "12345678").exists()
@@ -214,11 +220,12 @@ def test_run_stage_a_does_not_write_or_delete_after_detach(tmp_path: Path) -> No
                 account_id="pst_account",
                 source=source,
                 storage_root=tmp_path,
-                source_snapshot=snapshot_source_file(source),
+                source_snapshot=snapshot_source_file(source, pst_storage=PST_STORAGE),
                 readpst_version="0.6.76",
                 options=ImportOptions("Archive", "cp932"),
                 storage_state=gate,
                 on_progress=lambda _count: None,
+                pst_storage=PST_STORAGE,
             )
 
     stage_root = tmp_path / "tmp" / "pstimp" / "12345678"
@@ -238,9 +245,10 @@ def test_run_stage_b_saves_messages_in_batches_and_removes_staging(tmp_path: Pat
             account_id="pst-account",
             source=source,
             storage_root=tmp_path,
-            source_snapshot=snapshot_source_file(source),
+            source_snapshot=snapshot_source_file(source, pst_storage=PST_STORAGE),
             readpst_version="0.6.76",
             options=ImportOptions("Archive", "cp932"),
+            pst_storage=PST_STORAGE,
         )
 
     with PstManifestWriter(tmp_path, import_uuid) as manifest:
@@ -253,11 +261,12 @@ def test_run_stage_b_saves_messages_in_batches_and_removes_staging(tmp_path: Pat
             account_id="pst-account",
             staging_root=stage_a.staging_root,
             batch_size=1,
+            pst_storage=PST_STORAGE,
         )
 
     assert result.status == "completed"
     assert result.ingested_count == 1
-    assert not stage_a.staging_root.exists()
+    assert not Path(stage_a.staging_root).exists()
     item = repository.items[(import_id, "Store/Inbox/1.eml")]
     assert item["status"] == "saved"
     assert repository.messages[1]["remote_state"] == "no_remote"
@@ -278,12 +287,13 @@ def test_run_stage_b_reuses_durable_saved_event_on_resume(tmp_path: Path) -> Non
             account_id="pst-account",
             source=source,
             storage_root=tmp_path,
-            source_snapshot=snapshot_source_file(source),
+            source_snapshot=snapshot_source_file(source, pst_storage=PST_STORAGE),
             readpst_version="0.6.76",
             options=ImportOptions("Archive", "cp932"),
+            pst_storage=PST_STORAGE,
         )
         stored = EmlStorage(tmp_path).save_from_file(
-            "pst-account", None, stage_a.staging_root / "Store/Inbox/1.eml"
+            "pst-account", None, Path(stage_a.staging_root) / "Store/Inbox/1.eml"
         )
         manifest.append(
             {
@@ -307,6 +317,7 @@ def test_run_stage_b_reuses_durable_saved_event_on_resume(tmp_path: Path) -> Non
             import_uuid=import_uuid,
             account_id="pst-account",
             staging_root=stage_a.staging_root,
+            pst_storage=PST_STORAGE,
         )
 
     assert result.status == "completed"
@@ -330,9 +341,10 @@ def test_run_stage_b_cancellation_keeps_resumable_staging(tmp_path: Path) -> Non
             account_id="pst-account",
             source=source,
             storage_root=tmp_path,
-            source_snapshot=snapshot_source_file(source),
+            source_snapshot=snapshot_source_file(source, pst_storage=PST_STORAGE),
             readpst_version="0.6.76",
             options=ImportOptions("Archive", "cp932"),
+            pst_storage=PST_STORAGE,
         )
 
     token = CancelToken()
@@ -349,10 +361,11 @@ def test_run_stage_b_cancellation_keeps_resumable_staging(tmp_path: Path) -> Non
             account_id="pst-account",
             staging_root=stage_a.staging_root,
             cancel=token,
+            pst_storage=PST_STORAGE,
         )
 
     assert repository.imports[import_id]["status"] == "cancelled_resumable"
-    assert stage_a.staging_root.exists()
+    assert Path(stage_a.staging_root).exists()
 
 
 def test_run_stage_b_keeps_parse_failures_as_completed_with_errors(tmp_path: Path) -> None:
@@ -367,9 +380,10 @@ def test_run_stage_b_keeps_parse_failures_as_completed_with_errors(tmp_path: Pat
             account_id="pst-account",
             source=source,
             storage_root=tmp_path,
-            source_snapshot=snapshot_source_file(source),
+            source_snapshot=snapshot_source_file(source, pst_storage=PST_STORAGE),
             readpst_version="0.6.76",
             options=ImportOptions("Archive", "cp932"),
+            pst_storage=PST_STORAGE,
         )
 
     with PstManifestWriter(tmp_path, import_uuid) as manifest:
@@ -381,12 +395,13 @@ def test_run_stage_b_keeps_parse_failures_as_completed_with_errors(tmp_path: Pat
             import_uuid=import_uuid,
             account_id="pst-account",
             staging_root=stage_a.staging_root,
+            pst_storage=PST_STORAGE,
         )
 
     assert result.status == "completed_with_errors"
     assert result.failed_count == 1
     assert repository.items[(import_id, "Store/Inbox/1.eml")]["error_class"] == "parse"
-    assert not stage_a.staging_root.exists()
+    assert not Path(stage_a.staging_root).exists()
     assert any(
         event["event"] == "item_parse_failed"
         for event in PstManifestReader(tmp_path, import_uuid).read_all_events()
@@ -397,16 +412,16 @@ def test_snapshot_hashes_in_chunks_and_validate_detects_source_change(tmp_path: 
     source = tmp_path / "archive.pst"
     source.write_bytes(b"pst-content")
 
-    snapshot = snapshot_source_file(source, chunk_size=3)
+    snapshot = snapshot_source_file(source, pst_storage=PST_STORAGE)
     assert snapshot.source_sha256 == hashlib.sha256(b"pst-content").hexdigest()
     assert snapshot.size_bytes == len(b"pst-content")
     assert snapshot.mtime_ns == source.stat().st_mtime_ns
     assert snapshot.file_identity is not None
-    assert validate_source_snapshot(source, snapshot) == snapshot
+    assert validate_source_snapshot(source, snapshot, pst_storage=PST_STORAGE) == snapshot
 
     source.write_bytes(b"changed-pst-content")
     with pytest.raises(SourceChangedError, match="changed"):
-        validate_source_snapshot(source, snapshot)
+        validate_source_snapshot(source, snapshot, pst_storage=PST_STORAGE)
 
 
 def test_snapshot_honors_cancellation(tmp_path: Path) -> None:
@@ -416,7 +431,7 @@ def test_snapshot_honors_cancellation(tmp_path: Path) -> None:
     token.cancel()
 
     with pytest.raises(OperationCancelledError):
-        snapshot_source_file(source, cancel=token)
+        snapshot_source_file(source, pst_storage=PST_STORAGE, cancel=token)
 
 
 def test_resolve_incomplete_import_requires_choice_then_resumes_or_discards() -> None:

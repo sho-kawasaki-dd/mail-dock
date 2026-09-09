@@ -4,19 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import os
-import shutil
-import stat
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from contextlib import suppress
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from email import policy
-from email.parser import BytesHeaderParser
 from enum import StrEnum
-from pathlib import Path
 from typing import Protocol, cast
 
 from mail_dock.domain.errors import (
@@ -27,24 +20,28 @@ from mail_dock.domain.errors import (
     UnreadableArchive,
 )
 from mail_dock.domain.fetcher import CancelToken
-from mail_dock.domain.importer import ExtractResult, ImportOptions
+from mail_dock.domain.importer import (
+    BaseArchiveImporter,
+    ExtractResult,
+    ImportOptions,
+    SourceFileSnapshot,
+)
 from mail_dock.domain.messages import ParsedMessage
-from mail_dock.domain.ports import BaseEmlStorage, BasePstManifestWriter, JSONValue
+from mail_dock.domain.ports import (
+    BaseEmlStorage,
+    BasePstImportStorage,
+    BasePstManifestWriter,
+    JSONValue,
+)
 from mail_dock.domain.repository import (
     BasePstImportRepository,
     MessageContents,
     MessageRecord,
 )
-from mail_dock.infrastructure.parsing.eml_parser import parse_eml
-from mail_dock.infrastructure.parsing.headers import parse_date_header, to_utc_iso8601
 
 _HASH_LENGTH = hashlib.sha256().digest_size * 2
-_CHUNK_SIZE = 1024 * 1024
 _STAGE_SCHEMA_VERSION = 1
-_STAGE_MARKER_NAME = "stageA_done.json"
 _MAX_PARSE_SIZE = 100 * 1024 * 1024
-_DATE_HEADER_LIMIT = 64 * 1024
-_REPARSE_POINT = 0x400
 _COMPLETE_STATUSES = frozenset({"completed", "completed_with_errors"})
 _INCOMPLETE_STATUSES = frozenset(
     {
@@ -56,35 +53,18 @@ _INCOMPLETE_STATUSES = frozenset(
     }
 )
 
-_LOGGER = logging.getLogger(__name__)
-
-
 class StorageWriteGate(Protocol):
     """Minimal storage-state contract used while a converter is running."""
 
     def is_write_allowed(self) -> bool: ...
 
 
-class StageAExtractor(Protocol):
-    """Extraction-only boundary implemented by the readpst runner."""
-
-    def extract(
-        self,
-        source: Path,
-        staging: Path,
-        options: ImportOptions,
-        *,
-        cancel: CancelToken,
-        on_progress: Callable[[int], None],
-    ) -> ExtractResult: ...
-
-
 @dataclass(frozen=True)
 class StageAResult:
     """Durable inventory produced after a successful readpst extraction."""
 
-    staging_root: Path
-    marker_path: Path
+    staging_root: os.PathLike[str]
+    marker_path: os.PathLike[str]
     total_files: int
     inventory_sha256: str
     static_manifest_sha256: str
@@ -115,20 +95,12 @@ def _content_hashed_snapshot(payload: dict[str, JSONValue]) -> dict[str, JSONVal
     return snapshot
 
 
-def _stage_marker_path(staging_root: Path) -> Path:
-    return staging_root / _STAGE_MARKER_NAME
-
-
-def read_stage_a_marker(marker_path: Path) -> dict[str, JSONValue]:
+def read_stage_a_marker(
+    marker_path: os.PathLike[str], pst_storage: BasePstImportStorage
+) -> dict[str, JSONValue]:
     """Read and validate a Stage A completion marker."""
 
-    try:
-        with marker_path.open("rb") as marker_file:
-            payload = json.load(marker_file)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise UnreadableArchive(f"Stage A marker cannot be read: {marker_path}") from error
-    if not isinstance(payload, dict):
-        raise UnreadableArchive("Stage A marker must contain a JSON object")
+    payload = dict(pst_storage.read_marker(marker_path))
     required = {
         "schema_version",
         "import_uuid",
@@ -153,8 +125,12 @@ def read_stage_a_marker(marker_path: Path) -> dict[str, JSONValue]:
         raise UnreadableArchive("Stage A marker import_uuid is not a version 4 UUID")
     if not isinstance(payload["staging_relative_path"], str):
         raise UnreadableArchive("Stage A marker staging path is invalid")
-    staging_path = Path(payload["staging_relative_path"])
-    if staging_path.is_absolute() or ".." in staging_path.parts:
+    staging_path = payload["staging_relative_path"].replace("\\", "/")
+    if (
+        staging_path.startswith(("/", "\\"))
+        or (len(staging_path) > 1 and staging_path[1] == ":")
+        or ".." in staging_path.split("/")
+    ):
         raise UnreadableArchive("Stage A marker staging path must stay below storage root")
     total_files = payload["total_files"]
     if not isinstance(total_files, int) or isinstance(total_files, bool) or total_files < 0:
@@ -168,139 +144,6 @@ def read_stage_a_marker(marker_path: Path) -> dict[str, JSONValue]:
     if not isinstance(payload["created_at"], str):
         raise UnreadableArchive("Stage A marker created_at is invalid")
     return payload
-
-
-def _write_stage_a_marker(
-    marker_path: Path,
-    *,
-    import_uuid: str,
-    staging_relative_path: str,
-    total_files: int,
-    inventory_sha256: str,
-    static_manifest_sha256: str,
-) -> None:
-    payload: dict[str, JSONValue] = {
-        "schema_version": _STAGE_SCHEMA_VERSION,
-        "import_uuid": import_uuid,
-        "staging_relative_path": staging_relative_path,
-        "total_files": total_files,
-        "inventory_sha256": inventory_sha256,
-        "static_manifest_sha256": static_manifest_sha256,
-        "created_at": datetime.now(UTC).isoformat(),
-    }
-    encoded = _canonical_json(payload) + b"\n"
-    temporary_path = marker_path.with_name(f".{marker_path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        with temporary_path.open("wb") as marker_file:
-            marker_file.write(encoded)
-            marker_file.flush()
-            os.fsync(marker_file.fileno())
-        temporary_path.replace(marker_path)
-        if os.name != "nt":
-            directory_fd = os.open(marker_path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
-    except OSError as error:
-        raise StorageDetachedError(f"Could not persist Stage A marker: {marker_path}") from error
-    finally:
-        with suppress(OSError):
-            temporary_path.unlink(missing_ok=True)
-
-
-def _is_reparse_point(metadata: os.stat_result) -> bool:
-    return bool(getattr(metadata, "st_file_attributes", 0) & _REPARSE_POINT)
-
-
-def _hash_file(path: Path) -> tuple[int, str]:
-    digest = hashlib.sha256()
-    try:
-        with path.open("rb") as source_file:
-            before = os.fstat(source_file.fileno())
-            if not stat.S_ISREG(before.st_mode):
-                raise UnreadableArchive(f"Staging item is not a regular file: {path}")
-            size = 0
-            for chunk in iter(lambda: source_file.read(_CHUNK_SIZE), b""):
-                digest.update(chunk)
-                size += len(chunk)
-            after = os.fstat(source_file.fileno())
-    except UnreadableArchive:
-        raise
-    except OSError as error:
-        raise UnreadableArchive(f"Could not inspect staging item: {path}") from error
-    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
-        raise UnreadableArchive(f"Staging item changed while it was scanned: {path}")
-    return size, digest.hexdigest()
-
-
-def _scan_staging(
-    staging_root: Path,
-) -> tuple[list[dict[str, JSONValue]], list[dict[str, JSONValue]]]:
-    """Build deterministic item and folder inventories without following links."""
-
-    try:
-        root = staging_root.resolve(strict=True)
-    except OSError as error:
-        raise UnreadableArchive(f"Staging directory cannot be inspected: {staging_root}") from error
-    if not root.is_dir():
-        raise UnreadableArchive(f"Staging path is not a directory: {staging_root}")
-
-    items: list[dict[str, JSONValue]] = []
-    folders: set[str] = set()
-    pending = [root]
-    while pending:
-        current = pending.pop()
-        try:
-            entries = sorted(os.scandir(current), key=lambda entry: entry.name)
-        except OSError as error:
-            raise UnreadableArchive(f"Could not inspect staging directory: {current}") from error
-        for entry in entries:
-            candidate = Path(entry.path)
-            try:
-                metadata = entry.stat(follow_symlinks=False)
-            except OSError as error:
-                _LOGGER.warning("Skipping unreadable PST staging item %s: %s", candidate, error)
-                continue
-            if entry.is_symlink() or _is_reparse_point(metadata):
-                _LOGGER.warning("Skipping link or reparse point in PST staging: %s", candidate)
-                continue
-            try:
-                resolved = candidate.resolve(strict=False)
-                resolved.relative_to(root)
-            except (OSError, ValueError):
-                _LOGGER.warning("Skipping PST staging item outside staging root: %s", candidate)
-                continue
-            if metadata.st_mode and stat.S_ISDIR(metadata.st_mode):
-                pending.append(candidate)
-                continue
-            if not stat.S_ISREG(metadata.st_mode):
-                _LOGGER.warning("Skipping non-regular PST staging item: %s", candidate)
-                continue
-            relative_path = candidate.relative_to(root).as_posix()
-            folder_relative_path = candidate.parent.relative_to(root).as_posix() or "."
-            size_bytes, file_hash = _hash_file(candidate)
-            items.append(
-                {
-                    "source_item_key": relative_path,
-                    "source_relative_path": relative_path,
-                    "folder_relative_path": folder_relative_path,
-                    "source_size_bytes": size_bytes,
-                    "source_sha256": file_hash,
-                }
-            )
-            folder_path = candidate.parent
-            while folder_path != root:
-                folders.add(folder_path.relative_to(root).as_posix())
-                folder_path = folder_path.parent
-
-    items.sort(key=lambda item: str(item["source_item_key"]))
-    folder_records: list[dict[str, JSONValue]] = []
-    for folder_name in sorted(folders):
-        folder_records.append(
-            {"raw_name": folder_name, "display_name": Path(folder_name).name}
-        )
-    return items, folder_records
 
 
 def _inventory_hash(items: list[dict[str, JSONValue]]) -> str:
@@ -327,14 +170,13 @@ def _ensure_write_allowed(storage_state: StorageWriteGate | None) -> None:
         raise StorageDetachedError("PST import requires attached storage")
 
 
-def _remove_staging(staging_root: Path, storage_state: StorageWriteGate | None) -> None:
+def _remove_staging(
+    pst_storage: BasePstImportStorage,
+    staging_root: os.PathLike[str],
+    storage_state: StorageWriteGate | None,
+) -> None:
     _ensure_write_allowed(storage_state)
-    try:
-        shutil.rmtree(staging_root, ignore_errors=False)
-    except FileNotFoundError:
-        return
-    except OSError as error:
-        raise StorageDetachedError(f"Could not discard PST staging: {staging_root}") from error
+    pst_storage.remove_staging(staging_root)
 
 
 def _abandon_stage_a(
@@ -342,9 +184,10 @@ def _abandon_stage_a(
     manifest: BasePstManifestWriter,
     import_id: int,
     import_uuid: str,
-    staging_root: Path,
+    staging_root: os.PathLike[str],
     error: Exception,
     storage_state: StorageWriteGate | None,
+    pst_storage: BasePstImportStorage,
 ) -> None:
     _ensure_write_allowed(storage_state)
     reason = "cancelled" if isinstance(error, OperationCancelledError) else "failed"
@@ -364,25 +207,26 @@ def _abandon_stage_a(
         finished_at=_timestamp(),
         error_message=str(error),
     )
-    _remove_staging(staging_root, storage_state)
+    _remove_staging(pst_storage, staging_root, storage_state)
 
 
 def run_stage_a(
     repository: BasePstImportRepository,
     manifest: BasePstManifestWriter,
-    extractor: StageAExtractor,
+    extractor: BaseArchiveImporter,
     *,
     import_id: int,
     import_uuid: str,
     account_id: str,
-    source: Path,
-    storage_root: Path,
+    source: os.PathLike[str],
+    storage_root: os.PathLike[str],
     source_snapshot: SourceFileSnapshot,
     readpst_version: str,
     options: ImportOptions,
     cancel: CancelToken | None = None,
     on_progress: Callable[[int], None] | None = None,
     storage_state: StorageWriteGate | None = None,
+    pst_storage: BasePstImportStorage,
 ) -> StageAResult:
     """Extract a PST, durably inventory its staging tree, and publish readiness.
 
@@ -399,18 +243,14 @@ def run_stage_a(
         raise ValueError("import_uuid must be a version 4 UUID")
     token = cancel or CancelToken()
     progress = on_progress or (lambda _count: None)
-    stage_root = (
-        Path(storage_root).expanduser().resolve()
-        / "tmp"
-        / "pstimp"
-        / import_uuid.replace("-", "")[:8]
-    )
+    source_path = pst_storage.normalize_path(source)
+    stage_root = pst_storage.staging_root(storage_root, import_uuid)
     import_snapshot: dict[str, JSONValue] = {
         "account_id": account_id,
         "display_name": options.display_name,
         "import_uuid": import_uuid,
         "created_at": _timestamp(),
-        "source_filename": source.name,
+        "source_filename": pst_storage.source_filename(source_path),
         "source_sha256": source_snapshot.source_sha256,
         "source_size_bytes": source_snapshot.size_bytes,
         "source_mtime": source_snapshot.mtime_ns,
@@ -430,11 +270,8 @@ def run_stage_a(
     }
 
     _ensure_write_allowed(storage_state)
-    _remove_staging(stage_root, storage_state)
-    try:
-        stage_root.mkdir(parents=True, exist_ok=False)
-    except OSError as error:
-        raise StorageDetachedError(f"Could not create PST staging: {stage_root}") from error
+    _remove_staging(pst_storage, stage_root, storage_state)
+    pst_storage.create_staging(stage_root)
 
     try:
         _ensure_write_allowed(storage_state)
@@ -453,16 +290,18 @@ def run_stage_a(
             progress(count)
 
         result: ExtractResult = extractor.extract(
-            source,
+            source_path,
             stage_root,
             options,
             cancel=token,
             on_progress=report,
         )
-        if result.staging_root.resolve() != stage_root:
+        if pst_storage.normalize_path(result.staging_root) != stage_root:
             raise UnreadableArchive("Archive extractor returned an unexpected staging directory")
-        validate_source_snapshot(source, source_snapshot, cancel=token)
-        items, folders = _scan_staging(stage_root)
+        validate_source_snapshot(
+            source_path, source_snapshot, cancel=token, pst_storage=pst_storage
+        )
+        items, folders = pst_storage.scan_staging(stage_root)
         inventory_sha256 = _inventory_hash(items)
         static_manifest_sha256 = _static_manifest_hash(import_snapshot, folders)
 
@@ -508,18 +347,24 @@ def run_stage_a(
             }
         )
         manifest.flush_and_sync()
-        storage_root_path = Path(storage_root).expanduser().resolve()
-        relative_stage = stage_root.relative_to(storage_root_path).as_posix()
-        _ensure_write_allowed(storage_state)
-        _write_stage_a_marker(
-            _stage_marker_path(stage_root),
-            import_uuid=import_uuid,
-            staging_relative_path=relative_stage,
-            total_files=len(items),
-            inventory_sha256=inventory_sha256,
-            static_manifest_sha256=static_manifest_sha256,
+        relative_stage = pst_storage.relative_path(
+            pst_storage.normalize_path(storage_root), stage_root
         )
-        read_stage_a_marker(_stage_marker_path(stage_root))
+        _ensure_write_allowed(storage_state)
+        marker_path = pst_storage.marker_path(stage_root)
+        pst_storage.write_marker(
+            marker_path,
+            {
+                "schema_version": _STAGE_SCHEMA_VERSION,
+                "import_uuid": import_uuid,
+                "staging_relative_path": relative_stage,
+                "total_files": len(items),
+                "inventory_sha256": inventory_sha256,
+                "static_manifest_sha256": static_manifest_sha256,
+                "created_at": _timestamp(),
+            },
+        )
+        read_stage_a_marker(marker_path, pst_storage)
         repository.update_import_status(
             import_id,
             "ready_to_ingest",
@@ -529,7 +374,7 @@ def run_stage_a(
         )
         return StageAResult(
             staging_root=stage_root,
-            marker_path=_stage_marker_path(stage_root),
+            marker_path=marker_path,
             total_files=len(items),
             inventory_sha256=inventory_sha256,
             static_manifest_sha256=static_manifest_sha256,
@@ -545,19 +390,9 @@ def run_stage_a(
             stage_root,
             error,
             storage_state,
+            pst_storage,
         )
         raise
-
-
-def _stage_item_path(staging_root: Path, relative_path: str) -> Path:
-    candidate = (staging_root / Path(relative_path)).resolve()
-    try:
-        candidate.relative_to(staging_root.resolve())
-    except ValueError as error:
-        raise UnreadableArchive(f"PST staging item escapes its root: {relative_path}") from error
-    if not candidate.is_file():
-        raise UnreadableArchive(f"PST staging item is missing: {relative_path}")
-    return candidate
 
 
 def _message_contents(parsed: ParsedMessage) -> MessageContents:
@@ -573,18 +408,6 @@ def _message_contents(parsed: ParsedMessage) -> MessageContents:
     }
 
 
-def _bounded_date(source_path: Path) -> datetime | None:
-    try:
-        with source_path.open("rb") as source_file:
-            prefix = source_file.read(_DATE_HEADER_LIMIT)
-    except OSError as error:
-        raise UnreadableArchive(f"Could not read PST staging item: {source_path}") from error
-    if b"\n\n" not in prefix and b"\r\n\r\n" not in prefix:
-        return None
-    header = BytesHeaderParser(policy=policy.default).parsebytes(prefix)
-    return parse_date_header(header.get("Date"), None)
-
-
 def _stage_b_message(
     item: MessageRecord,
     account_id: str,
@@ -593,6 +416,7 @@ def _stage_b_message(
     file_hash: str,
     size_bytes: int,
     parsed: ParsedMessage,
+    date_sent_iso8601: str | None,
 ) -> tuple[dict[str, object], MessageContents | None]:
     message = {
         "account_id": account_id,
@@ -608,7 +432,7 @@ def _stage_b_message(
         "sender": parsed.sender,
         "recipient": parsed.recipient,
         "cc": parsed.cc,
-        "date_sent": to_utc_iso8601(parsed.date_sent) if parsed.date_sent else None,
+        "date_sent": date_sent_iso8601,
         "size_bytes": size_bytes,
         "has_attachment": int(parsed.has_attachment),
         "in_reply_to": parsed.in_reply_to,
@@ -637,18 +461,19 @@ def run_stage_b(
     import_id: int,
     import_uuid: str,
     account_id: str,
-    staging_root: Path,
+    staging_root: os.PathLike[str],
     batch_size: int = 100,
     cancel: CancelToken | None = None,
     storage_state: StorageWriteGate | None = None,
+    pst_storage: BasePstImportStorage,
 ) -> StageBResult:
     """Ingest staged EML files in durable, resumable database batches."""
 
     if batch_size <= 0:
         raise ValueError("batch_size must be positive")
     token = cancel or CancelToken()
-    root = Path(staging_root).expanduser().resolve()
-    marker = read_stage_a_marker(_stage_marker_path(root))
+    root = pst_storage.normalize_path(staging_root)
+    marker = read_stage_a_marker(pst_storage.marker_path(root), pst_storage)
     if marker["import_uuid"] != import_uuid:
         raise UnreadableArchive("Stage A marker import_uuid does not match the import")
     items = list(repository.list_incomplete_items(import_id))
@@ -669,12 +494,13 @@ def run_stage_b(
             for item in batch:
                 token.raise_if_cancelled()
                 source_key = str(item["source_item_key"])
-                source_path = _stage_item_path(root, str(item["source_relative_path"]))
-                source_size = int(item.get("source_size_bytes") or source_path.stat().st_size)
+                source_path = pst_storage.resolve_staging_item(
+                    root, str(item["source_relative_path"])
+                )
+                source_size = int(item["source_size_bytes"])
                 oversize = source_size > _MAX_PARSE_SIZE
-                parsed = ParsedMessage() if oversize else parse_eml(source_path.read_bytes(), None)
-                if not oversize:
-                    parsed = replace(parsed, date_sent=_bounded_date(source_path))
+                staged_message = pst_storage.read_staged_message(source_path, parse=not oversize)
+                parsed = staged_message.parsed
                 saved_event = saved_events.get(source_key)
                 if saved_event is None:
                     _ensure_write_allowed(storage_state)
@@ -742,6 +568,7 @@ def run_stage_b(
                     stored_hash,
                     stored_size,
                     parsed,
+                    staged_message.date_sent_iso8601,
                 )
                 item_update: dict[str, object] = {
                     **dict(item),
@@ -768,7 +595,7 @@ def run_stage_b(
                             "account_id": account_id,
                             "raw_name": folder_name,
                             "display_name": (
-                                Path(folder_name).name if folder_name != "." else "."
+                                folder_name.rsplit("/", 1)[-1] if folder_name != "." else "."
                             ),
                         }
                     )
@@ -826,7 +653,7 @@ def run_stage_b(
             finished_at=_timestamp() if not remaining_count else None,
         )
         if not remaining_count:
-            _remove_staging(root, storage_state)
+            _remove_staging(pst_storage, root, storage_state)
         return StageBResult(
             final_status, processed_count, ingested_count, failed_count, remaining_count
         )
@@ -844,16 +671,6 @@ def run_stage_b(
             import_id, "failed_resumable", staging_path=str(root), error_message=str(error)
         )
         raise
-
-
-@dataclass(frozen=True)
-class SourceFileSnapshot:
-    """Immutable identity captured for a PST before extraction begins."""
-
-    source_sha256: str
-    size_bytes: int
-    mtime_ns: int
-    file_identity: tuple[int, int] | None
 
 
 class ImportJobDecision(StrEnum):
@@ -904,64 +721,28 @@ class ImportCapacity:
     retained_bytes: int
 
 
-def _file_identity(metadata: os.stat_result) -> tuple[int, int] | None:
-    device = getattr(metadata, "st_dev", None)
-    inode = getattr(metadata, "st_ino", None)
-    if not isinstance(device, int) or not isinstance(inode, int):
-        return None
-    return device, inode
-
-
-def _snapshot_metadata(metadata: os.stat_result) -> tuple[int, int, tuple[int, int] | None]:
-    return metadata.st_size, metadata.st_mtime_ns, _file_identity(metadata)
-
-
 def snapshot_source_file(
-    source: Path,
+    source: os.PathLike[str],
     *,
+    pst_storage: BasePstImportStorage,
     cancel: CancelToken | None = None,
-    chunk_size: int = _CHUNK_SIZE,
+    chunk_size: int = 1024 * 1024,
 ) -> SourceFileSnapshot:
-    """Hash a PST through a read-only stream and capture its file metadata."""
+    """Hash a PST through the provider-independent storage port."""
 
-    if chunk_size <= 0:
-        raise ValueError("chunk_size must be positive")
-    token = cancel or CancelToken()
-    token.raise_if_cancelled()
-    digest = hashlib.sha256()
-    try:
-        with source.open("rb") as source_file:
-            initial = os.fstat(source_file.fileno())
-            if not stat.S_ISREG(initial.st_mode):
-                raise UnreadableArchive(f"PST source is not a regular file: {source}")
-            for chunk in iter(lambda: source_file.read(chunk_size), b""):
-                token.raise_if_cancelled()
-                digest.update(chunk)
-            final = os.fstat(source_file.fileno())
-    except UnreadableArchive:
-        raise
-    except OSError as error:
-        raise UnreadableArchive(f"Could not read PST source: {source}") from error
-
-    if _snapshot_metadata(initial) != _snapshot_metadata(final):
-        raise SourceChangedError(f"PST source changed while it was being read: {source}")
-    return SourceFileSnapshot(
-        source_sha256=digest.hexdigest(),
-        size_bytes=final.st_size,
-        mtime_ns=final.st_mtime_ns,
-        file_identity=_file_identity(final),
-    )
+    return pst_storage.snapshot_source_file(source, cancel=cancel, chunk_size=chunk_size)
 
 
 def validate_source_snapshot(
-    source: Path,
+    source: os.PathLike[str],
     expected: SourceFileSnapshot,
     *,
+    pst_storage: BasePstImportStorage,
     cancel: CancelToken | None = None,
 ) -> SourceFileSnapshot:
     """Re-hash a source and reject any change since the recorded snapshot."""
 
-    actual = snapshot_source_file(source, cancel=cancel)
+    actual = snapshot_source_file(source, pst_storage=pst_storage, cancel=cancel)
     if actual != expected:
         raise SourceChangedError(f"PST source changed since it was inspected: {source}")
     return actual
@@ -1049,12 +830,12 @@ def resolve_import_job(
 
 
 def check_import_capacity(
-    storage_root: Path,
+    storage_root: os.PathLike[str],
     source_size_bytes: int,
     *,
     retained_bytes: int = 0,
-    check_free_space: Callable[[Path], object],
-    free_space: Callable[[Path], int],
+    check_free_space: Callable[..., object],
+    free_space: Callable[..., int],
 ) -> ImportCapacity:
     """Require the global storage policy and PST-size-based working space."""
 

@@ -8,6 +8,25 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mail_dock.domain.fetcher import CancelToken
+from mail_dock.domain.messages import ParsedMessage
+
+
+@dataclass(frozen=True)
+class SourceFileSnapshot:
+    """Immutable identity captured for an archive before extraction begins."""
+
+    source_sha256: str
+    size_bytes: int
+    mtime_ns: int
+    file_identity: tuple[int, int] | None
+
+
+@dataclass(frozen=True)
+class StagedMessage:
+    """Parsed data read from one extracted EML file."""
+
+    parsed: ParsedMessage
+    date_sent_iso8601: str | None = None
 
 
 @dataclass(frozen=True)

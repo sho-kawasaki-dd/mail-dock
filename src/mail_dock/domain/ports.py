@@ -6,7 +6,10 @@ import os
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Mapping, Sequence
 from datetime import datetime
+from pathlib import Path
 
+from mail_dock.domain.fetcher import CancelToken
+from mail_dock.domain.importer import SourceFileSnapshot, StagedMessage
 from mail_dock.domain.messages import AttachmentSavePlan, RenderedMessage, SavedFile, StoredEml
 
 type JSONValue = bool | int | float | str | list[JSONValue] | dict[str, JSONValue] | None
@@ -19,11 +22,14 @@ __all__ = [
     "BaseManifestReader",
     "BaseManifestWriter",
     "BaseMessageRenderer",
+    "BasePstImportStorage",
     "BasePstManifestReader",
     "BasePstManifestWriter",
     "BasePurgeStorage",
     "JSONValue",
     "SavedFile",
+    "SourceFileSnapshot",
+    "StagedMessage",
 ]
 
 
@@ -249,3 +255,75 @@ class BasePstManifestReader(ABC):
             )
             if key not in completed:
                 yield event
+
+
+class BasePstImportStorage(ABC):
+    """Filesystem and parser operations required by the PST import use case."""
+
+    @abstractmethod
+    def normalize_path(self, path: os.PathLike[str]) -> Path:
+        """Return a normalized path suitable for the archive importer."""
+
+    @abstractmethod
+    def source_filename(self, source: os.PathLike[str]) -> str:
+        """Return the display filename for an archive source."""
+
+    @abstractmethod
+    def staging_root(self, storage_root: os.PathLike[str], import_uuid: str) -> Path:
+        """Return the short, storage-local staging path for an import."""
+
+    @abstractmethod
+    def marker_path(self, staging_root: os.PathLike[str]) -> Path:
+        """Return the Stage A completion marker path."""
+
+    @abstractmethod
+    def create_staging(self, staging_root: os.PathLike[str]) -> None:
+        """Create an empty staging directory."""
+
+    @abstractmethod
+    def remove_staging(self, staging_root: os.PathLike[str]) -> None:
+        """Remove a staging directory recursively."""
+
+    @abstractmethod
+    def read_marker(self, marker_path: os.PathLike[str]) -> Mapping[str, JSONValue]:
+        """Read a Stage A marker payload."""
+
+    @abstractmethod
+    def write_marker(
+        self, marker_path: os.PathLike[str], payload: Mapping[str, JSONValue]
+    ) -> None:
+        """Durably publish a Stage A marker atomically."""
+
+    @abstractmethod
+    def scan_staging(
+        self, staging_root: os.PathLike[str]
+    ) -> tuple[list[dict[str, JSONValue]], list[dict[str, JSONValue]]]:
+        """Build deterministic inventories from a staging tree."""
+
+    @abstractmethod
+    def resolve_staging_item(
+        self, staging_root: os.PathLike[str], relative_path: str
+    ) -> Path:
+        """Resolve and validate one item below a staging root."""
+
+    @abstractmethod
+    def read_staged_message(
+        self, source_path: os.PathLike[str], *, parse: bool
+    ) -> StagedMessage:
+        """Read and parse one staged EML, or return metadata for an oversize file."""
+
+    @abstractmethod
+    def snapshot_source_file(
+        self,
+        source: os.PathLike[str],
+        *,
+        cancel: CancelToken | None = None,
+        chunk_size: int = 1024 * 1024,
+    ) -> SourceFileSnapshot:
+        """Hash an archive source and capture metadata without modifying it."""
+
+    @abstractmethod
+    def relative_path(
+        self, root: os.PathLike[str], child: os.PathLike[str]
+    ) -> str:
+        """Return a storage-relative POSIX path."""
