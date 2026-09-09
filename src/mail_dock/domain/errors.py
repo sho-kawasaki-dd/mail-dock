@@ -107,6 +107,10 @@ class UnreadableArchive(ArchiveImportError):  # noqa: N818
     """Raised when an archive cannot be read or is not a supported archive."""
 
 
+class SourceChangedError(ArchiveImportError):
+    """Raised when an archive changes after its source snapshot was recorded."""
+
+
 class UidValidityChanged(FetchError):  # noqa: N818
     """Control-flow signal indicating that a folder needs a new UID generation."""
 
