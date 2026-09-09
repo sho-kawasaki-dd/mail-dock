@@ -254,9 +254,9 @@
 
 #### **D-2. Stage A（抽出）**
 
-- [ ] `tmp/pstimp/{import_uuid先頭8桁}/` へ `readpst_runner` を実行する
-- [ ] readpst終了後に全項目インベントリを永続化・fsyncし、項目数と各マニフェストの内容ハッシュを含む `stageA_done.json` を原子的に作成する
-- [ ] 通常のキャンセル・失敗時はstagingを破棄し `status='abandoned'` とする。切断中は書込みや削除をせず、再接続後の調停でマーカーなしを `suspect` として破棄＋再抽出を提示する
+- [x] `tmp/pstimp/{import_uuid先頭8桁}/` へ `readpst_runner` を実行する
+- [x] readpst終了後に全項目インベントリを永続化・fsyncし、項目数と各マニフェストの内容ハッシュを含む `stageA_done.json` を原子的に作成する
+- [x] 通常のキャンセル・失敗時はstagingを破棄し `status='abandoned'` とする。切断中は書込みや削除をせず、再接続後の調停でマーカーなしを `suspect` として破棄＋再抽出を提示する
 
 #### **D-3. 項目確定とStage B（取込）**
 
