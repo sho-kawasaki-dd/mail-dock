@@ -230,11 +230,11 @@
 
 #### **C-4. `infrastructure/importers/readpst_runner.py`**
 
-- [ ] `shell=False`・引数リストで F-1 のオプション構成を起動する
-- [ ] 出力ファイル数のポーリングと経過時間による粗い進捗を実装する
-- [ ] `CancelToken` 連携（`terminate()` → タイムアウト後 `kill()`）を実装する
-- [ ] 非ゼロ終了・クラッシュを `ConverterFailed` へラップし、**stdoutとstderr両方**の末尾を保持する（readpstは致命的エラーをstdoutへ出力する。P-1）
-- [ ] `mk_separate_dir: Cannot create directory` を検出した場合は、フォルダ名がWindowsで作成できないことを示す専用メッセージを `ConverterFailed` に付与する（P-7）
+- [x] `shell=False`・引数リストで F-1 のオプション構成を起動する
+- [x] 出力ファイル数のポーリングと経過時間による粗い進捗を実装する
+- [x] `CancelToken` 連携（`terminate()` → タイムアウト後 `kill()`）を実装する
+- [x] 非ゼロ終了・クラッシュを `ConverterFailed` へラップし、**stdoutとstderr両方**の末尾を保持する（readpstは致命的エラーをstdoutへ出力する。P-1）
+- [x] `mk_separate_dir: Cannot create directory` を検出した場合は、フォルダ名がWindowsで作成できないことを示す専用メッセージを `ConverterFailed` に付与する（P-7）
 
 #### **C-5. `infrastructure/importers/lspst_parser.py`**
 
