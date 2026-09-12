@@ -145,17 +145,19 @@ def _rebuild_pst_manifests(
                     candidate = event.get("replaces_import_uuid")
                     if isinstance(candidate, str):
                         replaces_uuid = candidate
+                        timestamp = event.get("timestamp")
                         superseded_at[candidate] = (
-                            event.get("timestamp")
-                            if isinstance(event.get("timestamp"), str)
+                            timestamp
+                            if isinstance(timestamp, str)
                             else None
                         )
                 elif event.get("event") == "generation_restored":
                     candidate = event.get("superseded_import_uuid")
                     if isinstance(candidate, str):
+                        timestamp = event.get("timestamp")
                         superseded_at[candidate] = (
-                            event.get("timestamp")
-                            if isinstance(event.get("timestamp"), str)
+                            timestamp
+                            if isinstance(timestamp, str)
                             else None
                         )
             descriptors[import_uuid] = (reader, replaces_uuid)
