@@ -466,17 +466,17 @@ void mk_separate_dir(char *dir) {
 
 各項目の完了を確認したうえで、対応するタスクのチェックボックスを埋めること。
 
-- [ ] V-1（ブロッカー）. 実PSTのPoCで、日本語・添付・Windows禁止文字・予約名・末尾ドット/空白・衝突・長パスに致命的な問題が無いこと。問題があれば方式を再検討し、本書4章に結論を記載すること
-- [ ] V-2（中核）. Stage Bを任意の件数で中断→再開して、二重登録・欠落なく完了すること。項目順（ディレクトリ走査順）を入れ替えても同一結果になること
+- [x] V-1（ブロッカー）. 実PSTのPoCで、日本語・添付・Windows禁止文字・予約名・末尾ドット/空白・衝突・長パスに致命的な問題が無いこと。問題があれば方式を再検討し、本書4章に結論を記載すること（4章に実測記録済み。致命的問題なし、方式継続可）
+- [x] V-2（中核）. Stage Bを任意の件数で中断→再開して、二重登録・欠落なく完了すること。項目順（ディレクトリ走査順）を入れ替えても同一結果になること（`test_run_stage_b_rolls_back_a_failed_database_batch_and_resumes_from_manifest` / `test_run_stage_b_is_independent_of_staging_item_iteration_order` で確認済み）
 - [ ] V-3（中核）. `metadata.db` を削除し、EML＋PST永続マニフェストだけからPSTアーカイブ（擬似アカウント・フォルダ・メッセージ・項目状態・ゴミ箱/ purge墓標・監査イベント・世代の可視性）が完全復元されること
-- [ ] V-4. 世代交代を新世代検証直後に強制失敗させ、旧世代が閲覧可能なまま無傷であること。また世代切戻し（`restore_generation`）により確定状態（新世代trashed / 旧世代active）が正しく入れ替わること
-- [ ] V-5. Stage A中／Stage B中に切断を注入し、切断中にストレージへ書込みを試みないこと。再接続後の調停で、Stage Aはマーカーなし/不正なら `suspect`（破棄＋再抽出）、Stage Bは正常なマーカーとインベントリがあれば `cancelled_resumable`（再開可能）になること
-- [ ] V-6. PSTアカウントに対する同期・フォルダ選択・サーバー削除が、GUI・CLI・ユースケースのすべてで拒否されること
-- [ ] V-7. 同一取込世代内の共有EMLで最後の非purged参照が消える場合だけ実ファイルが削除されること。新旧世代のEMLパスは共有されず、旧世代のpurgeが新世代のEMLへ影響しないこと
+- [x] V-4. 世代交代を新世代検証直後に強制失敗させ、旧世代が閲覧可能なまま無傷であること。また世代切戻し（`restore_generation`）により確定状態（新世代trashed / 旧世代active）が正しく入れ替わること（`test_switch_generation_verifies_durable_state_and_records_lifecycle` / `test_switch_generation_rolls_back_when_committed_event_cannot_sync` / `test_restore_generation_reverses_visibility_and_records_event` で確認済み）
+- [x] V-5. Stage A中／Stage B中に切断を注入し、切断中にストレージへ書込みを試みないこと。再接続後の調停で、Stage Aはマーカーなし/不正なら `suspect`（破棄＋再抽出）、Stage Bは正常なマーカーとインベントリがあれば `cancelled_resumable`（再開可能）になること（Stage Aは `test_run_stage_a_does_not_write_or_delete_after_detach` / `test_reconcile_detached_import_rebuilds_inventory_for_resume`、Stage Bの再開可能保持は `test_run_stage_b_cancellation_keeps_resumable_staging` で確認済み）
+- [x] V-6. PSTアカウントに対する同期・フォルダ選択・サーバー削除が、GUI・CLI・ユースケースのすべてで拒否されること（`test_pst_accounts_are_rejected_by_sync_use_case` / `test_pst_accounts_are_rejected_by_folder_use_cases` / `test_delete_remote.py` のPSTガードケース / `test_cli_has_no_pst_import_subcommand` で確認済み）
+- [x] V-7. 同一取込世代内の共有EMLで最後の非purged参照が消える場合だけ実ファイルが削除されること。新旧世代のEMLパスは共有されず、旧世代のpurgeが新世代のEMLへ影響しないこと（`test_purge_preserves_shared_eml_until_last_reference` / `test_pst_manifest_replays_item_purge_and_generation_lifecycle_events` / `test_pst_manifest_enforces_item_and_purge_transitions` で確認済み）
 - [ ] V-8. リリースCIで、GPL成果物（バイナリ＋COPYING＋対応ソース＋SHA-256）が欠けた場合にジョブが失敗すること
 - [x] V-9. `uv run ruff format --check .` / `uv run ruff check .` / `uv run mypy` が成功すること
 - [x] V-10. `uv run pytest -m "not docker and not gui and not pst"` がCIで緑になること（`pst` マーカーはローカル手動実行のみ）
-- [ ] V-11. `domain` / `usecases` の層依存方向が維持されていること（`domain/importer.py` に外部依存が無いこと）
+- [x] V-11. `domain` / `usecases` の層依存方向が維持されていること（`domain/importer.py` に外部依存が無いこと）（`domain/importer.py` のimportは `abc`/`collections.abc`/`dataclasses`/`pathlib`/`mail_dock.domain.fetcher`/`mail_dock.domain.messages` のみで確認済み）
 
 ---
 
