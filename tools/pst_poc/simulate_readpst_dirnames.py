@@ -58,7 +58,12 @@ def mk_separate_dir(parent: Path, raw_name: str) -> tuple[str | None, str, str]:
             continue
         except OSError as exc:
             # readpst はここで DIE() し、変換全体が終了コード1で異常終了する
-            name = errno.errorcode.get(exc.errno, str(exc.errno))
+            error_number = exc.errno
+            name = (
+                errno.errorcode.get(error_number, str(error_number))
+                if error_number is not None
+                else "UNKNOWN"
+            )
             return None, "DIE", f"{name}: {exc.strerror}"
         return candidate, "ok", ""
 
@@ -101,7 +106,9 @@ CANDIDATES: list[tuple[str, str]] = [
 
 def main() -> int:
     # NFD など CP932 で表現できない名前を出力する
-    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if callable(reconfigure):
+        reconfigure(encoding="utf-8", errors="backslashreplace")
     if len(sys.argv) != 2:
         print(__doc__)
         return 2

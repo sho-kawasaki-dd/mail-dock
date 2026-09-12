@@ -353,10 +353,10 @@
 
 #### **I-5. 静的テスト・ドキュメント**
 
-- [ ] `tests/unit/test_main.py` の拡張：CLIにPSTインポート系サブコマンドが存在しないこと
-- [ ] `ruff check .` / `mypy .` / `pytest -m "not docker and not gui and not pst"` を実行し、全テスト通過を確認する
-- [ ] 開発計画書6章「Phase 4.5」の行、および本書「4. PoC結果」節を実測値で更新する
-- [ ] `.github/copilot-instructions.md` の該当記述を更新する
+- [x] `tests/unit/test_main.py` の拡張：CLIにPSTインポート系サブコマンドが存在しないこと
+- [x] `ruff check .` / `mypy .` / `pytest -m "not docker and not gui and not pst"` を実行し、全テスト通過を確認する
+- [x] 開発計画書6章「Phase 4.5」の行、および本書「4. PoC結果」節を実測値で更新する
+- [x] `.github/copilot-instructions.md` の該当記述を更新する
 
 ---
 
@@ -474,8 +474,8 @@ void mk_separate_dir(char *dir) {
 - [ ] V-6. PSTアカウントに対する同期・フォルダ選択・サーバー削除が、GUI・CLI・ユースケースのすべてで拒否されること
 - [ ] V-7. 同一取込世代内の共有EMLで最後の非purged参照が消える場合だけ実ファイルが削除されること。新旧世代のEMLパスは共有されず、旧世代のpurgeが新世代のEMLへ影響しないこと
 - [ ] V-8. リリースCIで、GPL成果物（バイナリ＋COPYING＋対応ソース＋SHA-256）が欠けた場合にジョブが失敗すること
-- [ ] V-9. `uv run ruff format --check .` / `uv run ruff check .` / `uv run mypy` が成功すること
-- [ ] V-10. `uv run pytest -m "not docker and not gui and not pst"` がCIで緑になること（`pst` マーカーはローカル手動実行のみ）
+- [x] V-9. `uv run ruff format --check .` / `uv run ruff check .` / `uv run mypy` が成功すること
+- [x] V-10. `uv run pytest -m "not docker and not gui and not pst"` がCIで緑になること（`pst` マーカーはローカル手動実行のみ）
 - [ ] V-11. `domain` / `usecases` の層依存方向が維持されていること（`domain/importer.py` に外部依存が無いこと）
 
 ---

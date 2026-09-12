@@ -55,12 +55,13 @@ presentation/   ← PySide6固有（View/ViewModel/QThreadワーカー）
 - HTMLメール表示は5層防御（オフレコプロファイル・属性無効化・リクエストインターセプタ・`cid:`スキーム・CSP注入）をすべて実装する。JavaScript無効化だけで済ませない。
 - `subprocess`（readpst）は `shell=False`・引数リスト・同梱バイナリの絶対パス解決のみ。ユーザー入力をコマンド文字列に連結しない。
 - 資格情報は `keyring` のみに保管し、DB・設定ファイルへは書き込まない。
+- PST取込本体（Stage A/B・再変換）は対話確認が必要なためGUI限定とし、CLIへPST取込サブコマンドを追加しない。CLIの `verify` / `reindex` はPSTマニフェストを対象にする。
 
 ## ビルド・テスト
 
 - Python 3.13必須（`requires-python = ">=3.13"`）。
 - 依存関係・テストツールは開発計画書 2.1節の確定依存を `pyproject.toml` に反映する（PySide6, keyring, beautifulsoup4, charset-normalizer, platformdirs / dev: pytest, pytest-qt, pytest-cov, ruff, mypy）。
-- Lint/型チェック/テスト: `ruff check .`, `mypy .`, `pytest`。
+- Lint/型チェック/テスト: `ruff check .`, `mypy .`, `pytest`。PST実機結合テストは `pst` マーカーで管理し、通常の検証は `pytest -m "not docker and not gui and not pst"` で実行する。
 - IMAP結合テストは Docker上の Dovecot/GreenMail を使用する想定（5.10節）。ただしDockerを用いたテストはWSL上で実行する。
 
 ## リポジトリ構成

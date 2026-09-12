@@ -73,9 +73,7 @@ def test_probe_runs_before_progress_and_cancel_stops_import(qtbot: Any, tmp_path
     assert wizard._import_token is None
 
 
-def test_wizard_pages_show_import_progress_and_summary(
-    qtbot: Any, tmp_path: Path
-) -> None:
+def test_wizard_pages_show_import_progress_and_summary(qtbot: Any, tmp_path: Path) -> None:
     source = tmp_path / "archive.pst"
     source.write_bytes(b"pst")
     sync_worker = _SyncWorker()

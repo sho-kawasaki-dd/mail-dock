@@ -151,6 +151,12 @@ def test_cli_has_no_destructive_subcommand(command: str) -> None:
         _build_parser().parse_args([command])
 
 
+@pytest.mark.parametrize("command", ["import-pst", "pst-import", "pst"])
+def test_cli_has_no_pst_import_subcommand(command: str) -> None:
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args([command])
+
+
 def test_main_routes_gui_and_no_command_without_starting_storage_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
