@@ -343,8 +343,8 @@
 
 #### **I-3. 結合テスト（`pst` マーカー、readpst未同梱環境ではskip）**
 
-- [ ] `tests/integration/test_pst_import.py`：実readpstで小規模PSTを取り込み、日本語・文字コード・添付・禁止文字・予約名・末尾ドット/空白・衝突・深い階層・破損PST・staging外を指す名称を検証する
-- [ ] `tests/integration/test_pst_reindex.py`：`metadata.db`を破棄し、EML＋PSTマニフェストのみからPSTアーカイブが完全復元されることを検証する
+- [x] `tests/integration/test_pst_import.py`：実readpstで小規模PSTを取り込み、日本語・文字コード・添付・禁止文字・予約名・末尾ドット/空白・衝突・深い階層・破損PST・staging外を指す名称を検証する
+- [x] `tests/integration/test_pst_reindex.py`：`metadata.db`を破棄し、EML＋PSTマニフェストのみからPSTアーカイブが完全復元されることを検証する
 
 #### **I-4. GUIテスト（`gui` マーカー）**
 
