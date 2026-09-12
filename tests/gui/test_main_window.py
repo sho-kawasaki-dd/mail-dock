@@ -21,6 +21,7 @@ from mail_dock.domain.search import (
 )
 from mail_dock.domain.storage_state import StorageState
 from mail_dock.presentation import strings
+from mail_dock.presentation.threads.sync_worker import FolderTreeSnapshot
 from mail_dock.presentation.views.main_window import MainWindow
 from mail_dock.usecases.delete_remote import DeleteResult
 from mail_dock.usecases.export_mbox import ExportMboxProgress
@@ -216,6 +217,64 @@ def test_startup_sync_account_list_excludes_pst_archives(qtbot: Any) -> None:
     qtbot.addWidget(window)
 
     assert window._enabled_account_ids() == ("account-1",)
+    window.stop_workers()
+
+
+def test_pst_selection_hides_remote_actions_and_mail_selection_restores_them(
+    qtbot: Any,
+) -> None:
+    context = _ContextWithPst()
+    window = MainWindow(cast(Any, context))
+    qtbot.addWidget(window)
+    window._update_folder_tree(
+        FolderTreeSnapshot(
+            accounts=tuple(_RepositoryWithPst().list_accounts()),
+            folders=(
+                *tuple(_RepositoryWithPst().list_folders("account-1")),
+                {
+                    "id": 20,
+                    "account_id": "pst-1",
+                    "display_name": "PST受信箱",
+                },
+            ),
+            pst_imports=(
+                {
+                    "id": 1,
+                    "account_id": "pst-1",
+                    "display_name": "PST",
+                    "status": "completed",
+                    "is_active": 1,
+                },
+            ),
+        )
+    )
+    assert window.folder_tree_model.rowCount() == 2
+
+    mail_index = window.folder_tree_model.index_for_key("mail-accounts")
+    pst_index = window.folder_tree_model.index_for_key("pst-archives")
+    selection_model = window.folder_tree_view.selectionModel()
+    assert selection_model is not None
+
+    selection_model.setCurrentIndex(
+        mail_index,
+        QItemSelectionModel.SelectionFlag.ClearAndSelect,
+    )
+    assert window.sync_action.isVisible()
+    assert window.delete_remote_action.isVisible()
+
+    selection_model.setCurrentIndex(
+        pst_index,
+        QItemSelectionModel.SelectionFlag.ClearAndSelect,
+    )
+    assert not window.sync_action.isVisible()
+    assert not window.delete_remote_action.isVisible()
+
+    selection_model.setCurrentIndex(
+        mail_index,
+        QItemSelectionModel.SelectionFlag.ClearAndSelect,
+    )
+    assert window.sync_action.isVisible()
+    assert window.delete_remote_action.isVisible()
     window.stop_workers()
 
 

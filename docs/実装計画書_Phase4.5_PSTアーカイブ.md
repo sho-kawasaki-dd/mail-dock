@@ -348,8 +348,8 @@
 
 #### **I-4. GUIテスト（`gui` マーカー）**
 
-- [ ] `tests/gui/test_import_wizard.py`：ウィザード各ページの遷移・キャンセル・進捗表示
-- [ ] `tests/gui/test_folder_tree_model.py` の拡張：2ルート構成、PSTルート選択時のツールバー抑止
+- [x] `tests/gui/test_import_wizard.py`：ウィザード各ページの遷移・キャンセル・進捗表示
+- [x] `tests/gui/test_folder_tree_model.py` / `tests/gui/test_main_window.py` の拡張：2ルート構成、PSTルート選択時のツールバー抑止
 
 #### **I-5. 静的テスト・ドキュメント**
 
