@@ -12,6 +12,7 @@ from mail_dock.domain.errors import (
     OperationCancelledError,
     SourceChangedError,
     StorageDetachedError,
+    UnreadableArchive,
 )
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.importer import ArchiveInfo, BaseArchiveImporter, ExtractResult, ImportOptions
@@ -98,6 +99,52 @@ class _FakeExtractor(BaseArchiveImporter):
             self.before_progress()
         on_progress(1)
         return ExtractResult(staging, 1, "", "")
+
+
+class _MultiFileExtractor(BaseArchiveImporter):
+    def __init__(self, files: tuple[tuple[str, bytes], ...]) -> None:
+        self.files = files
+
+    def probe(
+        self,
+        source: Path,
+        *,
+        cancel: CancelToken,
+        on_progress: Callable[[int], None],
+    ) -> ArchiveInfo:
+        del source, cancel, on_progress
+        raise NotImplementedError
+
+    def extract(
+        self,
+        source: Path,
+        staging: Path,
+        options: ImportOptions,
+        *,
+        cancel: CancelToken,
+        on_progress: Callable[[int], None],
+    ) -> ExtractResult:
+        del source, options
+        cancel.raise_if_cancelled()
+        for relative_path, content in self.files:
+            destination = staging / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(content)
+        on_progress(len(self.files))
+        return ExtractResult(staging, len(self.files), "", "")
+
+
+class _FailingCommitRepository(InMemoryPstImportRepository):
+    def __init__(self, fail_on: int) -> None:
+        super().__init__()
+        self.commit_attempts = 0
+        self.fail_on = fail_on
+
+    def commit_batch(self) -> None:
+        self.commit_attempts += 1
+        if self.commit_attempts == self.fail_on:
+            raise RuntimeError("database commit failed")
+        super().commit_batch()
 
 
 class _WriteGate:
@@ -405,6 +452,205 @@ def test_run_stage_b_saves_messages_in_batches_and_removes_staging(tmp_path: Pat
     assert repository.messages[1]["date_sent"] is None
     events = list(PstManifestReader(tmp_path, import_uuid).read_all_events())
     assert [event["event"] for event in events][-1] == "item_saved"
+
+
+def test_run_stage_b_rolls_back_a_failed_database_batch_and_resumes_from_manifest(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "archive.pst"
+    source.write_bytes(b"pst-content")
+    repository = _FailingCommitRepository(fail_on=2)
+    import_uuid = "77777777-7777-4777-8777-777777777777"
+    import_id = repository.create_import(
+        _record(import_uuid, hashlib.sha256(source.read_bytes()).hexdigest(), status="new")
+    )
+    with PstManifestWriter(tmp_path, import_uuid) as manifest:
+        stage_a = run_stage_a(
+            repository,
+            manifest,
+            _FakeExtractor(),
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id="pst-account",
+            source=source,
+            storage_root=tmp_path,
+            source_snapshot=snapshot_source_file(source, pst_storage=PST_STORAGE),
+            readpst_version="0.6.76",
+            options=ImportOptions("Archive", "cp932"),
+            pst_storage=PST_STORAGE,
+        )
+
+    with (
+        PstManifestWriter(tmp_path, import_uuid) as manifest,
+        pytest.raises(RuntimeError, match="database commit failed"),
+    ):
+        run_stage_b(
+            repository,
+            manifest,
+            EmlStorage(tmp_path),
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id="pst-account",
+            staging_root=stage_a.staging_root,
+            pst_storage=PST_STORAGE,
+        )
+
+    item = repository.items[(import_id, "Store/Inbox/1.eml")]
+    assert item["status"] == "discovered"
+    assert repository.messages == {}
+    assert repository.imports[import_id]["status"] == "failed_resumable"
+    assert Path(stage_a.staging_root).exists()
+    assert (
+        len(
+            [
+                event
+                for event in PstManifestReader(tmp_path, import_uuid).read_all_events()
+                if event["event"] == "item_saved"
+            ]
+        )
+        == 1
+    )
+
+    repository.fail_on = 0
+    with PstManifestWriter(tmp_path, import_uuid) as manifest:
+        result = run_stage_b(
+            repository,
+            manifest,
+            EmlStorage(tmp_path),
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id="pst-account",
+            staging_root=stage_a.staging_root,
+            pst_storage=PST_STORAGE,
+        )
+
+    assert result.status == "completed"
+    assert len(repository.messages) == 1
+    assert (
+        len(
+            [
+                event
+                for event in PstManifestReader(tmp_path, import_uuid).read_all_events()
+                if event["event"] == "item_saved"
+            ]
+        )
+        == 1
+    )
+
+
+def test_run_stage_b_is_independent_of_staging_item_iteration_order(tmp_path: Path) -> None:
+    source = tmp_path / "archive.pst"
+    source.write_bytes(b"pst-content")
+    repository = InMemoryPstImportRepository()
+    import_uuid = "88888888-8888-4888-8888-888888888888"
+    import_id = repository.create_import(
+        _record(import_uuid, hashlib.sha256(source.read_bytes()).hexdigest(), status="new")
+    )
+    extractor = _MultiFileExtractor(
+        (
+            ("Store/Inbox/2.eml", b"Subject: two\n\nsecond\n"),
+            ("Store/Inbox/1.eml", b"Subject: one\n\nfirst\n"),
+        )
+    )
+    with PstManifestWriter(tmp_path, import_uuid) as manifest:
+        stage_a = run_stage_a(
+            repository,
+            manifest,
+            extractor,
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id="pst-account",
+            source=source,
+            storage_root=tmp_path,
+            source_snapshot=snapshot_source_file(source, pst_storage=PST_STORAGE),
+            readpst_version="0.6.76",
+            options=ImportOptions("Archive", "cp932"),
+            pst_storage=PST_STORAGE,
+        )
+
+    inventory = list(repository.items.values())
+    repository.items.clear()
+    for item in reversed(inventory):
+        repository.upsert_import_item(item)
+
+    with PstManifestWriter(tmp_path, import_uuid) as manifest:
+        result = run_stage_b(
+            repository,
+            manifest,
+            EmlStorage(tmp_path),
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id="pst-account",
+            staging_root=stage_a.staging_root,
+            batch_size=1,
+            pst_storage=PST_STORAGE,
+        )
+
+    assert result.status == "completed"
+    assert result.ingested_count == 2
+    assert {str(item["source_item_key"]) for item in repository.items.values()} == {
+        "Store/Inbox/1.eml",
+        "Store/Inbox/2.eml",
+    }
+    assert {str(message["subject"]) for message in repository.messages.values()} == {
+        "one",
+        "two",
+    }
+
+
+def test_run_stage_b_records_oversize_without_parsing_the_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("mail_dock.usecases.import_pst._MAX_PARSE_SIZE", 3)
+    source, repository, import_uuid, import_id = _stage_a_import(tmp_path)
+    with PstManifestWriter(tmp_path, import_uuid) as manifest:
+        stage_a = run_stage_a(
+            repository,
+            manifest,
+            _FakeExtractor(),
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id="pst-account",
+            source=source,
+            storage_root=tmp_path,
+            source_snapshot=snapshot_source_file(source, pst_storage=PST_STORAGE),
+            readpst_version="0.6.76",
+            options=ImportOptions("Archive", "cp932"),
+            pst_storage=PST_STORAGE,
+        )
+
+    with PstManifestWriter(tmp_path, import_uuid) as manifest:
+        result = run_stage_b(
+            repository,
+            manifest,
+            EmlStorage(tmp_path),
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id="pst-account",
+            staging_root=stage_a.staging_root,
+            pst_storage=PST_STORAGE,
+        )
+
+    assert result.status == "completed_with_errors"
+    assert result.failed_count == 1
+    assert repository.items[(import_id, "Store/Inbox/1.eml")]["error_class"] == "oversize"
+    assert len(repository.contents) == 1
+    assert set(repository.contents[1].values()) == {""}
+    assert any(
+        event["event"] == "item_oversize"
+        for event in PstManifestReader(tmp_path, import_uuid).read_all_events()
+    )
+
+
+def test_pst_staging_item_resolution_rejects_paths_outside_the_staging_root(
+    tmp_path: Path,
+) -> None:
+    staging_root = tmp_path / "staging"
+    staging_root.mkdir()
+    (tmp_path / "outside.eml").write_bytes(b"outside")
+
+    with pytest.raises(UnreadableArchive, match="escapes"):
+        PST_STORAGE.resolve_staging_item(staging_root, "../outside.eml")
 
 
 def test_run_stage_b_reuses_durable_saved_event_on_resume(tmp_path: Path) -> None:

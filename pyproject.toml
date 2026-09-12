@@ -63,6 +63,7 @@ addopts = "--strict-markers"
 markers = [
 	"docker: tests requiring the Docker-based integration environment",
 	"gui: tests requiring the graphical user interface",
+	"pst: tests requiring the bundled readpst converter or PST fixtures",
 ]
 
 [tool.coverage.run]

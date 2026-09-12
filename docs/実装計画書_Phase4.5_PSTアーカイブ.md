@@ -328,18 +328,18 @@
 
 #### **I-1. CI設定**
 
-- [ ] `pyproject.toml` の `markers` に `pst` を追加する
-- [ ] `.github/workflows/ci.yml` の3ジョブすべてを `-m "not docker and not gui and not pst"` に更新する
+- [x] `pyproject.toml` の `markers` に `pst` を追加する
+- [x] `.github/workflows/ci.yml` の3つの pytest 実行に `not pst` を追加する（Docker実行の `docker` 条件は維持）
 
 #### **I-2. 単体テスト**
 
-- [ ] `tests/unit/test_readpst_locator.py`：パス解決・バージョン取得・DLL欠落時の`ConverterNotFound`
-- [ ] `tests/unit/test_readpst_runner.py`：fake subprocessでのクラッシュ・無応答・キャンセルの注入
-- [ ] `tests/unit/test_lspst_parser.py`：不明形式のフォールバック、PST種別のマジックバイト判定
-- [ ] `tests/unit/test_eml_storage.py` の拡張：`save_from_file()` によるストリーミング保存・ハッシュ計算・重複検出・アトミック配置
-- [ ] `tests/unit/test_import_pst.py`：状態遷移表、Stage Aインベントリ確定前の停止、Stage Bのバッチ処理・冪等性・項目順変更耐性・再開・cancel、DB文単位の失敗とrollback、`completed_with_errors`、未完了破棄、切替committed前の停止時に旧世代が維持されること、世代切戻し（確定状態の検証）、原本変更、パストラバーサル防御、oversize処理
-- [ ] `tests/unit/test_pst_manifest.py`：静的JSONの原子的配置・内容ハッシュ、`items.jsonl` のCRC32検証・末尾torn write切り離し、全イベントからの状態再構築
-- [ ] 既存ガードテスト（`test_sync_mail.py` 等）にPSTアカウント拒否のケースを追加する
+- [x] `tests/unit/test_readpst_locator.py`：パス解決・バージョン取得・DLL欠落時の`ConverterNotFound`
+- [x] `tests/unit/test_readpst_runner.py`：fake subprocessでのクラッシュ・無応答・キャンセルの注入
+- [x] `tests/unit/test_lspst_parser.py`：不明形式のフォールバック、PST種別のマジックバイト判定
+- [x] `tests/unit/test_eml_storage.py` の拡張：`save_from_file()` によるストリーミング保存・ハッシュ計算・重複検出・アトミック配置
+- [x] `tests/unit/test_import_pst.py`：状態遷移表、Stage Aインベントリ確定前の停止、Stage Bのバッチ処理・冪等性・項目順変更耐性・再開・cancel、DB文単位の失敗とrollback、`completed_with_errors`、未完了破棄、切替committed前の停止時に旧世代が維持されること、世代切戻し（確定状態の検証）、原本変更、パストラバーサル防御、oversize処理
+- [x] `tests/unit/test_pst_manifest.py`：静的JSONの原子的配置・内容ハッシュ、`items.jsonl` のCRC32検証・末尾torn write切り離し、全イベントからの状態再構築
+- [x] 既存ガードテスト（`test_sync_mail.py` 等）にPSTアカウント拒否のケースを追加する
 
 #### **I-3. 結合テスト（`pst` マーカー、readpst未同梱環境ではskip）**
 

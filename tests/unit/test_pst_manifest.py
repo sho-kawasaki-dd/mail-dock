@@ -73,6 +73,130 @@ def test_pst_manifest_writes_verified_snapshots_and_idempotent_events(tmp_path: 
         "item_discovered",
         "item_saved",
     ]
+    assert not list((tmp_path / "tmp").iterdir())
+
+
+def test_pst_manifest_replays_item_purge_and_generation_lifecycle_events(
+    tmp_path: Path,
+) -> None:
+    import_uuid = "11111111-1111-4111-8111-111111111111"
+    previous_uuid = "22222222-2222-4222-8222-222222222222"
+    timestamp = "2026-09-09T00:00:00Z"
+
+    with PstManifestWriter(tmp_path, import_uuid) as writer:
+        writer.append(
+            {
+                **_discovered(import_uuid),
+                "source_item_key": "Inbox/1.eml",
+                "source_relative_path": "Inbox/1.eml",
+            }
+        )
+        writer.append(
+            {
+                **_saved(import_uuid),
+                "source_item_key": "Inbox/1.eml",
+            }
+        )
+        writer.append(
+            {
+                **_discovered(import_uuid),
+                "source_item_key": "Inbox/2.eml",
+                "source_relative_path": "Inbox/2.eml",
+            }
+        )
+        writer.append(
+            {
+                "event": "item_parse_failed",
+                "import_uuid": import_uuid,
+                "timestamp": timestamp,
+                "source_item_key": "Inbox/2.eml",
+                "error_class": "parse",
+                "error_message": "malformed message",
+            }
+        )
+        writer.append(
+            {
+                "event": "item_reparsed",
+                "import_uuid": import_uuid,
+                "timestamp": timestamp,
+                "source_item_key": "Inbox/2.eml",
+                "final_relative_path": "eml/pst/reparsed.eml",
+                "file_hash": "d" * 64,
+                "size_bytes": 11,
+            }
+        )
+        purge: dict[str, JSONValue] = {
+            "import_uuid": import_uuid,
+            "timestamp": timestamp,
+            "source_item_key": "Inbox/1.eml",
+            "relative_path": "eml/pst/message.eml",
+            "file_hash": "c" * 64,
+            "shared_reference_count": 0,
+            "physical_delete": True,
+        }
+        writer.append({"event": "purge_intent", **purge})
+        writer.append({"event": "purged", **purge})
+        writer.append(
+            {
+                "event": "generation_switch_prepared",
+                "import_uuid": import_uuid,
+                "timestamp": timestamp,
+                "replaces_import_uuid": previous_uuid,
+            }
+        )
+        writer.append(
+            {
+                "event": "generation_switch_committed",
+                "import_uuid": import_uuid,
+                "timestamp": timestamp,
+                "replaces_import_uuid": previous_uuid,
+            }
+        )
+        writer.append(
+            {
+                "event": "generation_superseded",
+                "import_uuid": import_uuid,
+                "timestamp": timestamp,
+                "superseded_import_uuid": previous_uuid,
+            }
+        )
+        writer.append(
+            {
+                "event": "generation_restored",
+                "import_uuid": import_uuid,
+                "timestamp": timestamp,
+                "restored_import_uuid": previous_uuid,
+                "superseded_import_uuid": import_uuid,
+            }
+        )
+
+    events = list(PstManifestReader(tmp_path, import_uuid).read_all_events())
+    item_state: dict[str, str] = {}
+    for event in events:
+        event_name = str(event["event"])
+        source_item_key = event.get("source_item_key")
+        if not isinstance(source_item_key, str):
+            continue
+        if event_name == "item_discovered":
+            item_state[source_item_key] = "discovered"
+        elif event_name == "item_saved":
+            item_state[source_item_key] = "saved"
+        elif event_name in {"item_parse_failed", "item_oversize"}:
+            item_state[source_item_key] = "failed"
+        elif event_name == "item_reparsed":
+            item_state[source_item_key] = "saved"
+        elif event_name == "purge_intent":
+            item_state[source_item_key] = "purge_pending"
+        elif event_name == "purged":
+            item_state[source_item_key] = "purged"
+
+    assert item_state == {"Inbox/1.eml": "purged", "Inbox/2.eml": "saved"}
+    assert [event["event"] for event in events[-4:]] == [
+        "generation_switch_prepared",
+        "generation_switch_committed",
+        "generation_superseded",
+        "generation_restored",
+    ]
 
 
 def test_pst_static_snapshots_are_immutable(tmp_path: Path) -> None:
