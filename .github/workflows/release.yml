@@ -1,0 +1,107 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  readpst:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install MSYS2 and libpst
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-libpst
+
+      - name: Fetch and patch readpst
+        shell: pwsh
+        run: pwsh -NoProfile -File .\tools\fetch_readpst.ps1 -Msys2Root C:\msys64
+
+      - name: Smoke test bundled converter
+        shell: pwsh
+        run: |
+          $readpst = (Resolve-Path .\vendor\readpst\readpst.exe).Path
+          & $readpst -V
+          if ($LASTEXITCODE -ne 0) { throw "readpst -V failed with exit code $LASTEXITCODE" }
+
+      - name: Verify GPL release materials and checksums
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path .\vendor\readpst).Path
+          $metadataPath = Join-Path $root "readpst-artifacts.json"
+          $checksumPath = Join-Path $root "SHA256SUMS"
+          $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+          $required = @("readpst.exe", "lspst.exe", "COPYING", "readpst.exe.manifest", "readpst-artifacts.json", "SHA256SUMS")
+          foreach ($name in $required) {
+            if (-not (Test-Path -LiteralPath (Join-Path $root $name) -PathType Leaf)) {
+              throw "Missing GPL release material: $name"
+            }
+          }
+          if ((Get-Content -LiteralPath (Join-Path $root "COPYING") -Raw) -notmatch "GNU GENERAL PUBLIC LICENSE") {
+            throw "vendor/readpst/COPYING is not a GPL license text"
+          }
+          if ($metadata.package.licenses -notmatch "GPL-2\.0") {
+            throw "The fetched libpst package is not identified as GPL-2.0-or-later"
+          }
+          if ($metadata.source.commit -notmatch "^[0-9a-f]{40}$") {
+            throw "The corresponding source is not pinned to a full commit"
+          }
+          foreach ($artifact in $metadata.artifacts) {
+            $path = Join-Path $root $artifact.path
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Manifest-listed artifact is missing: $($artifact.path)"
+            }
+            $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToUpperInvariant()
+            if ($actual -ne $artifact.sha256) {
+              throw "SHA-256 mismatch for $($artifact.path): expected $($artifact.sha256), got $actual"
+            }
+          }
+          foreach ($line in Get-Content -LiteralPath $checksumPath) {
+            if ($line -notmatch "^([0-9A-Fa-f]{64})\s{2}(.+)$") {
+              throw "Malformed SHA256SUMS entry: $line"
+            }
+            $checksumPathEntry = Join-Path $root $Matches[2]
+            if (-not (Test-Path -LiteralPath $checksumPathEntry -PathType Leaf)) {
+              throw "SHA256SUMS references a missing file: $($Matches[2])"
+            }
+            $checksumActual = (Get-FileHash -LiteralPath $checksumPathEntry -Algorithm SHA256).Hash
+            if ($checksumActual -ine $Matches[1]) {
+              throw "SHA256SUMS mismatch for $($Matches[2])"
+            }
+          }
+          if ($metadata.readpst_manifest.readpst_sha256_before -notmatch "^[0-9A-F]{64}$" -or
+              $metadata.readpst_manifest.readpst_sha256_after -notmatch "^[0-9A-F]{64}$") {
+            throw "The readpst pre/post manifest patch hashes are missing"
+          }
+          Write-Host "GPL release materials and all artifact hashes are valid."
+
+      - name: Create readpst release artifact
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}"
+          $archive = Join-Path $env:RUNNER_TEMP "mail-dock-readpst-$version.zip"
+          Compress-Archive -Path .\vendor\readpst\* -DestinationPath $archive -Force
+          "archive=$archive" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mail-dock-readpst-${{ github.ref_name }}
+          path: ${{ runner.temp }}/mail-dock-readpst-${{ github.ref_name }}.zip
+
+      - name: Publish GitHub release asset
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ runner.temp }}/mail-dock-readpst-${{ github.ref_name }}.zip

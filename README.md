@@ -60,6 +60,35 @@ uv run pytest -m "not docker and not gui"
 
 The default test command excludes Docker-based integration tests and GUI tests, and is suitable for the Windows mock-based development path.
 
+## PST converter and licensing
+
+PST import uses the independently executed `readpst` and `lspst` programs from
+the MSYS2 UCRT64 package `mingw-w64-ucrt-x86_64-libpst`. The converter is not
+built into the Python process and the application does not modify the source
+PST. PST-to-EML conversion reconstructs messages, so keep the original PST in
+your own long-term backup set after importing it.
+
+On Windows, install MSYS2 with the UCRT64 environment and the Windows SDK
+(for `mt.exe`), then fetch the converter and its runtime DLLs with:
+
+```powershell
+pwsh -NoProfile -File .\tools\fetch_readpst.ps1 -Msys2Root C:\msys64
+```
+
+The script reads the installed MSYS2 package metadata, copies the converter
+and its DLL dependencies into `vendor/readpst/`, applies the tracked
+`readpst.exe.manifest` (`activeCodePage=UTF-8` and `longPathAware=true`), and
+downloads the corresponding libpst source archive pinned to the package
+commit. It writes `readpst-artifacts.json` and `SHA256SUMS`; the manifest
+contains the package versions, licenses, source URL, and the SHA-256 values
+before and after the Windows manifest resource patch.
+
+The GPL-2.0-or-later notice is kept in `vendor/readpst/COPYING`. Do not replace
+the source archive with a URL-only reference when preparing a release: the
+release workflow checks that the converter binaries, GPL notice, corresponding
+source archive, provenance manifest, and checksums are all present before
+creating the readpst artifact.
+
 ## GUI
 
 Start the desktop application with either command:

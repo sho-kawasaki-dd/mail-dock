@@ -316,11 +316,11 @@
 
 ### **3.8 グループH: 配布・GPL遵守（*A・Gに依存*）**
 
-- [ ] `tools/fetch_readpst.ps1` を確定版にし、取得物のSHA-256を記録する
-- [ ] `vendor/readpst/COPYING`（GPL-2.0全文）を配置する
-- [ ] `THIRD-PARTY-LICENSES.md` の「Phase 4.5で追記予定」コメントを埋め、readpst / libpst / 同梱DLLごとに名称・バージョン・ライセンス・対応ソース・取得元・SHA-256を列記する
-- [ ] `README.md` に readpst入手・検証手順と「原本PSTを保管すること」の注意を追記する
-- [ ] `.github/workflows/release.yml` を新設し、MSYS2から取得 → クリーンなWindowsで `readpst -V` のスモークテスト → GPL成果物（バイナリ＋COPYING＋対応ソース＋SHA-256）が揃わない場合にリリースを失敗させるチェックを実装する（PyInstaller/Inno Setup本体は含めない。D-12）
+- [x] `tools/fetch_readpst.ps1` を確定版にし、取得物のSHA-256を記録する
+- [x] `vendor/readpst/COPYING`（GPL-2.0全文）を配置する
+- [x] `THIRD-PARTY-LICENSES.md` の「Phase 4.5で追記予定」コメントを埋め、readpst / libpst / 同梱DLLごとに名称・バージョン・ライセンス・対応ソース・取得元・SHA-256を列記する
+- [x] `README.md` に readpst入手・検証手順と「原本PSTを保管すること」の注意を追記する
+- [x] `.github/workflows/release.yml` を新設し、MSYS2から取得 → クリーンなWindowsで `readpst -V` のスモークテスト → GPL成果物（バイナリ＋COPYING＋対応ソース＋SHA-256）が揃わない場合にリリースを失敗させるチェックを実装する（PyInstaller/Inno Setup本体は含めない。D-12）
 
 ---
 

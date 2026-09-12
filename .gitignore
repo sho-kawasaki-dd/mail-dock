@@ -43,6 +43,7 @@ test-storage/
 # applied to readpst.exe by tools/fetch_readpst.ps1, so it must stay tracked (D-19).
 vendor/readpst/*
 !vendor/readpst/readpst.exe.manifest
+!vendor/readpst/COPYING
 
 # IDE and editor files
 .vscode/

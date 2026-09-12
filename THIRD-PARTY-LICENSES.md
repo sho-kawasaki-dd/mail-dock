@@ -10,7 +10,7 @@ mail-dock uses the following third-party packages. License names and project lin
 | beautifulsoup4 | MIT | https://www.crummy.com/software/BeautifulSoup/ |
 | charset-normalizer | MIT | https://github.com/jawah/charset_normalizer |
 | platformdirs | MIT | https://github.com/platformdirs/platformdirs |
-| readpst / libpst 0.6.76 | GPL-2.0-or-later | https://github.com/buggins/libpst |
+| readpst / libpst 0.6.76.r79.gcc600ee-1 | GPL-2.0-or-later | https://github.com/pst-format/libpst |
 | MSYS2 UCRT64 runtime DLLs bundled with readpst | See the corresponding upstream package licenses | https://packages.msys2.org/ |
 
 The application is distributed under GPL-3.0-or-later. The license terms of each dependency apply to that dependency; this file is an inventory, not a replacement for the upstream license texts.
@@ -19,8 +19,8 @@ The application is distributed under GPL-3.0-or-later. The license terms of each
 
 The Windows converter was obtained from the MSYS2 package
 `mingw-w64-ucrt-x86_64-libpst` in the UCRT64 environment. The observed
-converter version is `readpst / libpst v0.6.76` and the companion utility
-reports `lspst / libpst v0.6.76`. The package identifies the license as
+converter version is `readpst / libpst v0.6.76.r79.gcc600ee-1` and the
+companion utility reports the same libpst build. The package identifies the license as
 GPL-2.0-or-later. `vendor/readpst/COPYING` is the corresponding license text.
 
 `readpst.exe` and `lspst.exe` load the following MSYS2 UCRT64 runtime DLLs.
@@ -50,13 +50,32 @@ Windows system DLLs reported by `ldd` are not bundled.
 | `vendor/readpst/libgmodule-2.0-0.dll` | GLib module runtime | [MSYS2 package repository](https://packages.msys2.org/) | `702E4C3A331D116CF96AC4FB4F04DEC64AEA7F8236220A639E123EC033B7D4B7` |
 | `vendor/readpst/libpcre2-8-0.dll` | PCRE2 regular expression runtime | [MSYS2 package repository](https://packages.msys2.org/) | `752F04BB7A60D2A049788FFAEC14B45602C4DEC4C29534001DFCF434D26DA19C` |
 | `vendor/readpst/COPYING` | GPL license text for libpst | GPL-2.0-or-later / [libpst](https://github.com/buggins/libpst) | `8177F97513213526DF2CF6184D8FF986C675AFB514D4E68A404010521B880643` |
+| `vendor/readpst/libpst-cc600ee98c4ed23b8ab0bc2cf6b6c6e9cb587e89.tar.gz` | Corresponding libpst source | GPL-2.0-or-later / [libpst commit cc600ee](https://github.com/pst-format/libpst/tree/cc600ee98c4ed23b8ab0bc2cf6b6c6e9cb587e89) | `D1F270D54C5296D1B5D3A6C0A70685C92DDAB58A1D34C373CF5B59215E2ACFEA` |
 
-The hashes above were calculated on 2026-09-08 with PowerShell
+The hashes above were calculated on 2026-09-12 with PowerShell
 `Get-FileHash -Algorithm SHA256` against the files currently present in
 `vendor/readpst/`. Recalculate them whenever the MSYS2 package or any bundled
 runtime DLL is refreshed. The exact package versions and licenses of the
-transitive runtime DLLs must be recorded from their corresponding MSYS2
-package metadata before a release.
+transitive runtime DLLs are recorded by `vendor/readpst/readpst-artifacts.json`
+and must be checked against their corresponding MSYS2 package metadata before
+a release. The current package provenance is:
+
+| MSYS2 package | Version | License | Corresponding source |
+| --- | --- | --- | --- |
+| `mingw-w64-ucrt-x86_64-bzip2` | `1.0.8-4` | custom | https://sourceware.org/bzip2/ |
+| `mingw-w64-ucrt-x86_64-gcc-libs` | `16.2.0-3` | GPL-3.0-or-later WITH GCC-exception-3.1; LGPL-2.1-or-later | https://gcc.gnu.org |
+| `mingw-w64-ucrt-x86_64-gettext-runtime` | `1.0-1` | GPL-3.0-or-later; LGPL-2.1-or-later | https://www.gnu.org/software/gettext/ |
+| `mingw-w64-ucrt-x86_64-glib2` | `2.88.3-1` | LGPL-2.1-or-later | https://gitlab.gnome.org/GNOME/glib |
+| `mingw-w64-ucrt-x86_64-libffi` | `3.8.0-1` | MIT | https://sourceware.org/libffi |
+| `mingw-w64-ucrt-x86_64-libgsf` | `1.14.58-1` | LGPL-2.1-only | https://gitlab.gnome.org/GNOME/libgsf.git |
+| `mingw-w64-ucrt-x86_64-libiconv` | `1.19-1` | LGPL-2.1-or-later; GPL-3.0-or-later documentation | https://www.gnu.org/software/libiconv/ |
+| `mingw-w64-ucrt-x86_64-libpst` | `0.6.76.r79.gcc600ee-1` | GPL-2.0-or-later | https://github.com/pst-format/libpst |
+| `mingw-w64-ucrt-x86_64-libsystre` | `1.0.2-2` | BSD-2-Clause | https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-libsystre |
+| `mingw-w64-ucrt-x86_64-libtre` | `0.9.0-2` | BSD | https://github.com/laurikari/tre |
+| `mingw-w64-ucrt-x86_64-libwinpthread` | `14.0.0.r353.g6df76fa52-2` | MIT; BSD-3-Clause-Clear | https://www.mingw-w64.org/ |
+| `mingw-w64-ucrt-x86_64-libxml2` | `2.15.3-3` | MIT | https://gitlab.gnome.org/GNOME/libxml2/-/wikis/home |
+| `mingw-w64-ucrt-x86_64-pcre2` | `10.48-3` | BSD-3-Clause | https://pcre.org/ |
+| `mingw-w64-ucrt-x86_64-zlib` | `1.3.2-2` | Zlib | https://www.zlib.net/ |
 
 ### Manifest patch applied to `readpst.exe` (D-19)
 
