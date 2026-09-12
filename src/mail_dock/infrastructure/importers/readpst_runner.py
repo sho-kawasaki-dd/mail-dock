@@ -86,9 +86,7 @@ class ReadPstRunner:
         """
 
         selected_charset = options.charset if options is not None else (charset or "cp932")
-        selected_deleted = (
-            options.include_deleted if options is not None else bool(include_deleted)
-        )
+        selected_deleted = options.include_deleted if options is not None else bool(include_deleted)
         if not selected_charset or "\x00" in selected_charset:
             raise ValueError("charset must be a non-empty string without NUL")
 

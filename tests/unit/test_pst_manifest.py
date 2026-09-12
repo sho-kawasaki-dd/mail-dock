@@ -125,14 +125,10 @@ def test_pst_manifest_reader_rejects_invalid_event_transition(tmp_path: Path) ->
         "file_hash": "c" * 64,
         "size_bytes": 10,
     }
-    payload = (
-        str(invalid).replace("'", '"').replace("False", "false").encode("utf-8")
-    )
+    payload = str(invalid).replace("'", '"').replace("False", "false").encode("utf-8")
     checksum = zlib.crc32(payload) & 0xFFFFFFFF
     lines[1] = payload + f"|CRC32:{checksum:08x}\n".encode("ascii")
-    lines.append(
-        path.read_bytes().splitlines(keepends=True)[1]
-    )
+    lines.append(path.read_bytes().splitlines(keepends=True)[1])
     path.write_bytes(b"".join(lines))
 
     with pytest.raises(ManifestCorruptError):

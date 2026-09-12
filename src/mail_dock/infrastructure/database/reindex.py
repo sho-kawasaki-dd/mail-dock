@@ -146,20 +146,12 @@ def _rebuild_pst_manifests(
                     if isinstance(candidate, str):
                         replaces_uuid = candidate
                         timestamp = event.get("timestamp")
-                        superseded_at[candidate] = (
-                            timestamp
-                            if isinstance(timestamp, str)
-                            else None
-                        )
+                        superseded_at[candidate] = timestamp if isinstance(timestamp, str) else None
                 elif event.get("event") == "generation_restored":
                     candidate = event.get("superseded_import_uuid")
                     if isinstance(candidate, str):
                         timestamp = event.get("timestamp")
-                        superseded_at[candidate] = (
-                            timestamp
-                            if isinstance(timestamp, str)
-                            else None
-                        )
+                        superseded_at[candidate] = timestamp if isinstance(timestamp, str) else None
             descriptors[import_uuid] = (reader, replaces_uuid)
         except (OSError, TypeError, ValueError) as error:
             _LOGGER.warning(

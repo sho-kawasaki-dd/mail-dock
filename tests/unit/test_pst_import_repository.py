@@ -92,9 +92,7 @@ def test_pst_import_items_are_idempotent_and_batches_are_atomic(
     assert db_conn.execute("SELECT COUNT(*) FROM messages").fetchone() == (0,)
 
 
-def test_pst_message_rejects_remote_fields(
-    db_conn: sqlite3.Connection, tmp_path: Path
-) -> None:
+def test_pst_message_rejects_remote_fields(db_conn: sqlite3.Connection, tmp_path: Path) -> None:
     repository, folder_id = _repository(db_conn, tmp_path / "metadata.db")
     record = {
         "account_id": "pst-account",

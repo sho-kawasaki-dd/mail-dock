@@ -53,6 +53,7 @@ _INCOMPLETE_STATUSES = frozenset(
     }
 )
 
+
 class StorageWriteGate(Protocol):
     """Minimal storage-state contract used while a converter is running."""
 
@@ -263,14 +264,11 @@ def verify_generation(
         if not isinstance(message_id, int) or saved_event is None:
             raise UnreadableArchive(f"PST item has no durable message: {source_key}")
         if (
-            discovered[source_key].get("source_relative_path")
-            != item.get("source_relative_path")
+            discovered[source_key].get("source_relative_path") != item.get("source_relative_path")
             or discovered[source_key].get("folder_relative_path")
             != item.get("folder_relative_path")
-            or discovered[source_key].get("source_size_bytes")
-            != item.get("source_size_bytes")
-            or discovered[source_key].get("source_sha256")
-            != item.get("source_sha256")
+            or discovered[source_key].get("source_size_bytes") != item.get("source_size_bytes")
+            or discovered[source_key].get("source_sha256") != item.get("source_sha256")
             or item.get("final_relative_path") != saved_event.get("final_relative_path")
             or item.get("source_sha256") is None
             or saved_event.get("file_hash") is None
@@ -296,12 +294,9 @@ def verify_generation(
         error_class = item.get("error_class")
         if error_class is not None:
             failed_count += 1
-            expected_event = (
-                "item_oversize" if error_class == "oversize" else "item_parse_failed"
-            )
+            expected_event = "item_oversize" if error_class == "oversize" else "item_parse_failed"
             if not any(
-                event.get("event") == expected_event
-                and event.get("source_item_key") == source_key
+                event.get("event") == expected_event and event.get("source_item_key") == source_key
                 for event in events
             ):
                 raise UnreadableArchive(f"PST item error is not in the manifest: {source_key}")
@@ -323,12 +318,8 @@ def recover_generation_switch(
     """Restore the old generation when a prepared switch lacks a commit event."""
 
     events = list(manifest.read_events())
-    prepared = any(
-        event.get("event") == "generation_switch_prepared" for event in events
-    )
-    committed = any(
-        event.get("event") == "generation_switch_committed" for event in events
-    )
+    prepared = any(event.get("event") == "generation_switch_prepared" for event in events)
+    committed = any(event.get("event") == "generation_switch_committed" for event in events)
     if prepared and not committed:
         repository.rollback_generation_switch(import_id, replaces_id)
 
@@ -448,9 +439,7 @@ def reconcile_detached_import(
         )
         return False
 
-    existing = {
-        str(item.get("source_item_key")): item for item in repository.list_items(import_id)
-    }
+    existing = {str(item.get("source_item_key")): item for item in repository.list_items(import_id)}
     saved_events = _event_by_item(events, "item_saved")
     _ensure_write_allowed(storage_state)
     repository.begin_batch()
@@ -770,9 +759,7 @@ def run_stage_a(
         _ensure_write_allowed(storage_state)
         import_record = repository.get_import(import_id)
         operation = (
-            "pst_reimport"
-            if import_record and import_record.get("replaces_id")
-            else "pst_import"
+            "pst_reimport" if import_record and import_record.get("replaces_id") else "pst_import"
         )
         _record_pst_audit(
             repository,
@@ -1079,7 +1066,9 @@ def run_stage_b(
                     "error_message": (
                         "EML exceeds the 100 MiB parse limit"
                         if oversize
-                        else parsed.parse_error if parse_failed else None
+                        else parsed.parse_error
+                        if parse_failed
+                        else None
                     ),
                     "attempt_count": int(item.get("attempt_count") or 0) + 1,
                 }
@@ -1105,14 +1094,10 @@ def run_stage_b(
                     repository.upsert_import_item(item_update)
                 batch_items = list(repository.list_items(import_id))
                 batch_ingested = sum(
-                    1
-                    for item in batch_items
-                    if item.get("status") in {"saved", "completed"}
+                    1 for item in batch_items if item.get("status") in {"saved", "completed"}
                 )
                 batch_failed = sum(
-                    1
-                    for item in batch_items
-                    if item.get("error_class") in {"parse", "oversize"}
+                    1 for item in batch_items if item.get("error_class") in {"parse", "oversize"}
                 )
                 repository.update_import_status(
                     import_id,
@@ -1140,7 +1125,9 @@ def run_stage_b(
         final_status = (
             "failed_resumable"
             if remaining_count
-            else "completed_with_errors" if failed_count else "completed"
+            else "completed_with_errors"
+            if failed_count
+            else "completed"
         )
         _ensure_write_allowed(storage_state)
         repository.update_import_status(

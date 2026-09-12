@@ -68,9 +68,7 @@ def test_save_from_file_streams_and_deduplicates_eml(
     storage = EmlStorage(tmp_storage_root)
 
     first = storage.save_from_file("account", None, source)
-    second = storage.save_from_file(
-        "account", datetime(2030, 1, 1, tzinfo=UTC), source
-    )
+    second = storage.save_from_file("account", datetime(2030, 1, 1, tzinfo=UTC), source)
 
     assert first.file_hash == hashlib.sha256(raw).hexdigest()
     assert first.size_bytes == len(raw)

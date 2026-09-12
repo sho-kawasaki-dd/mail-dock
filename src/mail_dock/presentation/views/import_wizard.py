@@ -260,7 +260,9 @@ class ImportWizard(QWizard):
 
     def _show_cancelled(self, _value: object) -> None:
         self._import_token = None
-        self._summary_label.setText("PSTの取り込みをキャンセルしました。未完了の処理は再開できます。")
+        self._summary_label.setText(
+            "PSTの取り込みをキャンセルしました。未完了の処理は再開できます。"
+        )
         self.next()
 
     def _show_error(self, value: object) -> None:

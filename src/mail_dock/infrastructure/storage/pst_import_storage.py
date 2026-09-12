@@ -82,10 +82,7 @@ class PstImportStorage(BasePstImportStorage):
 
     def staging_root(self, storage_root: os.PathLike[str], import_uuid: str) -> Path:
         return (
-            self.normalize_path(storage_root)
-            / "tmp"
-            / "pstimp"
-            / import_uuid.replace("-", "")[:8]
+            self.normalize_path(storage_root) / "tmp" / "pstimp" / import_uuid.replace("-", "")[:8]
         )
 
     def marker_path(self, staging_root: os.PathLike[str]) -> Path:
@@ -95,9 +92,7 @@ class PstImportStorage(BasePstImportStorage):
         try:
             Path(staging_root).mkdir(parents=True, exist_ok=False)
         except OSError as error:
-            raise StorageDetachedError(
-                f"Could not create PST staging: {staging_root}"
-            ) from error
+            raise StorageDetachedError(f"Could not create PST staging: {staging_root}") from error
 
     def remove_staging(self, staging_root: os.PathLike[str]) -> None:
         try:
@@ -105,9 +100,7 @@ class PstImportStorage(BasePstImportStorage):
         except FileNotFoundError:
             return
         except OSError as error:
-            raise StorageDetachedError(
-                f"Could not discard PST staging: {staging_root}"
-            ) from error
+            raise StorageDetachedError(f"Could not discard PST staging: {staging_root}") from error
 
     def read_marker(self, marker_path: os.PathLike[str]) -> Mapping[str, JSONValue]:
         try:
@@ -119,9 +112,7 @@ class PstImportStorage(BasePstImportStorage):
             raise UnreadableArchive("Stage A marker must contain a JSON object")
         return payload
 
-    def write_marker(
-        self, marker_path: os.PathLike[str], payload: Mapping[str, JSONValue]
-    ) -> None:
+    def write_marker(self, marker_path: os.PathLike[str], payload: Mapping[str, JSONValue]) -> None:
         marker = Path(marker_path)
         encoded = _canonical_json(payload) + b"\n"
         temporary_path = marker.with_name(f".{marker.name}.{os.urandom(16).hex()}.tmp")
@@ -132,17 +123,13 @@ class PstImportStorage(BasePstImportStorage):
                 os.fsync(marker_file.fileno())
             temporary_path.replace(marker)
             if os.name != "nt":
-                directory_fd = os.open(
-                    marker.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-                )
+                directory_fd = os.open(marker.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
                 try:
                     os.fsync(directory_fd)
                 finally:
                     os.close(directory_fd)
         except OSError as error:
-            raise StorageDetachedError(
-                f"Could not persist Stage A marker: {marker}"
-            ) from error
+            raise StorageDetachedError(f"Could not persist Stage A marker: {marker}") from error
         finally:
             with suppress(OSError):
                 temporary_path.unlink(missing_ok=True)
@@ -214,9 +201,7 @@ class PstImportStorage(BasePstImportStorage):
         ]
         return items, folder_records
 
-    def resolve_staging_item(
-        self, staging_root: os.PathLike[str], relative_path: str
-    ) -> Path:
+    def resolve_staging_item(self, staging_root: os.PathLike[str], relative_path: str) -> Path:
         root = Path(staging_root).resolve()
         candidate = (root / Path(relative_path)).resolve()
         try:
@@ -229,9 +214,7 @@ class PstImportStorage(BasePstImportStorage):
             raise UnreadableArchive(f"PST staging item is missing: {relative_path}")
         return candidate
 
-    def read_staged_message(
-        self, source_path: os.PathLike[str], *, parse: bool
-    ) -> StagedMessage:
+    def read_staged_message(self, source_path: os.PathLike[str], *, parse: bool) -> StagedMessage:
         if not parse:
             return StagedMessage(ParsedMessage())
         path = Path(source_path)

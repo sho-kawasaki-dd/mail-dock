@@ -295,9 +295,7 @@ class BasePstImportStorage(ABC):
         """Read a Stage A marker payload."""
 
     @abstractmethod
-    def write_marker(
-        self, marker_path: os.PathLike[str], payload: Mapping[str, JSONValue]
-    ) -> None:
+    def write_marker(self, marker_path: os.PathLike[str], payload: Mapping[str, JSONValue]) -> None:
         """Durably publish a Stage A marker atomically."""
 
     @abstractmethod
@@ -307,15 +305,11 @@ class BasePstImportStorage(ABC):
         """Build deterministic inventories from a staging tree."""
 
     @abstractmethod
-    def resolve_staging_item(
-        self, staging_root: os.PathLike[str], relative_path: str
-    ) -> Path:
+    def resolve_staging_item(self, staging_root: os.PathLike[str], relative_path: str) -> Path:
         """Resolve and validate one item below a staging root."""
 
     @abstractmethod
-    def read_staged_message(
-        self, source_path: os.PathLike[str], *, parse: bool
-    ) -> StagedMessage:
+    def read_staged_message(self, source_path: os.PathLike[str], *, parse: bool) -> StagedMessage:
         """Read and parse one staged EML, or return metadata for an oversize file."""
 
     @abstractmethod
@@ -329,7 +323,5 @@ class BasePstImportStorage(ABC):
         """Hash an archive source and capture metadata without modifying it."""
 
     @abstractmethod
-    def relative_path(
-        self, root: os.PathLike[str], child: os.PathLike[str]
-    ) -> str:
+    def relative_path(self, root: os.PathLike[str], child: os.PathLike[str]) -> str:
         """Return a storage-relative POSIX path."""

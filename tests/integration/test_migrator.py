@@ -54,9 +54,7 @@ def test_pst_import_migration_creates_import_tables_and_indexes(
 ) -> None:
     assert migrate(db_conn, tmp_path / "metadata.db") == 6
 
-    import_columns = {
-        row[1] for row in db_conn.execute("PRAGMA table_info(pst_imports)")
-    }
+    import_columns = {row[1] for row in db_conn.execute("PRAGMA table_info(pst_imports)")}
     assert import_columns == {
         "id",
         "import_uuid",
@@ -79,9 +77,7 @@ def test_pst_import_migration_creates_import_tables_and_indexes(
         "finished_at",
         "error_message",
     }
-    item_columns = {
-        row[1] for row in db_conn.execute("PRAGMA table_info(pst_import_items)")
-    }
+    item_columns = {row[1] for row in db_conn.execute("PRAGMA table_info(pst_import_items)")}
     assert item_columns == {
         "import_id",
         "source_item_key",
@@ -114,18 +110,14 @@ def test_pst_import_migration_creates_import_tables_and_indexes(
         ).fetchone()[0]
         for row in db_conn.execute("PRAGMA index_list(pst_imports)")
     }
-    assert indexes["idx_pst_src"] == (
-        "CREATE INDEX idx_pst_src\nON pst_imports(source_sha256)"
-    )
+    assert indexes["idx_pst_src"] == ("CREATE INDEX idx_pst_src\nON pst_imports(source_sha256)")
     assert indexes["uq_active_pst_source"] == (
         "CREATE UNIQUE INDEX uq_active_pst_source\n"
         "ON pst_imports(source_sha256)\n"
         "WHERE is_active = 1"
     )
 
-    foreign_keys = {
-        row[2] for row in db_conn.execute("PRAGMA foreign_key_list(pst_imports)")
-    }
+    foreign_keys = {row[2] for row in db_conn.execute("PRAGMA foreign_key_list(pst_imports)")}
     assert foreign_keys == {"accounts", "pst_imports"}
     item_foreign_keys = {
         row[2] for row in db_conn.execute("PRAGMA foreign_key_list(pst_import_items)")

@@ -470,8 +470,7 @@ def _pst_events_by_item(
     return {
         str(event["source_item_key"]): event
         for event in events
-        if event.get("event") == event_name
-        and isinstance(event.get("source_item_key"), str)
+        if event.get("event") == event_name and isinstance(event.get("source_item_key"), str)
     }
 
 
@@ -597,11 +596,7 @@ def reindex_pst(
         parsed = parse_eml(raw, None) if raw is not None else ParsedMessage()
         parse_error = parse_failed.get(source_item_key) or oversize.get(source_item_key)
         local_state = (
-            "purged"
-            if source_item_key in purged
-            else "active"
-            if is_active
-            else "trashed"
+            "purged" if source_item_key in purged else "active" if is_active else "trashed"
         )
         message: MessageRecord = {
             "account_id": account_id,

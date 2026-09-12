@@ -216,8 +216,7 @@ def build_pst_archive_root(
     trash_accounts = tuple(
         str(record["account_id"])
         for record in imports
-        if record.get("status") == "superseded"
-        and isinstance(record.get("account_id"), str)
+        if record.get("status") == "superseded" and isinstance(record.get("account_id"), str)
     )
     pst_trash = FolderTreeNode(
         key="pst-trash",

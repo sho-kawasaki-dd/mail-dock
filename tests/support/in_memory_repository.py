@@ -505,12 +505,15 @@ class InMemoryPstImportRepository(BasePstImportRepository):
         self.audit_log: list[dict[str, Any]] = []
         self.contents: dict[int, dict[str, str | None]] = {}
         self.batch_open = False
-        self._batch_snapshot: tuple[
-            dict[int, dict[str, Any]],
-            dict[tuple[int, str], dict[str, Any]],
-            dict[int, dict[str, Any]],
-            dict[int, dict[str, str | None]],
-        ] | None = None
+        self._batch_snapshot: (
+            tuple[
+                dict[int, dict[str, Any]],
+                dict[tuple[int, str], dict[str, Any]],
+                dict[int, dict[str, Any]],
+                dict[int, dict[str, str | None]],
+            ]
+            | None
+        ) = None
         self._next_import_id = 1
         self._next_folder_id = 1
         self._next_message_id = 1

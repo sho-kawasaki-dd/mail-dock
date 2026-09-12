@@ -221,23 +221,24 @@ def test_run_stage_a_publishes_inventory_and_atomic_marker(tmp_path: Path) -> No
 
 def test_run_stage_a_failure_marks_abandoned_and_discards_staging(tmp_path: Path) -> None:
     source, repository, import_uuid, import_id = _stage_a_import(tmp_path)
-    with PstManifestWriter(tmp_path, import_uuid) as manifest, pytest.raises(
-        ConverterFailed, match="fake readpst"
+    with (
+        PstManifestWriter(tmp_path, import_uuid) as manifest,
+        pytest.raises(ConverterFailed, match="fake readpst"),
     ):
-            run_stage_a(
-                repository,
-                manifest,
-                _FakeExtractor("failed"),
-                import_id=import_id,
-                import_uuid=import_uuid,
-                account_id="pst_account",
-                source=source,
-                storage_root=tmp_path,
-                source_snapshot=snapshot_source_file(source, pst_storage=PST_STORAGE),
-                readpst_version="0.6.76",
-                options=ImportOptions("Archive", "cp932"),
-                pst_storage=PST_STORAGE,
-            )
+        run_stage_a(
+            repository,
+            manifest,
+            _FakeExtractor("failed"),
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id="pst_account",
+            source=source,
+            storage_root=tmp_path,
+            source_snapshot=snapshot_source_file(source, pst_storage=PST_STORAGE),
+            readpst_version="0.6.76",
+            options=ImportOptions("Archive", "cp932"),
+            pst_storage=PST_STORAGE,
+        )
 
     stage_root = tmp_path / "tmp" / "pstimp" / "12345678"
     assert not stage_root.exists()
@@ -248,8 +249,9 @@ def test_run_stage_a_failure_marks_abandoned_and_discards_staging(tmp_path: Path
 
 def test_run_stage_a_cancellation_marks_abandoned_and_discards_staging(tmp_path: Path) -> None:
     source, repository, import_uuid, import_id = _stage_a_import(tmp_path)
-    with PstManifestWriter(tmp_path, import_uuid) as manifest, pytest.raises(
-        OperationCancelledError, match="fake extraction cancelled"
+    with (
+        PstManifestWriter(tmp_path, import_uuid) as manifest,
+        pytest.raises(OperationCancelledError, match="fake extraction cancelled"),
     ):
         run_stage_a(
             repository,
@@ -273,25 +275,23 @@ def test_run_stage_a_cancellation_marks_abandoned_and_discards_staging(tmp_path:
 def test_run_stage_a_does_not_write_or_delete_after_detach(tmp_path: Path) -> None:
     source, repository, import_uuid, import_id = _stage_a_import(tmp_path)
     gate = _WriteGate()
-    with PstManifestWriter(tmp_path, import_uuid) as manifest, pytest.raises(
-        StorageDetachedError
-    ):
-            run_stage_a(
-                repository,
-                manifest,
-                _FakeExtractor(before_progress=lambda: setattr(gate, "allowed", False)),
-                import_id=import_id,
-                import_uuid=import_uuid,
-                account_id="pst_account",
-                source=source,
-                storage_root=tmp_path,
-                source_snapshot=snapshot_source_file(source, pst_storage=PST_STORAGE),
-                readpst_version="0.6.76",
-                options=ImportOptions("Archive", "cp932"),
-                storage_state=gate,
-                on_progress=lambda _count: None,
-                pst_storage=PST_STORAGE,
-            )
+    with PstManifestWriter(tmp_path, import_uuid) as manifest, pytest.raises(StorageDetachedError):
+        run_stage_a(
+            repository,
+            manifest,
+            _FakeExtractor(before_progress=lambda: setattr(gate, "allowed", False)),
+            import_id=import_id,
+            import_uuid=import_uuid,
+            account_id="pst_account",
+            source=source,
+            storage_root=tmp_path,
+            source_snapshot=snapshot_source_file(source, pst_storage=PST_STORAGE),
+            readpst_version="0.6.76",
+            options=ImportOptions("Archive", "cp932"),
+            storage_state=gate,
+            on_progress=lambda _count: None,
+            pst_storage=PST_STORAGE,
+        )
 
     stage_root = tmp_path / "tmp" / "pstimp" / "12345678"
     assert stage_root.exists()
@@ -339,14 +339,14 @@ def test_reconcile_detached_import_rebuilds_inventory_for_resume(tmp_path: Path)
     gate = _WriteGate()
     with PstManifestWriter(tmp_path, import_uuid) as manifest:
         reconciled = reconcile_detached_import(
-                repository,
-                manifest,
-                PST_STORAGE,
-                import_id=import_id,
-                import_uuid=import_uuid,
-                storage_root=tmp_path,
-                storage_state=gate,
-            )
+            repository,
+            manifest,
+            PST_STORAGE,
+            import_id=import_id,
+            import_uuid=import_uuid,
+            storage_root=tmp_path,
+            storage_state=gate,
+        )
         assert reconciled is True, repository.audit_log
 
     assert repository.imports[import_id]["status"] == "cancelled_resumable"
@@ -481,8 +481,9 @@ def test_run_stage_b_cancellation_keeps_resumable_staging(tmp_path: Path) -> Non
 
     token = CancelToken()
     token.cancel()
-    with PstManifestWriter(tmp_path, import_uuid) as manifest, pytest.raises(
-        OperationCancelledError
+    with (
+        PstManifestWriter(tmp_path, import_uuid) as manifest,
+        pytest.raises(OperationCancelledError),
     ):
         run_stage_b(
             repository,
@@ -731,9 +732,7 @@ def test_resolve_incomplete_import_requires_choice_then_resumes_or_discards() ->
 def test_resolve_active_completed_import_requires_cancel_or_reimport() -> None:
     repository = InMemoryPstImportRepository()
     digest = "b" * 64
-    active_id = repository.create_import(
-        _record("complete", digest, status="completed", active=1)
-    )
+    active_id = repository.create_import(_record("complete", digest, status="completed", active=1))
 
     pending = resolve_import_job(repository, digest)
     assert pending.action is ImportJobAction.NEEDS_REIMPORT_DECISION

@@ -87,9 +87,7 @@ class ReadPstLocator:
         self._require_file(path, "readpst executable")
         if self._is_windows:
             missing = [
-                name
-                for name in _WINDOWS_READPST_DLLS
-                if not (self._vendor_dir / name).is_file()
+                name for name in _WINDOWS_READPST_DLLS if not (self._vendor_dir / name).is_file()
             ]
             if missing:
                 names = ", ".join(missing)

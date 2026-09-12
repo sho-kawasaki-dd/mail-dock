@@ -15,7 +15,7 @@ def test_parser_keeps_folder_lines_and_ignores_partial_lspst_diagnostics() -> No
         'Folder "受信トレイ"\r\n'
         "Email\tFrom: sender@example.com\tSubject: subject\r\n"
         'Folder "Archive/2024"\r\n'
-        'A second message_store has been found. Sorry, this must be an error.\r\n'
+        "A second message_store has been found. Sorry, this must be an error.\r\n"
         'Folder "送信済みアイテム"\r\n'
     )
 

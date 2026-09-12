@@ -49,10 +49,7 @@ def test_locator_reads_version_output(tmp_path: Path, monkeypatch: pytest.Monkey
         "mail_dock.infrastructure.importers.readpst_locator.subprocess.run", fake_run
     )
 
-    assert (
-        ReadPstLocator(tmp_path, is_windows=True).version()
-        == "readpst version 0.6.76"
-    )
+    assert ReadPstLocator(tmp_path, is_windows=True).version() == "readpst version 0.6.76"
     assert calls[0][0] == [str(tmp_path.resolve() / "readpst.exe"), "-V"]
     assert calls[0][1]["cwd"] == tmp_path.resolve()
 
