@@ -196,12 +196,28 @@
 
 ### **Group E: 5.1 テスト**
 
-- [ ] `tests/docker/dovecot` に、平文+STARTTLS必須構成・`LOGINDISABLED`構成・自己署名証明書構成を追加する
-- [ ] `tests/integration/` に STARTTLS接続・PLAINフォールバック・カスタムCA証明書接続の結合テストを追加する
-- [ ] `tests/unit/` にTLSモード分岐・CA証明書読み込み失敗時の `ConfigError`・SASL PLAINコールバックの単体テストを追加する
+> Group Aで追加した `tls_mode` / `LOGINDISABLED` PLAINフォールバック / カスタムCA証明書は、現行の `tests/unit/test_generic_imap.py` のFake接続テストだけでは実IMAPサーバーとの相互作用（実TLSネゴシエーション・実証明書検証・サーバー側の認証広告）を保証できない。既存の `tests/docker/compose.yaml` / `dovecot.conf` は暗黙的TLS＋通常`LOGIN`の1構成のみを提供しており、本グループで**改修**（新規追加ではなく既存構成の拡張）した上で、Docker/WSL環境が使える時点で**実際に実行して動作確認**する。
+
+- [ ] `tests/docker/compose.yaml` の `dovecot` サービスに、STARTTLS専用ポート（暗黙的TLSの `imaps` リスナーを持たない平文リスナー）を追加する。既存の暗黙的TLSポート（3994）は回帰用にそのまま維持し、既存の結合テストを壊さないことを確認する
+- [ ] `tests/docker/dovecot/dovecot.conf` を拡張し、以下の3構成を条件分岐または追加設定ファイルで再現する（新規サービスを増やさずポート/設定の出し分けで済ませられるか、Dovecotの `protocol imap { }` ブロックやポート単位の設定上書きで両立できるかをまず検証し、両立できない場合のみ `compose.yaml` にサービスを追加する）:
+  - 平文リスナー＋STARTTLS必須（`disable_plaintext_auth = yes` を非TLS接続に適用し、STARTTLS前の生`LOGIN`を拒否する）
+  - `LOGINDISABLED`（`disable_plaintext_auth = yes` をTLS確立後にも適用し、`LOGIN` コマンド自体を無効化してSASL PLAINのみ許可する）
+  - 自己署名証明書だが**テスト専用CA**が発行したサーバー証明書（`entrypoint.sh` でCA鍵・サーバー証明書のペアを起動時生成し、CA証明書だけをホスト側から読める場所へ書き出す。秘密鍵はコンテナ外へ出さない）
+- [ ] `tests/docker/dovecot/entrypoint.sh` を拡張し、上記のCA証明書生成・配置を行う（既存の自己署名証明書生成ロジックとの重複を避け、CA発行フローに置き換える）
+- [ ] `tests/support/imap_integration.py` の `ImapService` に `tls_mode` / `ca_cert_path` を追加し、`service()` が対応するポート・CA証明書パスを環境変数から解決できるようにする
+- [ ] `tests/support/imap_integration.py` の `make_fetcher()` を `tls_mode` / `ca_cert_path` に対応させ、`insecure_ssl_context()`（検証無効化）に頼らず、実際にCA証明書で検証させる接続経路を追加する（検証無効化はSTARTTLS/LOGINDISABLEDシナリオ用に残し、カスタムCA検証シナリオでは使わない）
+- [ ] `tests/integration/` に結合テストを追加し、実Dovecotに対して以下を確認する:
+  - STARTTLS接続 → `CAPABILITY` 再取得 → 通常`LOGIN`が成功すること
+  - `LOGINDISABLED`構成でSASL PLAIN認証が成功し、生の`LOGIN`が拒否されること
+  - 発行元CA証明書を指定した接続が証明書検証に成功すること
+  - 誤ったCA証明書パス、またはCA未指定でシステム信頼ストアに無い証明書に対しては、検証を無効化せずに接続が失敗すること
+  - STARTTLS必須構成に対しSTARTTLSを行わず`tls_mode="implicit"`で接続を試みると拒否されること
+- [ ] `tests/unit/` にTLSモード分岐・CA証明書読み込み失敗時の `ConfigError`・SASL PLAINコールバックの単体テストを追加する（Group Aで実施済み。上記Docker結合テストと重複させず、実サーバー特有の応答のみをDocker側に残す）
 - [ ] `tests/gui/test_settings_dialog.py` に接続方式・CA証明書欄の入力とダイアログ再検証ロジックのテストを追加する
 - [ ] `provider_type` 正規化マイグレーションと `account_snapshot` 再記録の結合テストを追加する
-- [ ] `tests/unit/test_onamae_imap.py` を `tests/unit/test_generic_imap.py` へリネームする（クラス名変更に追従）
+- [ ] `tests/unit/test_onamae_imap.py` を `tests/unit/test_generic_imap.py` へリネームする（クラス名変更に追従。Group Aで実施済み）
+- [ ] `tests/support/README.md` に、STARTTLS/LOGINDISABLED/カスタムCA構成の起動手順・関連環境変数（ポート・CA証明書パス）を追記する
+- [ ] **動作確認**: Docker/WSL環境が利用可能になった時点で `docker compose up -d` の上、上記3シナリオの結合テストを実際に実行し、緑になることを確認する（既存の暗黙的TLS結合テストが回帰していないことも合わせて確認する）。確認結果（実施日・環境・結果）をリポジトリメモリまたは本書に記録する
 
 ### **Group F: 5.1 ドキュメント整合**
 
@@ -355,7 +371,8 @@
 | `src/mail_dock/usecases/delete_remote.py` | Gmailの`expunge`拒否・ラベル区別削除 | Group J, M |
 | `src/mail_dock/presentation/views/dialogs/settings_dialog.py` | 接続方式・認証方式・OAuth連携UI | Group D, K |
 | `src/mail_dock/presentation/views/setup_wizard.py` | 認証方式選択・フォルダ重複警告 | Group K |
-| `tests/docker/dovecot` | STARTTLS/LOGINDISABLED/自己署名証明書構成 | Group E |
+| `tests/docker/dovecot` | STARTTLS/LOGINDISABLED/CA発行の自己署名証明書構成（既存の暗黙的TLS構成を維持したまま拡張） | Group E |
+| `tests/support/imap_integration.py` | `ImapService`/`make_fetcher()`の`tls_mode`/`ca_cert_path`対応 | Group E |
 
 ---
 
@@ -385,7 +402,7 @@
 各項目の完了を確認したうえで、対応するタスクのチェックボックスを埋めること。
 
 - [ ] V-1（ブロッカー）. 実Gmailで認可コード＋PKCE、refresh、XOAUTH2接続、`LIST`、`X-GM-MSGID` / `X-GM-THRID` / `X-GM-LABELS` の取得が成功すること。7日失効の待機実測と帯域制限到達は完了条件に含めない
-- [ ] V-2. 汎用IMAP（5.1）で、STARTTLS・`LOGINDISABLED`・カスタムCA証明書の3シナリオがDocker結合テストで通ること
+- [ ] V-2. 汎用IMAP（5.1）で、STARTTLS・`LOGINDISABLED`・カスタムCA証明書（誤ったCA/未指定時の検証失敗を含む）の3シナリオがDocker結合テストで通ること。既存の暗黙的TLS結合テストが回帰していないこと。Docker/WSL環境で実際に実行して確認した結果を記録すること
 - [ ] V-3. `007` 後処理がsnapshot追記・fsync後にDBを正規化し、各中断点からの再実行後も `reindex.py` が `provider_type="imap"` とTLS設定を復元すること
 - [ ] V-4. 実Gmailアカウント（またはOAuth2スタブ）でXOAUTH2接続・同期・EML保存が成功し、5.2aの時点でDB削除後もfetchマニフェストから `X-GM-*` が復元されること
 - [ ] V-5. Gmailアカウントに対する `delete_remote` の `mode="expunge"` が拒否され、`trash` のみ実行できること
