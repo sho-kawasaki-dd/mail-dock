@@ -31,7 +31,7 @@ from mail_dock.domain.search import BaseSearchRepository
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
 from mail_dock.infrastructure.database.pst_import_repository import SqlitePstImportRepository
 from mail_dock.infrastructure.database.search_repository import SqliteSearchRepository
-from mail_dock.infrastructure.fetchers.onamae_imap import OnamaeImapFetcher
+from mail_dock.infrastructure.fetchers.generic_imap import GenericImapFetcher
 from mail_dock.infrastructure.importers.readpst_importer import ReadPstImporter
 from mail_dock.infrastructure.security.keyring_store import (
     KeyringBackendStatus,
@@ -253,7 +253,7 @@ class AppContext:
             raise ConfigError(f"Account has no valid username: {account_id}")
         if isinstance(port, bool) or not isinstance(port, int) or port <= 0:
             raise ConfigError(f"Account has no valid port: {account_id}")
-        return OnamaeImapFetcher(
+        return GenericImapFetcher(
             host,
             username,
             load_credentials(self.credential_store, account_id),
@@ -271,7 +271,7 @@ class AppContext:
     ) -> BaseMailFetcher:
         """Create an unaffiliated fetcher for the setup connection test."""
 
-        return OnamaeImapFetcher(
+        return GenericImapFetcher(
             host,
             username,
             password,

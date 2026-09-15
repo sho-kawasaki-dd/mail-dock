@@ -7,7 +7,7 @@ import pytest
 
 from mail_dock.domain.errors import TransientError
 from mail_dock.domain.fetcher import CancelToken
-from mail_dock.infrastructure.fetchers.onamae_imap import OnamaeImapFetcher
+from mail_dock.infrastructure.fetchers.generic_imap import GenericImapFetcher
 from mail_dock.infrastructure.storage.eml_storage import EmlStorage
 from mail_dock.infrastructure.storage.manifest import ManifestWriter
 from mail_dock.infrastructure.storage.storage_root import initialize_root
@@ -24,7 +24,7 @@ from tests.support.imap_integration import (
 )
 
 
-class TransientFailureFetcher(OnamaeImapFetcher):
+class TransientFailureFetcher(GenericImapFetcher):
     """Inject connection-loss errors at the provider boundary for one UID."""
 
     def __init__(

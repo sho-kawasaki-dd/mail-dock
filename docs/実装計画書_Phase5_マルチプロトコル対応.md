@@ -160,15 +160,15 @@
 
 ### **Group A: 5.1 ドメイン層・フェッチャー**
 
-- [ ] `infrastructure/fetchers/onamae_imap.py` を `infrastructure/fetchers/generic_imap.py` にリネームし、クラス名を `GenericImapFetcher` に変更する（全参照を更新する）
-- [ ] クラス docstring を「ID/パスワード認証・XOAUTH2の両方に対応する任意のIMAP4rev1サーバー向けの実装」へ書き改める
-- [ ] コンストラクタに `tls_mode: Literal["implicit", "starttls"] = "implicit"` と `ca_cert_path: str | None = None` を追加する
-- [ ] `connect()` を分岐させる: `tls_mode="implicit"` は現行の `IMAP4_SSL` 経路、`tls_mode="starttls"` は `IMAP4` 接続 → `starttls(ssl_context=...)` → 以降は現行と同じ流れにする
-- [ ] `ca_cert_path` 指定時に `load_verify_locations(cafile=...)` を適用するヘルパーを追加し、失敗時は `ConfigError` を送出する
-- [ ] STARTTLS完了後（または暗黙的TLS確立直後）の `CAPABILITY` に `LOGINDISABLED` が含まれる場合、SASL PLAIN認証へ切り替える
-- [ ] `imap_common.wrap_imap_errors` に STARTTLS失敗・SASL認証失敗のエラー分類を追加する
-- [ ] `_TRASH_CANDIDATES` に英語圏の主要な慣用名を追加する
-- [ ] 既存の `iter_message_refs` / `iter_flags` / `iter_flags_since` / `delete_remote_message` 等の挙動・シグネチャを変更しない（回帰させない）
+- [x] `infrastructure/fetchers/onamae_imap.py` を `infrastructure/fetchers/generic_imap.py` にリネームし、クラス名を `GenericImapFetcher` に変更する（全参照を更新する）
+- [x] クラス docstring を「ID/パスワード認証・XOAUTH2の両方に対応する任意のIMAP4rev1サーバー向けの実装」へ書き改める
+- [x] コンストラクタに `tls_mode: Literal["implicit", "starttls"] = "implicit"` と `ca_cert_path: str | None = None` を追加する
+- [x] `connect()` を分岐させる: `tls_mode="implicit"` は現行の `IMAP4_SSL` 経路、`tls_mode="starttls"` は `IMAP4` 接続 → `starttls(ssl_context=...)` → 以降は現行と同じ流れにする
+- [x] `ca_cert_path` 指定時に `load_verify_locations(cafile=...)` を適用するヘルパーを追加し、失敗時は `ConfigError` を送出する
+- [x] STARTTLS完了後（または暗黙的TLS確立直後）の `CAPABILITY` に `LOGINDISABLED` が含まれる場合、SASL PLAIN認証へ切り替える
+- [x] `imap_common.wrap_imap_errors` に STARTTLS失敗・SASL認証失敗のエラー分類を追加する
+- [x] `_TRASH_CANDIDATES` に英語圏の主要な慣用名を追加する
+- [x] 既存の `iter_message_refs` / `iter_flags` / `iter_flags_since` / `delete_remote_message` 等の挙動・シグネチャを変更しない（回帰させない）
 
 ### **Group B: 5.1 DBスキーマとリポジトリ**
 

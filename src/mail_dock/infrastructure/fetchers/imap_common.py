@@ -191,8 +191,17 @@ def wrap_imap_errors(operation: str = "IMAP operation") -> Iterator[None]:
         raise TransientError(f"{operation}: temporary network failure") from error
     except imaplib.IMAP4.error as error:
         message = _exception_text(error)
-        if "AUTHENTICATIONFAILED" in message.upper():
+        upper_message = message.upper()
+        if any(
+            marker in upper_message
+            for marker in ("AUTHENTICATIONFAILED", "AUTHENTICATION", "SASL")
+        ):
             raise AuthenticationError(f"{operation}: authentication failed") from error
+        if "STARTTLS" in upper_message:
+            unsupported = ("NOT SUPPORTED", "UNSUPPORTED", "UNKNOWN", "BAD")
+            if any(marker in upper_message for marker in unsupported):
+                raise PermanentError(f"{operation}: STARTTLS is not supported") from error
+            raise TransientError(f"{operation}: STARTTLS negotiation failed") from error
         raise PermanentError(f"{operation}: IMAP command failed") from error
     except ssl.SSLError as error:
         if _is_certificate_verification_failure(error):

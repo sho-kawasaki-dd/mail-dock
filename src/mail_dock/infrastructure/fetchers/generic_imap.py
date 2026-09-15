@@ -1,4 +1,4 @@
-"""IMAP over SSL fetcher for Onamae and compatible IMAP servers.
+"""Generic IMAP fetcher with implicit TLS and STARTTLS support.
 
 The fetcher owns exactly one live IMAP connection. It translates all protocol
 operations at the infrastructure boundary; retry and backoff belong to the
@@ -12,9 +12,9 @@ import re
 import ssl
 from collections.abc import Iterable, Iterator
 from contextlib import suppress
-from typing import cast
+from typing import Literal, cast
 
-from mail_dock.domain.errors import AuthenticationError, PermanentError
+from mail_dock.domain.errors import AuthenticationError, ConfigError, PermanentError, TransientError
 from mail_dock.domain.fetcher import (
     BaseMailFetcher,
     CancelToken,
@@ -34,21 +34,23 @@ _NOMODSEQ_PATTERN = re.compile(r"\bNOMODSEQ\b", re.IGNORECASE)
 _TRASH_CANDIDATES = (
     "Trash",
     "ゴミ箱",
+    "Deleted",
     "Deleted Items",
     "Deleted Messages",
+    "Deleted Mail",
     "INBOX.Trash",
 )
 
 
-class OnamaeImapFetcher(BaseMailFetcher):
-    """Fetch mail through one authenticated IMAP4_SSL connection.
+class GenericImapFetcher(BaseMailFetcher):
+    """Fetch mail from an arbitrary authenticated IMAP4rev1 server.
 
-    The default settings match the Onamae IMAPS endpoint. This class does not
-    retry commands; retry and backoff are centralized in the use-case layer.
+    Both implicit TLS and STARTTLS are supported. This class does not retry
+    commands; retry and backoff are centralized in the use-case layer.
 
-    Real-server checks still required for Onamae are the hierarchy delimiter,
-    modified UTF-7 folder names, the concurrent-connection limit, timeout
-    behavior, and support for MOVE, UIDPLUS, and SPECIAL-USE.
+    Real-server checks still required for each provider are the hierarchy
+    delimiter, modified UTF-7 folder names, timeout behavior, and support for
+    MOVE, UIDPLUS, and SPECIAL-USE.
     """
 
     def __init__(
@@ -62,6 +64,8 @@ class OnamaeImapFetcher(BaseMailFetcher):
         read_timeout: float | None = None,
         remote_trash_folder: str | None = None,
         ssl_context: ssl.SSLContext | None = None,
+        tls_mode: Literal["implicit", "starttls"] = "implicit",
+        ca_cert_path: str | None = None,
     ) -> None:
         if not host:
             raise ValueError("host must not be empty")
@@ -73,6 +77,8 @@ class OnamaeImapFetcher(BaseMailFetcher):
             raise ValueError("timeout must be positive")
         if read_timeout is not None and read_timeout <= 0:
             raise ValueError("read_timeout must be positive")
+        if tls_mode not in {"implicit", "starttls"}:
+            raise ValueError("tls_mode must be 'implicit' or 'starttls'")
         self._host = host
         self._port = port
         self._username = username
@@ -81,7 +87,9 @@ class OnamaeImapFetcher(BaseMailFetcher):
         self._read_timeout = read_timeout if read_timeout is not None else timeout
         self._remote_trash_folder = remote_trash_folder
         self._ssl_context = ssl_context
-        self._connection: imaplib.IMAP4_SSL | None = None
+        self._tls_mode = tls_mode
+        self._ca_cert_path = ca_cert_path
+        self._connection: imaplib.IMAP4 | None = None
         self._capabilities: frozenset[str] = frozenset()
         self._highest_modseq: int | None = None
 
@@ -92,33 +100,53 @@ class OnamaeImapFetcher(BaseMailFetcher):
         return self._capabilities
 
     def connect(self) -> None:
-        """Open one TLS connection and authenticate it with LOGIN."""
+        """Open one connection, negotiate TLS, and authenticate it."""
 
         if self._connection is not None:
             return
 
-        connection: imaplib.IMAP4_SSL | None = None
+        connection: imaplib.IMAP4 | None = None
         try:
             with wrap_imap_errors("IMAP connect"):
-                if self._ssl_context is None:
+                if self._tls_mode == "starttls":
+                    ssl_context = self._build_ssl_context()
+                    connection = imaplib.IMAP4(
+                        self._host,
+                        self._port,
+                        timeout=self._timeout,
+                    )
+                    connection.sock.settimeout(self._read_timeout)
+                    status, data = connection.starttls(ssl_context=ssl_context)
+                    self._ensure_ok(status, data, "STARTTLS")
+                elif self._ssl_context is None and self._ca_cert_path is None:
                     connection = imaplib.IMAP4_SSL(
                         self._host,
                         self._port,
                         timeout=self._timeout,
                     )
                 else:
+                    ssl_context = self._build_ssl_context()
                     connection = imaplib.IMAP4_SSL(
                         self._host,
                         self._port,
-                        ssl_context=self._ssl_context,
+                        ssl_context=ssl_context,
                         timeout=self._timeout,
                     )
                 connection.sock.settimeout(self._read_timeout)
-                status, data = connection.login(self._username, self._password)
-                self._ensure_ok(status, data, "LOGIN")
                 capability_status, capability_data = connection.capability()
                 self._ensure_ok(capability_status, capability_data, "CAPABILITY")
                 self._capabilities = self._parse_capabilities(capability_data)
+                if "LOGINDISABLED" in self._capabilities:
+                    credentials = f"\x00{self._username}\x00{self._password}".encode()
+
+                    def plain_callback(_challenge: bytes) -> bytes:
+                        return credentials
+
+                    auth_status, auth_data = connection.authenticate("PLAIN", plain_callback)
+                    self._ensure_ok(auth_status, auth_data, "AUTHENTICATE PLAIN")
+                else:
+                    login_status, login_data = connection.login(self._username, self._password)
+                    self._ensure_ok(login_status, login_data, "LOGIN")
                 if "CONDSTORE" in self._capabilities:
                     enable_status, enable_data = connection.enable("CONDSTORE")
                     self._ensure_ok(enable_status, enable_data, "ENABLE CONDSTORE")
@@ -375,7 +403,17 @@ class OnamaeImapFetcher(BaseMailFetcher):
         self._uid_command("STORE", str(uid), "+FLAGS.SILENT", r"(\Deleted)")
         self._uid_command("EXPUNGE", str(uid))
 
-    def _require_connection(self) -> imaplib.IMAP4_SSL:
+    def _build_ssl_context(self) -> ssl.SSLContext:
+        context = self._ssl_context or ssl.create_default_context()
+        if self._ca_cert_path is None:
+            return context
+        try:
+            context.load_verify_locations(cafile=self._ca_cert_path)
+        except (OSError, ssl.SSLError, ValueError) as error:
+            raise ConfigError("could not load the configured CA certificate") from error
+        return context
+
+    def _require_connection(self) -> imaplib.IMAP4:
         if self._connection is None:
             raise PermanentError("IMAP connection is not open")
         return self._connection
@@ -397,11 +435,20 @@ class OnamaeImapFetcher(BaseMailFetcher):
             return
         response_text = " ".join(
             item.decode("utf-8", errors="replace") if isinstance(item, bytes) else str(item)
-            for item in OnamaeImapFetcher._response_items(data)
+            for item in GenericImapFetcher._response_items(data)
         )
         message = f"{operation} failed: {response_text[:200]}"
-        if "AUTHENTICATIONFAILED" in message.upper():
+        upper_message = message.upper()
+        if any(
+            marker in upper_message
+            for marker in ("AUTHENTICATIONFAILED", "AUTHENTICATION", "SASL")
+        ):
             raise AuthenticationError(message)
+        if operation == "STARTTLS":
+            unsupported = ("NOT SUPPORTED", "UNSUPPORTED", "UNKNOWN", "BAD")
+            if any(marker in upper_message for marker in unsupported):
+                raise PermanentError(message)
+            raise TransientError(message)
         raise PermanentError(message)
 
     @staticmethod
@@ -417,7 +464,7 @@ class OnamaeImapFetcher(BaseMailFetcher):
     @staticmethod
     def _parse_capabilities(data: object) -> frozenset[str]:
         tokens: set[str] = set()
-        for item in OnamaeImapFetcher._response_items(data):
+        for item in GenericImapFetcher._response_items(data):
             text = item.decode("ascii", errors="replace") if isinstance(item, bytes) else str(item)
             if text.upper().startswith("CAPABILITY "):
                 text = text.split(None, 1)[1]
@@ -426,7 +473,7 @@ class OnamaeImapFetcher(BaseMailFetcher):
 
     @staticmethod
     def _first_number(data: object) -> int | None:
-        for item in OnamaeImapFetcher._response_items(data):
+        for item in GenericImapFetcher._response_items(data):
             text = item.decode("ascii", errors="replace") if isinstance(item, bytes) else str(item)
             match = _UIDVALIDITY_PATTERN.search(text)
             if match is not None:
@@ -437,7 +484,7 @@ class OnamaeImapFetcher(BaseMailFetcher):
 
     @staticmethod
     def _first_modseq(data: object, *, allow_plain: bool = True) -> int | None:
-        items = OnamaeImapFetcher._response_items(data)
+        items = GenericImapFetcher._response_items(data)
         for item in items:
             text = item.decode("ascii", errors="replace") if isinstance(item, bytes) else str(item)
             match = _HIGHEST_MODSEQ_PATTERN.search(text)
@@ -464,13 +511,13 @@ class OnamaeImapFetcher(BaseMailFetcher):
             _NOMODSEQ_PATTERN.search(
                 item.decode("ascii", errors="replace") if isinstance(item, bytes) else str(item)
             )
-            for item in OnamaeImapFetcher._response_items(data)
+            for item in GenericImapFetcher._response_items(data)
         )
 
     @staticmethod
     def _search_uids(data: object) -> list[int]:
         values: list[int] = []
-        for item in OnamaeImapFetcher._response_items(data):
+        for item in GenericImapFetcher._response_items(data):
             text = item.decode("ascii", errors="replace") if isinstance(item, bytes) else str(item)
             values.extend(int(value) for value in text.split() if value.isdigit())
         return values

@@ -20,7 +20,7 @@ import pytest
 from mail_dock.infrastructure.database.connection import connect
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
 from mail_dock.infrastructure.database.migrator import migrate
-from mail_dock.infrastructure.fetchers.onamae_imap import OnamaeImapFetcher
+from mail_dock.infrastructure.fetchers.generic_imap import GenericImapFetcher
 
 
 @dataclass(frozen=True)
@@ -64,10 +64,10 @@ def insecure_ssl_context() -> ssl.SSLContext:
     return context
 
 
-def make_fetcher(settings: ImapService) -> OnamaeImapFetcher:
+def make_fetcher(settings: ImapService) -> GenericImapFetcher:
     """Construct the production fetcher for a Compose service."""
 
-    return OnamaeImapFetcher(
+    return GenericImapFetcher(
         settings.host,
         settings.username,
         settings.password,

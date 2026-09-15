@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import builtins
 import imaplib
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import ClassVar, cast
 
 import pytest
 
-from mail_dock.domain.errors import AuthenticationError, OperationCancelledError, PermanentError
+from mail_dock.domain.errors import (
+    AuthenticationError,
+    ConfigError,
+    OperationCancelledError,
+    PermanentError,
+)
 from mail_dock.domain.fetcher import CancelToken, RemoteFolder
-from mail_dock.infrastructure.fetchers.onamae_imap import OnamaeImapFetcher
+from mail_dock.infrastructure.fetchers.generic_imap import GenericImapFetcher
 
 
 class FakeSocket:
@@ -30,11 +35,23 @@ class FakeImap:
     nomodseq: ClassVar[bool] = False
     commands: list[tuple[str, tuple[object, ...]]]
     login_result: ClassVar[tuple[str, builtins.list[bytes]]] = ("OK", [b"LOGIN completed"])
+    authenticate_result: ClassVar[tuple[str, builtins.list[bytes]]] = (
+        "OK",
+        [b"AUTHENTICATE completed"],
+    )
 
-    def __init__(self, host: str, port: int, *, timeout: float) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        *,
+        timeout: float,
+        ssl_context: object | None = None,
+    ) -> None:
         self.host = host
         self.port = port
         self.timeout = timeout
+        self.ssl_context = ssl_context
         self.sock = FakeSocket()
         self.commands = []
         self.uidvalidity = 123
@@ -43,6 +60,18 @@ class FakeImap:
     def login(self, username: str, password: str) -> tuple[str, builtins.list[bytes]]:
         self.commands.append(("LOGIN", (username, password)))
         return self.login_result
+
+    def starttls(self, *, ssl_context: object) -> tuple[str, builtins.list[bytes]]:
+        self.commands.append(("STARTTLS", (ssl_context,)))
+        return "OK", [b"Begin TLS negotiation now"]
+
+    def authenticate(
+        self,
+        mechanism: str,
+        callback: Callable[[bytes], bytes],
+    ) -> tuple[str, builtins.list[bytes]]:
+        self.commands.append(("AUTHENTICATE", (mechanism, callback(b"+"))))
+        return self.authenticate_result
 
     def capability(self) -> tuple[str, builtins.list[bytes]]:
         self.commands.append(("CAPABILITY", ()))
@@ -126,12 +155,14 @@ def fake_imap(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     FakeImap.highest_modseq = None
     FakeImap.nomodseq = False
     FakeImap.login_result = ("OK", [b"LOGIN completed"])
+    FakeImap.authenticate_result = ("OK", [b"AUTHENTICATE completed"])
+    monkeypatch.setattr(imaplib, "IMAP4", FakeImap)
     monkeypatch.setattr(imaplib, "IMAP4_SSL", FakeImap)
     yield
 
 
 def test_connect_reuses_one_connection_and_records_capabilities(fake_imap: None) -> None:
-    fetcher = OnamaeImapFetcher(
+    fetcher = GenericImapFetcher(
         "imap.example.test",
         "user@example.test",
         "password",
@@ -154,7 +185,7 @@ def test_connect_reuses_one_connection_and_records_capabilities(fake_imap: None)
 def test_iter_refs_searches_in_descending_500_message_chunks(fake_imap: None) -> None:
     FakeImap.messages = {uid: f"message-{uid}".encode("ascii") for uid in range(1, 502)}
     FakeImap.search_uids = list(range(1, 502))
-    fetcher = OnamaeImapFetcher("imap.example.test", "user", "password")
+    fetcher = GenericImapFetcher("imap.example.test", "user", "password")
     fetcher.connect()
 
     refs = list(
@@ -180,7 +211,7 @@ def test_iter_refs_searches_in_descending_500_message_chunks(fake_imap: None) ->
 
 
 def test_downloads_use_peek_and_select_returns_uidvalidity(fake_imap: None) -> None:
-    fetcher = OnamaeImapFetcher("imap.example.test", "user", "password")
+    fetcher = GenericImapFetcher("imap.example.test", "user", "password")
     fetcher.connect()
 
     assert fetcher.select_folder("INBOX") == 123
@@ -196,7 +227,7 @@ def test_downloads_use_peek_and_select_returns_uidvalidity(fake_imap: None) -> N
 def test_iter_flags_uses_flags_only_and_500_uid_chunks(fake_imap: None) -> None:
     FakeImap.search_uids = list(range(1, 502))
     FakeImap.flags = {uid: (r"\Seen",) for uid in FakeImap.search_uids}
-    fetcher = OnamaeImapFetcher("imap.example.test", "user", "password")
+    fetcher = GenericImapFetcher("imap.example.test", "user", "password")
     fetcher.connect()
 
     refs = list(fetcher.iter_flags("INBOX", FakeImap.search_uids))
@@ -216,7 +247,7 @@ def test_iter_flags_since_uses_condstore_and_reads_highest_modseq(fake_imap: Non
     FakeImap.capability_response = b"CAPABILITY IMAP4rev1 CONDSTORE"
     FakeImap.highest_modseq = 42
     FakeImap.flags = {1: (r"\Flagged",)}
-    fetcher = OnamaeImapFetcher("imap.example.test", "user", "password")
+    fetcher = GenericImapFetcher("imap.example.test", "user", "password")
     fetcher.connect()
 
     assert fetcher.select_folder("INBOX") == 123
@@ -233,7 +264,7 @@ def test_iter_flags_since_uses_condstore_and_reads_highest_modseq(fake_imap: Non
 def test_select_folder_reports_nomodseq_as_unavailable(fake_imap: None) -> None:
     FakeImap.capability_response = b"CAPABILITY IMAP4rev1 CONDSTORE"
     FakeImap.nomodseq = True
-    fetcher = OnamaeImapFetcher("imap.example.test", "user", "password")
+    fetcher = GenericImapFetcher("imap.example.test", "user", "password")
     fetcher.connect()
 
     fetcher.select_folder("INBOX")
@@ -244,7 +275,7 @@ def test_select_folder_reports_nomodseq_as_unavailable(fake_imap: None) -> None:
 def test_iter_flags_honors_cancellation_before_fetch(fake_imap: None) -> None:
     token = CancelToken()
     token.cancel()
-    fetcher = OnamaeImapFetcher("imap.example.test", "user", "password")
+    fetcher = GenericImapFetcher("imap.example.test", "user", "password")
     fetcher.connect()
 
     with pytest.raises(OperationCancelledError):
@@ -252,7 +283,7 @@ def test_iter_flags_honors_cancellation_before_fetch(fake_imap: None) -> None:
 
 
 def test_delete_uses_move_when_server_supports_it(fake_imap: None) -> None:
-    fetcher = OnamaeImapFetcher("imap.example.test", "user", "password")
+    fetcher = GenericImapFetcher("imap.example.test", "user", "password")
     fetcher.connect()
 
     fetcher.delete_remote_message("INBOX", 7, mode="trash")
@@ -265,7 +296,7 @@ def test_delete_uses_move_when_server_supports_it(fake_imap: None) -> None:
 def test_trash_detection_prefers_special_use_over_candidates_and_configuration(
     fake_imap: None,
 ) -> None:
-    fetcher = OnamaeImapFetcher(
+    fetcher = GenericImapFetcher(
         "imap.example.test",
         "user",
         "password",
@@ -289,7 +320,7 @@ def test_trash_detection_prefers_special_use_over_candidates_and_configuration(
 
 
 def test_trash_detection_returns_none_when_unresolved(fake_imap: None) -> None:
-    fetcher = OnamaeImapFetcher("imap.example.test", "user", "password")
+    fetcher = GenericImapFetcher("imap.example.test", "user", "password")
     fetcher.connect()
     fetcher.list_folders = lambda: [RemoteFolder("Archive", "Archive")]  # type: ignore[method-assign]
 
@@ -297,7 +328,7 @@ def test_trash_detection_returns_none_when_unresolved(fake_imap: None) -> None:
 
 
 def test_manual_trash_folder_can_override_an_unlisted_folder(fake_imap: None) -> None:
-    fetcher = OnamaeImapFetcher(
+    fetcher = GenericImapFetcher(
         "imap.example.test",
         "user",
         "password",
@@ -311,7 +342,7 @@ def test_manual_trash_folder_can_override_an_unlisted_folder(fake_imap: None) ->
 
 def test_copy_trash_path_uses_uid_expunge(fake_imap: None) -> None:
     FakeImap.capability_response = b"CAPABILITY IMAP4rev1 UIDPLUS SPECIAL-USE"
-    fetcher = OnamaeImapFetcher(
+    fetcher = GenericImapFetcher(
         "imap.example.test",
         "user",
         "password",
@@ -329,7 +360,7 @@ def test_copy_trash_path_uses_uid_expunge(fake_imap: None) -> None:
 
 def test_expunge_is_rejected_without_uidplus(fake_imap: None) -> None:
     FakeImap.capability_response = b"CAPABILITY IMAP4rev1 SPECIAL-USE"
-    fetcher = OnamaeImapFetcher("imap.example.test", "user", "password")
+    fetcher = GenericImapFetcher("imap.example.test", "user", "password")
     fetcher.connect()
 
     assert not fetcher.supports_uid_expunge()
@@ -342,7 +373,47 @@ def test_expunge_is_rejected_without_uidplus(fake_imap: None) -> None:
 
 def test_authentication_failure_is_translated(fake_imap: None) -> None:
     FakeImap.login_result = ("NO", [b"[AUTHENTICATIONFAILED] invalid credentials"])
-    fetcher = OnamaeImapFetcher("imap.example.test", "user", "password")
+    fetcher = GenericImapFetcher("imap.example.test", "user", "password")
 
     with pytest.raises(AuthenticationError):
+        fetcher.connect()
+
+
+def test_starttls_uses_plain_imap_before_login(fake_imap: None) -> None:
+    fetcher = GenericImapFetcher(
+        "imap.example.test",
+        "user",
+        "password",
+        port=143,
+        tls_mode="starttls",
+    )
+
+    fetcher.connect()
+
+    commands = FakeImap.instances[0].commands
+    assert commands[0][0] == "STARTTLS"
+    assert commands[1][0] == "CAPABILITY"
+    assert ("LOGIN", ("user", "password")) in commands
+
+
+def test_logindisabled_uses_sasl_plain(fake_imap: None) -> None:
+    FakeImap.capability_response = b"CAPABILITY IMAP4rev1 LOGINDISABLED"
+    fetcher = GenericImapFetcher("imap.example.test", "user", "password")
+
+    fetcher.connect()
+
+    commands = FakeImap.instances[0].commands
+    assert ("AUTHENTICATE", ("PLAIN", b"\x00user\x00password")) in commands
+    assert not any(command[0] == "LOGIN" for command in commands)
+
+
+def test_invalid_ca_certificate_is_a_config_error(fake_imap: None) -> None:
+    fetcher = GenericImapFetcher(
+        "imap.example.test",
+        "user",
+        "password",
+        ca_cert_path="missing-ca.pem",
+    )
+
+    with pytest.raises(ConfigError):
         fetcher.connect()

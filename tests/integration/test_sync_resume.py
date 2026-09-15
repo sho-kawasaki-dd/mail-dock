@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-import mail_dock.infrastructure.fetchers.onamae_imap as onamae_imap
+import mail_dock.infrastructure.fetchers.generic_imap as generic_imap
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.infrastructure.storage.eml_storage import EmlStorage
 from mail_dock.infrastructure.storage.manifest import ManifestWriter
@@ -26,7 +26,7 @@ from tests.support.imap_integration import (
 def test_real_sync_resumes_history_and_new_mail_without_duplicates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(onamae_imap, "_FETCH_CHUNK_SIZE", 50)
+    monkeypatch.setattr(generic_imap, "_FETCH_CHUNK_SIZE", 50)
     settings = service("dovecot")
     mailbox = unique_mailbox("SyncResume")
     with imap_client(settings) as client:

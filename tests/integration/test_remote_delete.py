@@ -1,6 +1,6 @@
 """Docker/Dovecot integration tests for the server-side deletion safety net.
 
-These exercise the real provider (`OnamaeImapFetcher`) against a live IMAP
+These exercise the real provider (`GenericImapFetcher`) against a live IMAP
 server for behavior that a Fake fetcher cannot prove: SPECIAL-USE Trash
 discovery, MOVE/EXPUNGE semantics, and reconciling an uncertain delete
 against the server's actual state (see review notes 3.4 / 9.3).

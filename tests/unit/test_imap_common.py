@@ -76,6 +76,12 @@ def test_imap_errors_are_translated() -> None:
     assert socket.timeout is TimeoutError
     with pytest.raises(AuthenticationError), wrap_imap_errors("LOGIN"):
         raise imaplib.IMAP4.error("[AUTHENTICATIONFAILED] invalid credentials")
+    with pytest.raises(AuthenticationError), wrap_imap_errors("AUTHENTICATE PLAIN"):
+        raise imaplib.IMAP4.error("SASL authentication failed")
+    with pytest.raises(TransientError), wrap_imap_errors("STARTTLS"):
+        raise imaplib.IMAP4.error("STARTTLS failed temporarily")
+    with pytest.raises(PermanentError), wrap_imap_errors("STARTTLS"):
+        raise imaplib.IMAP4.error("STARTTLS not supported")
     with pytest.raises(TransientError), wrap_imap_errors("FETCH"):
         raise TimeoutError("timed out")
     with pytest.raises(TransientError), wrap_imap_errors("FETCH"):

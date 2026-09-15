@@ -53,7 +53,7 @@ from mail_dock.infrastructure.database.fts_maintenance import integrity_check
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
 from mail_dock.infrastructure.database.migrator import migrate
 from mail_dock.infrastructure.database.search_repository import SqliteSearchRepository
-from mail_dock.infrastructure.fetchers.onamae_imap import OnamaeImapFetcher
+from mail_dock.infrastructure.fetchers.generic_imap import GenericImapFetcher
 from mail_dock.infrastructure.logging_config import (
     purge_old_logs,
     set_storage_log_target,
@@ -768,7 +768,7 @@ def _account_fetcher(
     account: MessageRecord,
     credential_store: BaseCredentialStore,
     settings: config.AppConfig,
-) -> OnamaeImapFetcher:
+) -> GenericImapFetcher:
     account_id = _account_id(account)
     host = account.get("host")
     username = account.get("username")
@@ -779,7 +779,7 @@ def _account_fetcher(
         raise ConfigError(f"Account has no valid username: {account_id}")
     if isinstance(port, bool) or not isinstance(port, int) or port <= 0:
         raise ConfigError(f"Account has no valid port: {account_id}")
-    return OnamaeImapFetcher(
+    return GenericImapFetcher(
         host,
         username,
         _load_cli_credentials(credential_store, account_id),
