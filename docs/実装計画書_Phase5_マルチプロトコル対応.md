@@ -324,8 +324,13 @@
 ### **Group P: ドキュメント整合**
 
 - [ ] 開発計画書 2.1 の依存関係一覧から「`google-auth-oauthlib`（将来対応用）」の記述を削除し、標準ライブラリのみでOAuth2を実装する方針へ更新する
+- [ ] 開発計画書 2.2 のリポジトリ構成ツリーと 2.3 のアーキテクチャ図から `infrastructure/fetchers/onamae_imap.py` および `gmail_oauth.py`（将来用）`GmailOAuthFetcher` という別クラス構成の記述を削除し、`generic_imap.py`（`GenericImapFetcher` 1本に統合、`auth_type`/`tls_mode`引数で分岐）と新設の `infrastructure/security/oauth2.py` を反映した構成へ書き換える（5.2a完了後）
+- [ ] 開発計画書 3.1 の `accounts.provider_type` コメント例示値（`'onamae_imap' / 'gmail_oauth' / 'pst_import'`）を、Gmail/MS365も `provider_type='imap'` を使い `auth_type`/`oauth_provider` カラムで区別する実際の設計に合わせて書き直す（`'gmail_oauth'`という値は存在しなくなる）
+- [ ] 開発計画書 3.3 の `messages` テーブル定義・一意インデックス（`uq_imap_message` / `uq_archive_message`）を、5.2b完了時点の `message_folders` 正規形（`UNIQUE messages(account_id, source_item_key)`、`UNIQUE message_folders(folder_id, uidvalidity, uid) WHERE uid IS NOT NULL`、`message_identity_aliases`等）へ全面的に書き換える。5.2a完了〜5.2b完了までの間は現行定義のままであることを移行注記として明記する（5.2b完了後）
+- [ ] 開発計画書 3.6 の「Phase 5.2（Gmail対応）では…`messages.folder_id` を `message_folders` 中間テーブルへ移行する想定」という記述を、5.2a/5.2bのサブフェーズ分割に合わせて書き直す（5.2b完了後）
+- [ ] 開発計画書 4.1 の `BaseMailFetcher` 抽象契約（`delete_remote_message(raw_name, uid, *, mode)`）を、5.2b時点の `remove_remote_membership` / `move_remote_message_to_trash` / `expunge_remote_message` 相当への分離契約に合わせて更新する（5.2b完了後）
 - [ ] 開発計画書 6章ロードマップのPhase 5行を、5.1 / 5.2a / 5.2b / 5.3 の4サブフェーズへ書き分ける
-- [ ] 開発計画書 8章決定事項ログへ本フェーズの主要決定（サブフェーズ分割、OAuthポート、秘密情報の保管方針、エンドポイント許可リスト、Gmailの`expunge`拒否、`message_folders`正規形等）を追記する
+- [ ] 開発計画書 8章決定事項ログの「メール識別子」エントリ（`IMAPは account_id + folder_id + uidvalidity + uid を一意キーとする`）を、5.2b完了後は `message_folders` 正規形の内容へ**追記ではなく訂正**する。あわせてサブフェーズ分割・OAuthポート・秘密情報の保管方針・エンドポイント許可リスト・Gmailの`expunge`拒否等の主要決定を追記する。追記だけでは新旧の決定事項が並存し自己矛盾するため、矛盾する旧記述は必ず置き換えること
 - [ ] 旧 [実装計画書_Phase5.1_汎用IMAPサーバー対応.md](./実装計画書_Phase5.1_汎用IMAPサーバー対応.md) の冒頭に、本書へ統合された旨の注記を追加する
 - [ ] `.github/copilot-instructions.md` に、OAuth2はGUI限定・秘密情報はkeyring/メモリのみという頻出ルールを追記する
 - [ ] `ruff check .` / `mypy .` / `pytest` を実行し、全テスト通過を確認する
