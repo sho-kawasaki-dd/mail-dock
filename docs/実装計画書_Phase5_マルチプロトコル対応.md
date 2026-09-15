@@ -6,6 +6,8 @@
 
 **本書は旧 [実装計画書_Phase5.1_汎用IMAPサーバー対応.md](./実装計画書_Phase5.1_汎用IMAPサーバー対応.md) を吸収し、開発計画書ロードマップの Phase 5 全体を1冊にまとめた統合計画書である。** Phase 5 を以下の4サブフェーズへ分割し、各々を独立して着手・検証可能な単位として扱う。
 
+本書は [実装計画書_Phase5_レビュー修正案.md](./実装計画書_Phase5_レビュー修正案.md) の指摘1〜10（XOAUTH2継続チャレンジ、プロバイダ別ループバックリダイレクトURI、OAuth待機のGUIスレッド分離、snapshot/reindexの新カラム追従、`messages`再構築手順、CONDSTOREフォールバック、`X-GM-LABELS`のUTF-7デコード、通常IMAPのMOVE統合とcanonicalメッセージモデル、Keyring一括クリーンアップ、テストファイルリネーム）を反映済みである。
+
 | サブフェーズ | 内容 | マイグレーション | 前提 |
 | :---- | :---- | :---- | :---- |
 | **5.1** | 汎用IMAPサーバー対応（`GenericImapFetcher`、STARTTLS、`LOGINDISABLED`→SASL PLAIN、カスタムCA証明書） | `007_generic_imap_connection.sql` | Phase 1 / 3.7 / 4 |
@@ -56,23 +58,23 @@
 | D-15 | 依存関係 | **追加のサードパーティ依存パッケージを追加しない。** OAuth2（認可コード＋PKCE＋ループバックリダイレクト）は標準ライブラリ（`http.server` / `urllib` / `secrets` / `hashlib` / `base64` / `json`）のみで実装する。開発計画書 2.1 に残る「`google-auth-oauthlib`（将来対応用）」の記述はこの決定に合わせて削除する（Group Pでタスク化） |
 | D-16 | ラベルと `message_folders` | Gmailの「1通が複数ラベルに属する」性質への対応を **5.2a と 5.2b に分割**する。5.2a では同期対象を既定でSPECIAL-USE `\All`（「すべてのメール」相当フォルダ）のみとし、既存の `messages.folder_id` 単一列のまま「1メッセージ=1フォルダ」の枠組みで動かす（ラベルは `gmail_labels` 列に文字列として保持するだけで検索・フィルタには使わない）。5.2b で `message_folders` 中間テーブルへ移行し、複数フォルダ所属・削除検知・検索フィルタを正式対応させる |
 | D-17 | INBOXとAll Mailの二重登録（5.2a の暫定挙動） | 5.2a では `\All` 以外のフォルダも `is_sync_target` に追加できる（ユーザー選択式の既存挙動を変えない）が、INBOXと「すべてのメール」を同時に同期対象にすると同一メールが別UIDで二重に保存される。**5.2aではこれを「既知の暫定挙動」として許容し、UIに警告を表示するに留める**（5.2bの `message_folders`移行で解消する）。理由: 5.2aの目的はまず「動くGmail接続」を確立することであり、二重登録の完全排除は `message_folders` 移行と不可分であるため、5.2a単体で作り込む投資対効果が低い |
-| D-18 | `X-GM-MSGID` / `X-GM-THRID` / `X-GM-LABELS` の先行取得 | **5.2aの時点でDBとfetchマニフェストの両方へ保存する。** `gmail_msgid` / `gmail_thrid` は10進文字列、`gmail_labels` はJSON配列で記録し、未取得（`null`）と取得済みラベルなし（`[]`）を区別する。5.2aのreindexで3項目を復元できることを必須とし、一次識別子への昇格は5.2bで行う |
-| D-19 | Gmail固有の応答分類 | `[THROTTLED]` / `[OVERQUOTA]` / `[LIMIT]` 等を `TransientError` へ分類し、長めのバックオフを `usecases/retry.py` に追加する。帯域制限への意図的な到達は必須PoCにせず、公式仕様または実運用で観測した応答をfixture化し、合成IMAP応答で決定的に検証する。リトライは引き続きusecases層に集約する |
+| D-18 | `X-GM-MSGID` / `X-GM-THRID` / `X-GM-LABELS` の先行取得 | **5.2aの時点でDBとfetchマニフェストの両方へ保存する。** `gmail_msgid` / `gmail_thrid` は10進文字列、`gmail_labels` はJSON配列で記録し、未取得（`null`）と取得済みラベルなし（`[]`）を区別する。5.2aのreindexで3項目を復元できることを必須とし、一次識別子への昇格は5.2bで行う。`gmail_labels` に含まれる日本語ラベル等は modified UTF-7 で返されるため、`imap_common.decode_modified_utf7` を適用した人間可読なUTF-8文字列配列（例: `["\Inbox", "重要"]`）としてDB・マニフェストへ保存する |
+| D-19 | Gmail固有の応答分類 | `[THROTTLED]` / `[OVERQUOTA]` / `[LIMIT]` 等を `TransientError` へ分類し、長めのバックオフを `usecases/retry.py` に追加する。帯域制限への意図的な到達は必須PoCにせず、公式仕様または実運用で観測した応答をfixture化し、合成IMAP応答で決定的に検証する。リトライは引き続きusecases層に集約する。Gmail IMAPは`CONDSTORE`拡張（RFC 4551/7162）に対応しないため、Phase 3.7で導入した定期フラグ更新は自動的に非`CONDSTORE`フォールバック経路（全件/範囲フェッチ）を通る。これは実装上の不備ではなく仕様上の制約であり、フォールバック経路の挙動をもって正とする |
 | D-20 | Gmailでのサーバー削除モード | **`remote_delete_mode='expunge'` をGmailアカウントでは拒否する。** Gmail IMAPにおける `EXPUNGE` は選択中フォルダ（ラベル）に対する操作であり、ラベルを1つ外す操作なのか完全削除なのかが文脈依存になるため、開発計画書1.3の不変条件3（削除は常に多段防御）を単純な `UIDPLUS EXPUNGE` 実装のままでは満たせない。Gmailアカウントは `trash`（`[Gmail]/ゴミ箱` へのMOVE）のみを許可し、`delete_remote.py` の入口でアカウントの `oauth_provider` を見て拒否する |
-| D-21 | 秘密情報の保存先 | `client_secret`・`refresh_token` は **`keyring` にのみ**保存する。`access_token` はプロセス内メモリにのみ保持し、いかなる永続先（DB・`config.json`・マニフェスト・ログ）にも書かない。`BaseCredentialStore` に **名前空間付きの汎用シークレット操作**（`set_secret` / `get_secret` / `delete_secret`）を追加し、パスワード専用の `set_password` 等と役割を分離する（複合キー文字列の手組みによる衝突を避けるため、実装は `(account_id, secret_name)` の2引数を素直に受け取る） |
-| D-22 | OAuth2フローの方式 | **Authorization Code + PKCE（S256）+ ループバックリダイレクト**（`http://127.0.0.1:{一時ポート}/`）を採用する。OOB方式（`urn:ietf:wg:oauth:2.0:oob`）はGoogleが廃止済みのため使わない。`state` パラメータの往復検証を必須とし、コールバック受信サーバーは127.0.0.1にのみバインドし、1リクエストを受けたら即座に停止し、タイムアウト（既定120秒）を設ける |
-| D-23 | OAuth2実装の置き場所 | `domain/ports.py` に `BaseOAuthClient` / `BaseAccessTokenProvider` の最小ポートを定義し、`usecases/oauth_authorize.py` とフェッチャーはポートだけに依存する。`infrastructure/security/oauth2.py` はHTTP・PKCE・ループバック受信・コード交換/更新を実装し、composition rootから注入する。ブラウザを開く操作だけをpresentation層に置く |
+| D-21 | 秘密情報の保存先 | `client_secret`・`refresh_token` は **`keyring` にのみ**保存する。`access_token` はプロセス内メモリにのみ保持し、いかなる永続先（DB・`config.json`・マニフェスト・ログ）にも書かない。`BaseCredentialStore` に **名前空間付きの汎用シークレット操作**（`set_secret` / `get_secret` / `delete_secret`）を追加し、パスワード専用の `set_password` 等と役割を分離する（複合キー文字列の手組みによる衝突を避けるため、実装は `(account_id, secret_name)` の2引数を素直に受け取る）。アカウント削除・OAuth連携解除時の孤児シークレット残存を防ぐため、アプリが管理するシークレット名（`password`・`client_secret`・`refresh_token`、将来追加分を含む列挙定数）を一元管理し、`BaseCredentialStore` に冪等な `delete_all_secrets(account_id)`（未存在キーの削除も成功扱い）を追加する。列挙はバックエンド全体の走査ではなく管理対象名の全削除として実装する |
+| D-22 | OAuth2フローの方式 | **Authorization Code + PKCE（S256）+ ループバックリダイレクト**を採用する。OOB方式（`urn:ietf:wg:oauth:2.0:oob`）はGoogleが廃止済みのため使わない。`state` パラメータの往復検証を必須とし、コールバック受信サーバーはループバックインターフェースにのみバインドし、1リクエストを受けたら即座に停止し、タイムアウト（既定120秒）を設ける。リダイレクトURIはプロバイダごとに固定文字列を共有せず、許可リスト付きプロバイダ定義に `loopback_redirect_host` を持たせて生成する: Googleは `127.0.0.1` とOSが割り当てた一時ポートによるIPリテラル（`http://127.0.0.1:{port}/`）、Microsoftは登録済みの `http://localhost` 系URIを基準にする。OSが割り当てた実ポートから認可要求とコード交換で同一のURI文字列を1回だけ生成して使い回し、任意のホスト・ユーザー入力URLは受け付けない。**補足（Group H着手時に要再確認）**: Microsoft Entra IDのパブリッククライアント登録は `http://localhost`（ポート省略）を特別扱いし、動的ポートへの割り当てを許容する場合があるため、「GoogleはIPリテラル、Microsoftは固定 localhost URI」という区分を実装の大前提として固定せず、Microsoft Identity Platform公式ドキュメントの最新記述を確認したうえで `loopback_redirect_host` の生成規則を確定すること。「両方を許容」という曖昧なフォールバックは設けず、プロバイダ登録と一致しない場合は設定エラーとして扱う方針は維持する |
+| D-23 | OAuth2実装の置き場所と実行スレッド | `domain/ports.py` に `BaseOAuthClient` / `BaseAccessTokenProvider` の最小ポートを定義し、`usecases/oauth_authorize.py` とフェッチャーはポートだけに依存する。`infrastructure/security/oauth2.py` はHTTP・PKCE・ループバック受信・コード交換/更新を実装し、composition rootから注入する。ブラウザを開く操作だけをpresentation層に置く。認可ユースケース全体はGUIスレッド外で実行し、既存の汎用`Worker`/`QThread`パターンを第一候補として、OAuth固有のシグナル・状態が必要な場合に限り`OAuthAuthorizeWorker`を新設する。認可待機ダイアログ（プログレス表示・「ブラウザで認証を完了してください」・「キャンセル」ボタン）を表示し、`CancelToken`のキャンセルをループバック待受の`shutdown()`/`server_close()`相当の停止へ接続してブロッキング待機を即座に解除する。タイムアウト時も同じクリーンアップ経路を通す |
 | D-24 | トークン更新のタイミング | `connect()` の直前に有効期限マージン120秒でアクセストークンの事前リフレッシュを行う。IMAPセッション確立後の失効は扱わない（次回同期時に再接続することで解決する）。リフレッシュ失敗（`invalid_grant` 等、ユーザーによるアクセス取消・失効）は `AuthenticationError` へラップし、UIで「Googleと再連携」を促す |
 | D-25 | Gmailの7日間トークン失効 | Google OAuth同意画面がExternalかつ「テスト中」の場合、`https://mail.google.com/` を含むリフレッシュトークンが7日で失効することは公式仕様として扱い、7日待機による実測を実装ブロッカーにしない。PoCは認可・refresh・XOAUTH2・`X-GM-*`取得を必須とし、失効時の `invalid_grant` はHTTPスタブで検証する。公開ステータス・審査・CASAは技術PoCと分離した運用判断とする |
 | D-26 | Dovecotでの結合テスト可否 | GmailのXOAUTH2は実サーバーでのみ確実に検証できるため、Dockerの Dovecot で `auth_mechanisms = xoauth2` によるローカルトークン検証が再現できるかをGroup GのPoCで確認する。再現できない場合は、Fakeフェッチャー・ローカルHTTPサーバーを用いた決定的な単体テストへ倒し、実サーバーでの検証は手動確認に留める（Phase4 レビュー修正案の「ソケット切断の実際の再現は狙わない」と同じ考え方） |
 | D-27 | MS365の位置づけ | Microsoft 365 / Outlook.com 対応は **Phase 5.3** とし、5.2aで確立したOAuth2基盤を、許可リスト付きプロバイダ定義とテナント値の差し替えで再利用する。共有メールボックス・委任アクセスはスコープ外とする |
 | D-28 | CLIへの公開範囲 | OAuth2の同意フロー（ブラウザ起動・トークン初回取得）は **GUI限定**とし、CLIにはOAuth関連サブコマンドを追加しない。既存の `verify` / `reindex` はGmail/MS365にも対応させるが、OAuth非秘密設定とGmailメタデータを復元する明示的な更新が必要であり、「影響なし」とは扱わない |
-| D-29 | `source_item_key` の一意性 | `source_item_key` はアカウント内一意とする。通常IMAPは `imap:{folder_key}:{uidvalidity}:{uid}`、Gmailは `gmail:{X-GM-MSGID}`、PSTは既存の取込世代内キーを使う。`folder_key` は `folder_raw_name` から可逆かつ衝突なく生成し、生成規則をdomainの共通ヘルパーへ集約する。旧IMAPマニフェストの `uidvalidity:uid` はreindex時にフォルダ名を用いて新形式へ正規化する |
-| D-30 | `message_folders` の正規形 | 5.2bではフォルダごとに変化する `uid` / `uidvalidity` / `remote_state` / `moved_to_folder_id` / `imap_flags` / `flags_seen_at` / `last_seen_at` を `message_folders` へ移し、移行完了後は `messages` 側の同名列を削除する。二重の正本は残さない |
-| D-31 | Gmailラベル履歴 | 初回fetchだけでなく、ラベル所属が変化するたびに完全な `message_membership_snapshot` をマニフェストへ追記し、fsync後にDBを更新する。差分イベント方式は採らず、各スナップショットにフォルダ名・UID・UIDVALIDITY・フラグを含め、reindexは最後の完全スナップショットから所属を復元する |
+| D-29 | `source_item_key` の一意性と役割 | `source_item_key` はアカウント内一意な**リモート所在キー**とする。通常IMAPは `imap:{folder_key}:{uidvalidity}:{uid}`、Gmailは `gmail:{X-GM-MSGID}`、PSTは既存の取込世代内キーを使う。`folder_key` は `folder_raw_name` から可逆かつ衝突なく生成し、生成規則をdomainの共通ヘルパーへ集約する。通常IMAPのUIDはフォルダとUIDVALIDITY世代の中でのみ有効な所在識別子であり、フォルダをまたぐ論理メッセージの安定IDではない。`messages.source_item_key` はcanonical行の初回作成時に確定し、その行の存続中は変更しない（D-30参照）。旧IMAPマニフェストの `uidvalidity:uid` はreindex時にフォルダ名を用いて新形式へ正規化する |
+| D-30 | `messages`のcanonical化と`message_folders`の正規形 | `messages` を**canonicalな論理メッセージ**とし、`messages.id` および初回作成時の `source_item_key` はその行の存続中は変更しない。5.2bではフォルダごとに変化する `uid` / `uidvalidity` / `remote_state` / `moved_to_folder_id` / `imap_flags` / `flags_seen_at` / `last_seen_at` を `message_folders` へ移し、移行完了後は `messages` 側の同名列を削除する（二重の正本は残さない）。派生キャッシュとして `message_identity_aliases(account_id, observed_source_item_key, message_id, evidence_kind)` を追加し、過去または移動先で観測したキーをcanonicalな `messages.id` へ解決する（`UNIQUE(account_id, observed_source_item_key)`）。自動統合はGmailの同一の `X-GM-MSGID`、またはアプリ自身が実行したMOVEでサーバーの `COPYUID` 等から新旧UIDの対応が確定した場合に行う。外部クライアントによるMOVE推定は、移動元UIDの消失・移動先UIDの新規観測・両フォルダの同一同期サイクルでの完全走査成功・`file_hash`完全一致・候補1対1のすべてを満たす場合のみ行い、候補複数・走査失敗・ハッシュ不一致・移動元が残存する場合は統合せず別行として保持する（誤統合より重複表示を優先する）。`UNIQUE messages(account_id, source_item_key)` と、UID非NULL時の `UNIQUE message_folders(folder_id, uidvalidity, uid)` を維持する |
+| D-31 | Gmailラベル履歴とMOVE統合の永続化順序 | 初回fetchだけでなく、ラベル所属が変化するたびに完全な `message_membership_snapshot` をマニフェストへ追記し、fsync後にDBを更新する。差分イベント方式は採らず、各スナップショットにフォルダ名・UID・UIDVALIDITY・フラグを含め、reindexは最後の完全スナップショットから所属を復元する。MOVE統合を伴う場合は、移動先EMLの通常の書き込み順序（保存→fetchイベント追記+fsync）の後に `message_identity_linked` イベント（`canonical_source_item_key` / `alias_source_item_key` / `evidence_kind` / `file_hash`）と完全な `message_membership_snapshot` を追記・fsyncしてから、`BEGIN IMMEDIATE` 後にmembershipをcanonical行へ付け替えてaliasを登録する。移動先に重複行が存在する場合は `message_contents` / `pst_import_items` 等の子参照をcanonical行へ付け替えてから重複行を削除する。canonical行は原則として最古のfetchイベントを持つ行とし、`local_state` は1件でもactiveなら優先し、EMLハッシュ不一致は自動統合せずエラーとして扱う |
 | D-32 | OAuthエンドポイント | DB/マニフェストには `oauth_provider`、`oauth_client_id`、Microsoftの `oauth_tenant` だけを保存し、任意の認可/トークンURLは保存しない。Google/MicrosoftのHTTPSエンドポイントと既定スコープはコード内の許可リスト付きプロバイダ定義から導出し、refresh tokenを任意ホストへ送信できないようにする |
 | D-33 | リフレッシュトークンのローテーション | token refresh応答に新しい `refresh_token` が含まれる場合はkeyringの値を置換し、含まれない場合は既存値を維持する。保存失敗を成功扱いせず、トークン本文を例外・ログへ含めない |
-| D-34 | マイグレーション順序 | 真実の情報源を先に更新する原則はスキーマ移行にも適用する。マニフェストの意味を変えるデータ移行は「新イベント追記+fsync → `BEGIN IMMEDIATE`でDB更新」の冪等な後処理とし、SQLマイグレーションだけでDBの意味を先行変更しない |
+| D-34 | マイグレーション順序とreindexの冪等性 | 真実の情報源を先に更新する原則はスキーマ移行にも適用する。マニフェストの意味を変えるデータ移行は「新イベント追記+fsync → `BEGIN IMMEDIATE`でDB更新」の冪等な後処理とし、SQLマイグレーションだけでDBの意味を先行変更しない。reindexはfetchイベントを読み、`message_identity_linked` からaliasをcanonical keyへ正規化した後、同一canonical keyのfetchを1つの `messages` 行へ畳み込み、最後の完全なmembership snapshotから `message_folders` とalias表を復元する冪等な手順とする。同一linkイベントの再適用は結果を変えないものとし、alias循環・1つのaliasに対する複数canonical指定・ハッシュ不一致は復元エラーとして拒否する |
 | D-35 | composition rootの静的検査 | 現行の `presentation/context.py` はinfrastructure実装を組み立てるcomposition rootであるため、依存方向の静的検査では明示的に例外扱いする。将来DI組み立てを `__main__.py` へ完全移動した場合にのみ例外を撤廃する |
 
 ### **2.2 機能要件**
@@ -99,11 +101,11 @@
 | # | 要件 | 根拠 |
 | :--- | :---- | :---- |
 | F-13 | `accounts` に `auth_type TEXT NOT NULL DEFAULT 'password'`（`password` \| `xoauth2`）、`oauth_provider TEXT`、`oauth_client_id TEXT`、`oauth_tenant TEXT` を `008_oauth_accounts.sql` で追加する。スコープはプロバイダ定義から導出し、`client_secret`・トークン・任意エンドポイントURLはDBへ書かない | D-21, D-27, D-32 |
-| F-14 | `messages` に `gmail_msgid TEXT` / `gmail_thrid TEXT` / `gmail_labels TEXT` を追加し、`X-GM-*` をDBとfetchマニフェストへ同じ書き込み単位で保存する。IDは10進文字列、ラベルはJSON配列とし、5.2aのreindexで復元する | D-18 |
+| F-14 | `messages` に `gmail_msgid TEXT` / `gmail_thrid TEXT` / `gmail_labels TEXT` を追加し、`X-GM-*` をDBとfetchマニフェストへ同じ書き込み単位で保存する。IDは10進文字列、ラベルはJSON配列とし、5.2aのreindexで復元する。`gmail_labels` は `imap_common.decode_modified_utf7` でデコードした後にUTF-8文字列配列としてJSON化する | D-18 |
 | F-15 | `CREATE INDEX idx_msg_gmsgid ON messages(account_id, gmail_msgid) WHERE gmail_msgid IS NOT NULL` を追加する | D-18 |
 | F-16 | `domain/ports.py` にOAuth/アクセストークン供給ポートを追加し、`infrastructure/security/oauth2.py` に標準ライブラリだけでHTTP・PKCE・ループバック受信・コード交換/更新を実装する。usecaseとfetcherはinfrastructure実装を直接importしない | D-15, D-22, D-23 |
-| F-17 | `BaseCredentialStore` に `set_secret(account_id, name, value)` / `get_secret(account_id, name) -> str \| None` / `delete_secret(account_id, name)` を追加し、`KeyringCredentialStore` / `SessionCredentialStore` / テストダブルへ実装する | D-21 |
-| F-18 | `GenericImapFetcher` に `auth_type="xoauth2"` の分岐を追加し、`imaplib` の `authenticate("XOAUTH2", callback)` で `user={email}\x01auth=Bearer {token}\x01\x01` 形式のSASL文字列を渡す | D-13, F-16 |
+| F-17 | `BaseCredentialStore` に `set_secret(account_id, name, value)` / `get_secret(account_id, name) -> str \| None` / `delete_secret(account_id, name)` / `delete_all_secrets(account_id)` を追加し、`KeyringCredentialStore` / `SessionCredentialStore` / テストダブルへ実装する。管理対象シークレット名は列挙定数として一元管理し、`delete_all_secrets` はその全キーへ冪等に `delete_secret` を適用する | D-21 |
+| F-18 | `GenericImapFetcher` に `auth_type="xoauth2"` の分岐を追加し、`imaplib` の `authenticate("XOAUTH2", callback)` で `user={email}\x01auth=Bearer {token}\x01\x01` 形式のSASL文字列を渡す。コールバックは状態を持たせ、初回呼び出しでSASL初期応答を返し、サーバーから追加の継続チャレンジ（`+`）を受けた場合は空行（`b""`）を返す。`None`は認証中断を意味するため使用しない | D-13, F-16 |
 | F-19 | 注入された `BaseAccessTokenProvider` が接続直前に有効期限を確認し、マージン120秒以内なら更新する。新refresh tokenが返ればkeyringを置換し、保存失敗・`invalid_grant`をドメイン例外へ変換する | D-24, D-33 |
 | F-20 | `wrap_imap_errors` にGmail固有の応答コード（`[THROTTLED]` / `[OVERQUOTA]` / `[LIMIT]`）の分類を追加し、`usecases/retry.py` へ長めのバックオフ経路を追加する | D-19 |
 | F-21 | `delete_remote.py` の入口で `accounts.oauth_provider='google'` のアカウントに対する `mode="expunge"` を拒否し、`trash` のみ許可する | D-20 |
@@ -117,15 +119,15 @@
 
 | # | 要件 | 根拠 |
 | :--- | :---- | :---- |
-| F-27 | `009_message_folders.sql` は互換スキーマとして `message_folders(message_id, folder_id, uid, uidvalidity, remote_state, moved_to_folder_id, imap_flags, flags_seen_at, last_seen_at)` を新設・バックフィルする。その後の冪等なfinalizerが必要なsnapshot記録と重複統合を完了してから `messages` テーブルを再構築し、フォルダ依存列を削除する | D-30, D-34 |
-| F-28 | 共通ヘルパーで通常IMAP=`imap:{folder_key}:{uidvalidity}:{uid}`、Gmail=`gmail:{X-GM-MSGID}`、PST=既存キーを生成する。旧マニフェストはreindex時に正規化し、旧キーを参照するpurge・監査・移動イベントは対応するfetchイベントから同じ正規化キーへ解決する | D-29 |
-| F-29 | `messages(account_id, source_item_key)` と `message_folders(folder_id, uidvalidity, uid) WHERE uid IS NOT NULL` をそれぞれ一意にし、非Gmailでもフォルダ間UID衝突が起きないことを固定する | D-29, D-30 |
+| F-27 | `009_message_folders.sql` は互換スキーマとして `message_folders(message_id, folder_id, uid, uidvalidity, remote_state, moved_to_folder_id, imap_flags, flags_seen_at, last_seen_at)` と `message_identity_aliases(account_id, observed_source_item_key, message_id, evidence_kind)`（`UNIQUE(account_id, observed_source_item_key)`）を新設・バックフィルする。その後の冪等なfinalizerが必要なsnapshot記録と重複統合を完了してから `messages` テーブルを再構築し、フォルダ依存列を削除する。finalizer開始前に `sqlite_schema` から `messages` / `message_contents` に依存するインデックス・トリガー・ビュー（`message_contents.message_id` と `pst_import_items.message_row_id` の外部キー、FTS5トリガー `mc_ai`/`mc_ad`/`mc_au` は `message_contents` 側にあること、`audit_log.message_id` はTEXTでFKではないこと）を棚卸しし、期待する定義をテストで固定する。再構築はSQLite公式の一般化手順に従い、`PRAGMA foreign_keys=OFF` を `BEGIN IMMEDIATE` より前に設定し、新テーブル作成→データ移行→旧テーブル削除→リネーム→インデックス/トリガー/ビュー再作成を1トランザクションで行う。重複統合で行IDが変わる場合のみ `message_contents` / `pst_import_items` の参照をcanonical行へ付け替え、`audit_log` はFK付け替え対象に含めない。COMMIT前に `PRAGMA foreign_key_check` と `PRAGMA integrity_check` を実行し、失敗時はロールバックしてから `PRAGMA foreign_keys=ON` へ戻す | D-30, D-34 |
+| F-28 | 共通ヘルパーで通常IMAP=`imap:{folder_key}:{uidvalidity}:{uid}`、Gmail=`gmail:{X-GM-MSGID}`、PST=既存キーを生成する。旧マニフェストはreindex時に正規化し、旧キーを参照するpurge・監査・移動イベントは対応するfetchイベントから同じ正規化キーへ解決する | D-29, D-30 |
+| F-29 | `messages(account_id, source_item_key)` と `message_folders(folder_id, uidvalidity, uid) WHERE uid IS NOT NULL`、`message_identity_aliases(account_id, observed_source_item_key)` をそれぞれ一意にし、非Gmailでもフォルダ間UID衝突が起きないことを固定する | D-29, D-30 |
 | F-30 | `domain/search.py` の `MessageFilter.folder_ids` を用いる検索クエリ・一覧クエリを `message_folders` 経由のJOINへ書き換える | F-27 |
 | F-31 | `presentation/models/folder_tree_model.py` のフォルダノード・メッセージ件数・一覧表示を `message_folders` を前提に更新する | F-27 |
-| F-32 | 同期・削除検知に加え、フラグ更新、UID一覧、移動検知、失敗再試行、reparse、verify、trash、フォルダ件数を `message_folders` 前提へ更新し、集計は `EXISTS` / `COUNT(DISTINCT message_id)` で二重計上を防ぐ | F-27 |
+| F-32 | 同期・削除検知に加え、フラグ更新、UID一覧、移動検知、失敗再試行、reparse、verify、trash、フォルダ件数を `message_folders` 前提へ更新し、集計は `EXISTS` / `COUNT(DISTINCT message_id)` で二重計上を防ぐ。移動検知は、`COPYUID` 等で新旧UID対応が確定したMOVE、または移動元UID消失・移動先UID新規観測・両フォルダの同一同期サイクルでの完全走査成功・`file_hash`完全一致・候補1対1のすべてを満たす外部MOVE推定のみを自動統合し、それ以外は別行として保持する（D-30） | F-27 |
 | F-33 | `BaseMailFetcher` の単一delete契約を `remove_remote_membership` / `move_remote_message_to_trash` / `expunge_remote_message` 相当のプロバイダ中立操作へ分離し、Gmailのラベル除去と完全なゴミ箱移動を区別する | F-27, D-20, D-31 |
 | F-34 | ローカルゴミ箱・purgeにおける共有EML判定（`count_path_references`）を `message_folders` を考慮した形へ更新する | F-27 |
-| F-35 | ラベル/フォルダ所属変更ごとに完全な `message_membership_snapshot` を追記・fsyncしてからDBを更新し、reindexは最後のsnapshotから `message_folders` を復元する | D-31 |
+| F-35 | ラベル/フォルダ所属変更ごとに完全な `message_membership_snapshot` を追記・fsyncしてからDBを更新し、reindexは最後のsnapshotから `message_folders` を復元する。MOVE統合を伴う場合は `message_identity_linked` イベント（`canonical_source_item_key` / `alias_source_item_key` / `evidence_kind` / `file_hash`）を同じ書き込み単位で追記し、reindexは `message_identity_linked` からaliasをcanonical keyへ正規化してからfetchイベントを畳み込む | D-31, D-34 |
 | F-36 | 5.2aのGmail重複行を `gmail_msgid` 単位で統合する。membershipは和集合、local stateは1件でもactiveならactiveとし、EMLハッシュ不一致は自動統合せず移行エラーにする。子テーブル・監査参照も付け替える | D-16, D-30 |
 
 #### **Phase 5.3: Microsoft 365 / Outlook.com**
@@ -133,7 +135,7 @@
 | # | 要件 | 根拠 |
 | :--- | :---- | :---- |
 | F-37 | `oauth_provider='microsoft'` と `oauth_tenant`（`consumers` / `organizations` / 検証済みテナントID）を追加し、許可リスト付きプロバイダ定義からAzure ADエンドポイントを導出する | D-27, D-32, F-13 |
-| F-38 | スコープ `https://outlook.office.com/IMAP.AccessAsUser.All offline_access` をプロバイダ定義に持たせ、5.2aのOAuthポートと実装を変更せずに認可コード＋PKCEフローを動作させる | F-16, D-27, D-32 |
+| F-38 | スコープ `https://outlook.office.com/IMAP.AccessAsUser.All offline_access` をプロバイダ定義に持たせ、5.2aのOAuthポートと実装を変更せずに認可コード＋PKCEフローを動作させる。リダイレクトURIも `loopback_redirect_host`（登録済み `http://localhost` 系）としてプロバイダ定義から導出し、Googleと異なる生成規則をコード変更なしで適用できることを確認する | F-16, D-22, D-27, D-32 |
 | F-39 | `outlook.office365.com:993` を既定ホストとして `GenericImapFetcher` に暗黙的TLS + XOAUTH2で接続する | F-18 |
 | F-40 | README にAzure ADアプリ登録手順（リダイレクトURI・APIアクセス許可・テナント選択）を記載する | D-14, D-27 |
 | F-41 | 共有メールボックス・委任アクセスをコードレベルで要件外とし、通常のOAuth2アカウント登録フローのみで完結することを確認する | D-27 |
@@ -174,6 +176,8 @@
 - [ ] `SqliteMessageRepository._ACCOUNT_COLUMNS` と `upsert_account` の `provider_type` 既定値を `"imap"` に変更する
 - [ ] `usecases/register_account.py` の `register_account` / `update_account` の `provider_type` ハードコードを `"imap"` に変更し、`tls_mode` / `ca_cert_path` 引数を追加する
 - [ ] `tests/support/in_memory_repository.py` のアカウント関連実装に新カラムを反映する
+- [ ] `usecases/snapshots.py` の `_ACCOUNT_FIELDS` に `tls_mode` / `ca_cert_path` を追加し、`_account_event()` の `provider_type` 既定値 `"onamae_imap"` を `"imap"` に修正する
+- [ ] `usecases/reindex.py` の `_account_record()` で `tls_mode` / `ca_cert_path` を復元し、旧snapshotに対しては確定済みの後方互換既定値を適用する
 - [ ] 既存の最新snapshotと全対象フィールドを比較する `reconcile_account_snapshots()` を新設する
 - [ ] `007` 後処理で新しいsnapshotを追記・fsyncしてから `BEGIN IMMEDIATE` でDBを正規化し、途中停止後もGUI/CLI共通起動経路から再試行できるようにする（D-4, D-34）
 
@@ -197,6 +201,7 @@
 - [ ] `tests/unit/` にTLSモード分岐・CA証明書読み込み失敗時の `ConfigError`・SASL PLAINコールバックの単体テストを追加する
 - [ ] `tests/gui/test_settings_dialog.py` に接続方式・CA証明書欄の入力とダイアログ再検証ロジックのテストを追加する
 - [ ] `provider_type` 正規化マイグレーションと `account_snapshot` 再記録の結合テストを追加する
+- [ ] `tests/unit/test_onamae_imap.py` を `tests/unit/test_generic_imap.py` へリネームする（クラス名変更に追従）
 
 ### **Group F: 5.1 ドキュメント整合**
 
@@ -226,6 +231,8 @@
 - [ ] refresh応答に新しい `refresh_token` がある場合はkeyringを置換し、無い場合は既存値を維持する。保存失敗を成功扱いせず、例外・ログへトークン本文を含めない
 - [ ] `invalid_grant` 等の失効レスポンスを `AuthenticationError` へラップする
 - [ ] Google/MicrosoftのHTTPSエンドポイントと既定スコープを許可リスト付きプロバイダ定義へ集約し、任意URLを引数・DB・マニフェストから受け取らない
+- [ ] 許可リスト付きプロバイダ定義に `loopback_redirect_host`（Google: `127.0.0.1`、Microsoft: 登録済み `http://localhost` 系 URI）を持たせ、認可要求とコード交換で同一のリダイレクトURI文字列を使い回す
+- [ ] Microsoft経路では `localhost` のIPv4/IPv6名前解決差を結合テストで確認する
 - [ ] 認可処理を「ループバック待受開始+認可URL生成」と「コールバック待機+コード交換」に分け、presentationがシステムブラウザを開ける契約にする
 
 ### **Group I: 5.2a 資格情報・DBスキーマ**
@@ -235,11 +242,15 @@
 - [ ] `migrations/008_oauth_accounts.sql` を追加し、`accounts.auth_type` / `oauth_provider` / `oauth_client_id` / `oauth_tenant` を追加する
 - [ ] `messages` に `gmail_msgid` / `gmail_thrid` / `gmail_labels` を追加し、`idx_msg_gmsgid` を作成する
 - [ ] `gmail_msgid` / `gmail_thrid` を10進文字列、`gmail_labels` をJSON配列としてfetchイベントへ追加し、未取得と空集合を区別する
-- [ ] `account_snapshot` の非秘密フィールドへ `auth_type` / `oauth_provider` / `oauth_client_id` / `oauth_tenant` を追加する（任意エンドポイントURL・`client_secret`・トークン類は含めない）
+- [ ] `usecases/snapshots.py` の `_ACCOUNT_FIELDS` / `_account_event()` へ `auth_type` / `oauth_provider` / `oauth_client_id` / `oauth_tenant` を追加する（任意エンドポイントURL・`client_secret`・トークン類は含めない）
+- [ ] `usecases/reindex.py` の `_account_record()` で同じ非秘密カラムを復元し、旧snapshotに対しては確定済みの後方互換既定値を適用する
+- [ ] 管理対象シークレット名（`password`/`client_secret`/`refresh_token`等）を列挙定数として定義し、`delete_all_secrets(account_id)` を追加する（存在しないキーの削除は成功扱いにする冪等実装）
+- [ ] アカウント削除・OAuth連携解除ユースケースから `delete_all_secrets(account_id)` を呼び出し、途中失敗時はログへ秘密値を含めずに通知する
 
 ### **Group J: 5.2a フェッチャー・usecases**
 
 - [ ] `GenericImapFetcher` に `auth_type="xoauth2"` 分岐を追加し、`authenticate("XOAUTH2", callback)` でSASL文字列を渡す
+- [ ] XOAUTH2コールバックを状態付きにし、サーバーからの継続チャレンジ（`+`）に対して空行（`b""`）を返すことで最終的な`NO`応答を経て`wrap_imap_errors`が`AuthenticationError`へ変換できるようにする
 - [ ] composition rootで `BaseAccessTokenProvider` 実装を注入し、`connect()` 直前の有効期限チェックとリフレッシュを実装する（フェッチャーはkeyring・HTTP実装を直接扱わない）
 - [ ] `UID FETCH` の応答パーサ（`imap_common.py`）へ `X-GM-MSGID` / `X-GM-THRID` / `X-GM-LABELS` の抽出を追加する
 - [ ] `wrap_imap_errors` にGmail固有応答コードの分類を追加する
@@ -253,6 +264,8 @@
 - [ ] `AccountDialog` に認証方式選択（ID/パスワード or Googleでログイン）を追加する
 - [ ] OAuthクライアントID入力欄と「Googleで認証」ボタンを追加し、クリックでブラウザを起動して認可フローを開始する
 - [ ] トークン状態表示（未連携／連携済み／要再連携）と再連携導線を追加する
+- [ ] 既存の汎用`Worker`/`ProgressDialog`を再利用し、OAuth認可待機（ブラウザ誘導・「キャンセル」ボタン）をGUIスレッド外で実行する
+- [ ] `CancelToken`のキャンセルをループバック待受の停止に接続し、成功・ユーザーキャンセル・120秒タイムアウト・ブラウザを閉じたままのキャンセルのいずれでもGUIイベントループが応答し続け、待受ソケットとスレッドが残らないことを確認する
 - [ ] `SetupWizard` に同じ認証方式選択を追加する
 - [ ] フォルダ選択ページでGmailアカウントの場合、`\All` を既定候補として提示し、他フォルダとの重複選択に警告文言を表示する
 
@@ -260,6 +273,7 @@
 
 - [ ] `infrastructure/security/oauth2.py` の単体テスト（PKCE生成・`state`検証・ループバックサーバー・トークン交換・リフレッシュ・失効処理）をローカルHTTPスタブで実施する
 - [ ] `GenericImapFetcher` のXOAUTH2認証分岐・トークン事前リフレッシュの単体テストをFakeフェッチャー相当のスタブで実施する
+- [ ] XOAUTH2の正常系・エラーチャレンジ後の`NO`・コールバック複数回呼び出しを固定する単体テストを追加する
 - [ ] refresh tokenのローテーション（新値あり/なし/keyring保存失敗）と、許可されていないエンドポイントへトークンを送信しないことをテストする
 - [ ] 5.2aの時点でDB削除後のreindexにより `gmail_msgid` / `gmail_thrid` / `gmail_labels` が復元されることをテストする
 - [ ] 秘密情報がDB・`config.json`・ログ・マニフェストへ出力されないことを固定するテストを追加する
@@ -272,7 +286,10 @@
 - [ ] 009適用後の冪等なfinalizerでmembership snapshot記録・Gmail重複統合・source key更新を終えてから `messages` を再構築し、`folder_id` / `uid` / `uidvalidity` / `remote_state` / `moved_to_folder_id` / `imap_flags` / `flags_seen_at` / `last_seen_at` を削除する
 - [ ] domainの共通ヘルパーで通常IMAP=`imap:{folder_key}:{uidvalidity}:{uid}`、Gmail=`gmail:{X-GM-MSGID}`、PST=既存キーを生成する
 - [ ] 旧IMAPマニフェストの `uidvalidity:uid` と、それを参照するpurge・監査・移動イベントを、reindex時に対応するfetchイベントと `folder_raw_name` から新形式へ正規化する
-- [ ] `UNIQUE messages(account_id, source_item_key)` と、UID非NULL時の `UNIQUE message_folders(folder_id, uidvalidity, uid)` を作成する
+- [ ] `UNIQUE messages(account_id, source_item_key)` と、UID非NULL時の `UNIQUE message_folders(folder_id, uidvalidity, uid)`、`message_identity_aliases(account_id, observed_source_item_key)` を作成する
+- [ ] finalizer開始前に `sqlite_schema` から `messages` / `message_contents` に依存するインデックス・トリガー・ビュー（`message_contents.message_id`・`pst_import_items.message_row_id` の外部キー、FTS5トリガー `mc_ai`/`mc_ad`/`mc_au` が `message_contents` 側にあること、`audit_log.message_id` はTEXTでFKではないこと）を棚卸しし、期待する定義をテストで固定する
+- [ ] `messages` 再構築はSQLite公式の一般化手順に従う: `PRAGMA foreign_keys=OFF` を `BEGIN IMMEDIATE` より前に設定→新テーブル作成→データ移行→旧テーブル削除→リネーム→インデックス/トリガー/ビュー再作成を1トランザクションで実施し、COMMIT前に `PRAGMA foreign_key_check` / `PRAGMA integrity_check` を実行、失敗時はロールバックしてから `PRAGMA foreign_keys=ON` へ戻す
+- [ ] `message_identity_aliases(account_id, observed_source_item_key, message_id, evidence_kind)` を新設し、`UNIQUE(account_id, observed_source_item_key)` を作成する
 - [ ] `domain/search.py::MessageFilter` と検索・一覧クエリを `message_folders` 経由のJOINへ更新する
 - [ ] `presentation/models/folder_tree_model.py` を `message_folders` を前提に更新する
 - [ ] 同期・削除検知・フラグ更新・UID一覧・移動検知・失敗再試行・reparse・verify・trash・フォルダ件数をmembership単位へ更新する
@@ -282,7 +299,10 @@
 - [ ] ラベル所属変更ごとに完全な `message_membership_snapshot` を追記・fsyncしてからDBを更新し、reindexが最後のsnapshotから `message_folders` を復元できるようにする
 - [ ] 定期フラグ更新時に `X-GM-LABELS` も取得し、所属変更があればmembership snapshotを記録する
 - [ ] 5.2aの重複を `gmail_msgid` 単位で統合し、membershipの和集合・active優先・子テーブル/監査参照の付け替えを行う。EMLハッシュ不一致は自動統合せず移行エラーにする
-- [ ] 009の各段階を冪等にし、途中停止後の再実行と移行前バックアップからの復旧をテストする
+- [ ] 通常IMAPのMOVE統合は、アプリ自身が実行したMOVEでサーバーの `COPYUID` 等から新旧UIDの対応が確定した場合、または外部MOVE推定として移動元UID消失・移動先UID新規観測・両フォルダの同一同期サイクルでの完全走査成功・`file_hash`完全一致・候補1対1のすべてを満たす場合のみ行う。候補複数・走査失敗・ハッシュ不一致・COPYの可能性がある場合は統合せず別行として保持する
+- [ ] 移動先の書き込み順序を「EML保存→fetchイベント追記+fsync→`message_identity_linked`（`canonical_source_item_key`/`alias_source_item_key`/`evidence_kind`/`file_hash`）+完全な`message_membership_snapshot`を追記・fsync→`BEGIN IMMEDIATE`後にmembership付け替え・alias登録・重複行の子参照付け替えと削除」の順で実装する。canonical行は最古のfetchイベントを持つ行とし、`local_state`は1件でもactiveなら優先し、ハッシュ不一致は自動統合せずエラーにする
+- [ ] reindexで `message_identity_linked` イベントを読み、aliasをcanonical keyへ正規化してから同一canonical keyのfetchを1つの `messages` 行へ畳み込み、最後の完全なmembership snapshotから `message_folders` とalias表を復元する。alias循環・1つのaliasに対する複数canonical指定・ハッシュ不一致は復元エラーとして拒否する
+- [ ] 009の各段階を冪等にし、途中停止後の再実行と移行前バックアップからの復旧をテストする。加えて、`COPYUID`で対応が確定したMOVEの統合、外部MOVE推定の1対1候補のみの統合（COPY・候補複数・片側走査失敗・ハッシュ不一致は非統合）、マニフェストfsync後・DBコミット前の中断からの再実行と同一linkイベントの重複適用、`metadata.db`削除後にEML＋fetch＋identity link＋最後のmembership snapshotから同じcanonical構造を復元できることをテストする
 
 ### **Group N: 5.3 Microsoft 365 / Outlook.com**
 
@@ -325,6 +345,8 @@
 | `src/mail_dock/migrations/009_message_folders.sql` | `message_folders`互換スキーマとバックフィル（finalizer完了後に旧列を除去） | Group M |
 | `src/mail_dock/usecases/oauth_authorize.py` | 認可フロー開始・トークン保存・再認可 | Group J |
 | `src/mail_dock/usecases/register_account.py` | `tls_mode`/`ca_cert_path`/`auth_type`/`oauth_*`対応 | Group B, J |
+| `src/mail_dock/usecases/snapshots.py` | アカウントsnapshotの新フィールド対応・`provider_type`既定値修正（`onamae_imap`→`imap`） | Group B, I |
+| `src/mail_dock/usecases/reindex.py` | 新フィールドの復元、`message_identity_aliases`/`message_identity_linked`からのcanonical復元 | Group B, I, M |
 | `src/mail_dock/usecases/delete_remote.py` | Gmailの`expunge`拒否・ラベル区別削除 | Group J, M |
 | `src/mail_dock/presentation/views/dialogs/settings_dialog.py` | 接続方式・認証方式・OAuth連携UI | Group D, K |
 | `src/mail_dock/presentation/views/setup_wizard.py` | 認証方式選択・フォルダ重複警告 | Group K |

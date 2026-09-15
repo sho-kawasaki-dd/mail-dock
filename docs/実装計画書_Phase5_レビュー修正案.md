@@ -206,13 +206,13 @@ Phase 5（マルチプロトコル対応: 汎用IMAP / Gmail OAuth2 / Microsoft 
 
 ## 4. 実装計画書（Phase 5）への反映推奨チェックリスト
 
-- [ ] **D-11 / D-19**: Gmail IMAP の `CONDSTORE` 非対応と Phase 3.7 フォールバック経路の適用を注記
-- [ ] **D-18 / F-14 / Group J**: `X-GM-LABELS` の modified UTF-7 デコード（UTF-8 文字列配列での永続化）を明記
-- [ ] **D-21 / F-17 / Group I**: 管理対象シークレット名を一元化し、アカウント削除・連携解除時に既知の全キーを冪等に削除する手順を追記
-- [ ] **D-22 / F-38**: GoogleとMicrosoft Entra IDの登録規則に合うリダイレクトURIをプロバイダ定義から生成し、認可要求とコード交換で同一URIを使う仕様を追記
-- [ ] **D-23 / Group K**: 既存の汎用`Worker`を第一候補としてOAuth待機をGUIスレッド外へ移し、待機ダイアログと`CancelToken`によるループバック待受停止を追記
-- [ ] **D-29〜D-31 / D-34 / F-27〜F-29 / F-32 / F-35 / Group M**: 通常IMAPのcanonical message、`message_identity_aliases`、保守的なMOVE統合条件、`message_identity_linked`、完全membership snapshot、重複行統合、reindex、冪等性テストを追記
-- [ ] **F-18 / Group J**: XOAUTH2のSASL初期応答後に届く追加の継続チャレンジ（`+`）に対する空行（`b""`）送信ハンドリングを追記
-- [ ] **F-27 / Group M**: 実スキーマの子参照・依存オブジェクトを棚卸しし、SQLite公式再構築手順、canonical行への参照付け替え、FTS5整合性検査、FK・DB整合性検査を明記
-- [ ] **Group A / Group E**: [tests/unit/test_onamae_imap.py](tests/unit/test_onamae_imap.py) のリネームタスクを追記
-- [ ] **Group B / Group I / セクション 4**: [src/mail_dock/usecases/snapshots.py](src/mail_dock/usecases/snapshots.py) の新フィールド対応・既定値修正、および [src/mail_dock/usecases/reindex.py](src/mail_dock/usecases/reindex.py) の復元処理を主要成果物とタスクに追記
+- [x] **D-11 / D-19**: Gmail IMAP の `CONDSTORE` 非対応と Phase 3.7 フォールバック経路の適用を注記
+- [x] **D-18 / F-14 / Group J**: `X-GM-LABELS` の modified UTF-7 デコード（UTF-8 文字列配列での永続化）を明記
+- [x] **D-21 / F-17 / Group I**: 管理対象シークレット名を一元化し、アカウント削除・連携解除時に既知の全キーを冪等に削除する手順を追記
+- [x] **D-22 / F-38**: GoogleとMicrosoft Entra IDの登録規則に合うリダイレクトURIをプロバイダ定義から生成し、認可要求とコード交換で同一URIを使う仕様を追記
+- [x] **D-23 / Group K**: 既存の汎用`Worker`を第一候補としてOAuth待機をGUIスレッド外へ移し、待機ダイアログと`CancelToken`によるループバック待受停止を追記
+- [x] **D-29〜D-31 / D-34 / F-27〜F-29 / F-32 / F-35 / Group M**: 通常IMAPのcanonical message、`message_identity_aliases`、保守的なMOVE統合条件、`message_identity_linked`、完全membership snapshot、重複行統合、reindex、冪等性テストを追記
+- [x] **F-18 / Group J**: XOAUTH2のSASL初期応答後に届く追加の継続チャレンジ（`+`）に対する空行（`b""`）送信ハンドリングを追記
+- [x] **F-27 / Group M**: 実スキーマの子参照・依存オブジェクトを棚卸しし、SQLite公式再構築手順、canonical行への参照付け替え、FTS5整合性検査、FK・DB整合性検査を明記
+- [x] **Group A / Group E**: [tests/unit/test_onamae_imap.py](tests/unit/test_onamae_imap.py) のリネームタスクを追記
+- [x] **Group B / Group I / セクション 4**: [src/mail_dock/usecases/snapshots.py](src/mail_dock/usecases/snapshots.py) の新フィールド対応・既定値修正、および [src/mail_dock/usecases/reindex.py](src/mail_dock/usecases/reindex.py) の復元処理を主要成果物とタスクに追記
