@@ -187,12 +187,12 @@
 
 ### **Group D: 5.1 GUIとコンポジションルート**
 
-- [ ] `AppContext.create_fetcher()` / `create_fetcher_for_credentials()`、`__main__._account_fetcher()` を `GenericImapFetcher` と新カラムに対応させる
-- [ ] `AccountDialog` に接続方式コンボボックス（暗黙的TLS / STARTTLS）を追加し、選択に応じてポート番号の既定プレースホルダ（993 / 143）を切り替える
-- [ ] `AccountDialog` にCA証明書ファイル指定欄（`QLineEdit` + 参照ボタン）を追加する
-- [ ] `_connection_fields_changed()` の比較対象に `tls_mode` / `ca_cert_path` を含める
-- [ ] `_test_connection()` / `create_fetcher_for_credentials()` 呼び出しに新パラメータを伝播させる
-- [ ] `strings.py` に新規ラベル・ヒント文言を追加する
+- [x] `AppContext.create_fetcher()` / `create_fetcher_for_credentials()`、`__main__._account_fetcher()` を `GenericImapFetcher` と新カラムに対応させる
+- [x] `AccountDialog` に接続方式コンボボックス（暗黙的TLS / STARTTLS）を追加し、選択に応じてポート番号の既定プレースホルダ（993 / 143）を切り替える
+- [x] `AccountDialog` にCA証明書ファイル指定欄（`QLineEdit` + 参照ボタン）を追加する
+- [x] `_connection_fields_changed()` の比較対象に `tls_mode` / `ca_cert_path` を含める
+- [x] `_test_connection()` / `create_fetcher_for_credentials()` 呼び出しに新パラメータを伝播させる
+- [x] `strings.py` に新規ラベル・ヒント文言を追加する
 
 ### **Group E: 5.1 テスト**
 

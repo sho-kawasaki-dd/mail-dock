@@ -13,7 +13,7 @@ from contextlib import suppress
 from dataclasses import replace
 from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from mail_dock import config
 from mail_dock.domain.errors import ConfigError
@@ -253,12 +253,20 @@ class AppContext:
             raise ConfigError(f"Account has no valid username: {account_id}")
         if isinstance(port, bool) or not isinstance(port, int) or port <= 0:
             raise ConfigError(f"Account has no valid port: {account_id}")
+        tls_mode = account.get("tls_mode", "implicit")
+        if tls_mode not in {"implicit", "starttls"}:
+            raise ConfigError(f"Account has no valid TLS mode: {account_id}")
+        ca_cert_path = account.get("ca_cert_path")
+        if ca_cert_path is not None and not isinstance(ca_cert_path, str):
+            raise ConfigError(f"Account has no valid CA certificate path: {account_id}")
         return GenericImapFetcher(
             host,
             username,
             load_credentials(self.credential_store, account_id),
             port=port,
             remote_trash_folder=self.settings.remote_trash_folder,
+            tls_mode=cast(Literal["implicit", "starttls"], tls_mode),
+            ca_cert_path=ca_cert_path or None,
         )
 
     def create_fetcher_for_credentials(
@@ -268,6 +276,8 @@ class AppContext:
         port: int,
         username: str,
         password: str,
+        tls_mode: Literal["implicit", "starttls"] = "implicit",
+        ca_cert_path: str | None = None,
     ) -> BaseMailFetcher:
         """Create an unaffiliated fetcher for the setup connection test."""
 
@@ -277,6 +287,8 @@ class AppContext:
             password,
             port=port,
             remote_trash_folder=self.settings.remote_trash_folder,
+            tls_mode=tls_mode,
+            ca_cert_path=ca_cert_path or None,
         )
 
     def create_message_renderer(self) -> Any:

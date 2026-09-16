@@ -166,6 +166,32 @@ def test_account_dialog_edit_requires_connection_test_when_host_changes(qtbot: A
     dialog._stop_worker()
 
 
+def test_account_dialog_edit_handles_tls_mode_and_ca_certificate(qtbot: Any) -> None:
+    account = {
+        **_editable_account(),
+        "port": 993,
+        "tls_mode": "implicit",
+        "ca_cert_path": "C:/certs/mail-ca.pem",
+    }
+    dialog = AccountDialog(
+        _AccountEditContext(_AccountRepository(account), _CredentialStore()), account=account
+    )
+    qtbot.addWidget(dialog)
+
+    assert dialog._tls_mode_edit.currentData() == "implicit"
+    assert dialog._port_edit.value() == 993
+    assert dialog._ca_cert_path_edit.text() == "C:/certs/mail-ca.pem"
+
+    dialog._tls_mode_edit.setCurrentIndex(dialog._tls_mode_edit.findData("starttls"))
+
+    assert dialog._port_edit.value() == 143
+    assert dialog._connection_fields_changed()
+    dialog._ca_cert_path_edit.clear()
+    assert dialog._account_values() is not None
+    assert dialog._account_values()["ca_cert_path"] is None
+    dialog._stop_worker()
+
+
 def test_active_settings_are_saved_with_purge_controls(qtbot: Any) -> None:
     context = _Context()
     dialog = SettingsDialog(context)

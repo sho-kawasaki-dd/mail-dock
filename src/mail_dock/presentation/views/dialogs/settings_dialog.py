@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -61,6 +62,8 @@ def _register_account_with_snapshot(context: Any, values: Mapping[str, Any]) -> 
             username=values["username"],
             password=values["password"],
             display_name=values["display_name"] or None,
+            tls_mode=values["tls_mode"],
+            ca_cert_path=values["ca_cert_path"],
             manifest=manifest,
             manifest_reader=context.create_manifest_reader(account_id),
         )
@@ -86,6 +89,8 @@ def _update_account_with_snapshot(
             password=values["password"] or None,
             display_name=values["display_name"] or None,
             is_enabled=is_enabled,
+            tls_mode=values["tls_mode"],
+            ca_cert_path=values["ca_cert_path"],
             manifest=manifest,
             manifest_reader=context.create_manifest_reader(account_id),
         )
@@ -137,12 +142,20 @@ class AccountDialog(QDialog):
 
         self._account_id_edit = QLineEdit(self)
         self._host_edit = QLineEdit(self)
+        self._tls_mode_edit = QComboBox(self)
+        self._tls_mode_edit.addItem(strings.SETTINGS_TLS_MODE_IMPLICIT, "implicit")
+        self._tls_mode_edit.addItem(strings.SETTINGS_TLS_MODE_STARTTLS, "starttls")
         self._port_edit = QSpinBox(self)
         self._port_edit.setRange(1, 65535)
         self._port_edit.setValue(993)
+        self._port_default = 993
         self._username_edit = QLineEdit(self)
         self._password_edit = QLineEdit(self)
         self._password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._ca_cert_path_edit = QLineEdit(self)
+        self._ca_cert_path_edit.setPlaceholderText(strings.SETTINGS_HINT_CA_CERT_PATH)
+        self._ca_cert_browse_button = QPushButton(strings.SETTINGS_BUTTON_BROWSE_CA_CERT, self)
+        self._ca_cert_browse_button.clicked.connect(self._browse_ca_certificate)
         self._display_name_edit = QLineEdit(self)
         self._status_label = QLabel(self)
         self._status_label.setWordWrap(True)
@@ -152,8 +165,13 @@ class AccountDialog(QDialog):
             self._account_id_edit.setReadOnly(True)
             self._account_id_edit.setToolTip(strings.SETTINGS_HINT_ACCOUNT_ID_LOCKED)
             self._host_edit.setText(str(account.get("host", "")))
-            self._port_edit.setValue(int(account.get("port") or 993))
+            tls_mode = account.get("tls_mode", "implicit")
+            mode_index = self._tls_mode_edit.findData(tls_mode)
+            self._tls_mode_edit.setCurrentIndex(mode_index if mode_index >= 0 else 0)
+            self._port_default = self._default_port_for_tls_mode()
+            self._port_edit.setValue(int(account.get("port") or self._port_default))
             self._username_edit.setText(str(account.get("username", "")))
+            self._ca_cert_path_edit.setText(str(account.get("ca_cert_path") or ""))
             self._display_name_edit.setText(str(account.get("display_name") or ""))
             self._password_edit.setPlaceholderText(strings.SETTINGS_HINT_PASSWORD_UNCHANGED)
         # Captured after prefilling so unrelated display-name-only edits skip the connection test.
@@ -161,6 +179,8 @@ class AccountDialog(QDialog):
             self._host_edit.text().strip(),
             self._port_edit.value(),
             self._username_edit.text().strip(),
+            self._tls_mode_edit.currentData(),
+            self._ca_cert_path_edit.text().strip(),
         )
 
         for field in (
@@ -171,11 +191,18 @@ class AccountDialog(QDialog):
         ):
             field.textChanged.connect(self._invalidate_connection_test)
         self._port_edit.valueChanged.connect(self._invalidate_connection_test)
+        self._tls_mode_edit.currentIndexChanged.connect(self._tls_mode_changed)
+        self._ca_cert_path_edit.textChanged.connect(self._invalidate_connection_test)
         form.addRow(strings.SETTINGS_LABEL_ACCOUNT_ID, self._account_id_edit)
         form.addRow(strings.SETTINGS_LABEL_HOST, self._host_edit)
+        form.addRow(strings.SETTINGS_LABEL_TLS_MODE, self._tls_mode_edit)
         form.addRow(strings.SETTINGS_LABEL_PORT, self._port_edit)
         form.addRow(strings.SETTINGS_LABEL_USERNAME, self._username_edit)
         form.addRow(strings.SETTINGS_LABEL_PASSWORD, self._password_edit)
+        ca_cert_row = QHBoxLayout()
+        ca_cert_row.addWidget(self._ca_cert_path_edit)
+        ca_cert_row.addWidget(self._ca_cert_browse_button)
+        form.addRow(strings.SETTINGS_LABEL_CA_CERT_PATH, ca_cert_row)
         form.addRow(strings.SETTINGS_LABEL_DISPLAY_NAME, self._display_name_edit)
         layout.addLayout(form)
 
@@ -196,6 +223,26 @@ class AccountDialog(QDialog):
     def _invalidate_connection_test(self, *_args: object) -> None:
         self._connection_test_passed = False
 
+    def _default_port_for_tls_mode(self) -> int:
+        return 143 if self._tls_mode_edit.currentData() == "starttls" else 993
+
+    def _tls_mode_changed(self, *_args: object) -> None:
+        default_port = self._default_port_for_tls_mode()
+        if self._port_edit.value() == self._port_default:
+            self._port_edit.setValue(default_port)
+        self._port_default = default_port
+        self._invalidate_connection_test()
+
+    def _browse_ca_certificate(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            strings.SETTINGS_LABEL_CA_CERT_PATH,
+            self._ca_cert_path_edit.text().strip(),
+            "CA certificates (*.pem *.crt *.cer);;All files (*)",
+        )
+        if path:
+            self._ca_cert_path_edit.setText(path)
+
     def _connection_fields_changed(self) -> bool:
         """Whether host/port/username/password differ from the stored account.
 
@@ -210,6 +257,8 @@ class AccountDialog(QDialog):
             self._host_edit.text().strip(),
             self._port_edit.value(),
             self._username_edit.text().strip(),
+            self._tls_mode_edit.currentData(),
+            self._ca_cert_path_edit.text().strip(),
         )
         return current != self._original_connection_values
 
@@ -277,6 +326,8 @@ class AccountDialog(QDialog):
             "port": self._port_edit.value(),
             "username": username,
             "password": password,
+            "tls_mode": self._tls_mode_edit.currentData(),
+            "ca_cert_path": self._ca_cert_path_edit.text().strip() or None,
             "display_name": self._display_name_edit.text().strip(),
         }
 
@@ -1015,6 +1066,8 @@ def _test_connection(context: Any, values: dict[str, Any]) -> None:
         port=values["port"],
         username=values["username"],
         password=values["password"],
+        tls_mode=values["tls_mode"],
+        ca_cert_path=values["ca_cert_path"],
     )
     with fetcher:
         return None

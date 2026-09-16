@@ -780,12 +780,20 @@ def _account_fetcher(
         raise ConfigError(f"Account has no valid username: {account_id}")
     if isinstance(port, bool) or not isinstance(port, int) or port <= 0:
         raise ConfigError(f"Account has no valid port: {account_id}")
+    tls_mode = account.get("tls_mode", "implicit")
+    if tls_mode not in {"implicit", "starttls"}:
+        raise ConfigError(f"Account has no valid TLS mode: {account_id}")
+    ca_cert_path = account.get("ca_cert_path")
+    if ca_cert_path is not None and not isinstance(ca_cert_path, str):
+        raise ConfigError(f"Account has no valid CA certificate path: {account_id}")
     return GenericImapFetcher(
         host,
         username,
         _load_cli_credentials(credential_store, account_id),
         port=port,
         remote_trash_folder=settings.remote_trash_folder,
+        tls_mode=tls_mode,
+        ca_cert_path=ca_cert_path or None,
     )
 
 
