@@ -86,11 +86,35 @@ def test_load_credentials_requires_registered_password() -> None:
         load_credentials(FakeCredentialStore(), "missing")
 
 
-def test_list_accounts_delegates_without_credentials() -> None:
+def test_list_accounts_includes_connection_settings_without_credentials() -> None:
     repository = InMemoryMessageRepository()
-    repository.upsert_account({"id": "account", "username": "user"})
+    repository.upsert_account(
+        {
+            "id": "account",
+            "provider_type": "imap",
+            "host": "imap.example.com",
+            "port": 143,
+            "username": "user",
+            "tls_mode": "starttls",
+            "ca_cert_path": "/etc/ssl/mail-ca.pem",
+            "password": "must-not-be-returned",
+        }
+    )
 
-    assert list_accounts(repository) == repository.list_accounts()
+    accounts = list_accounts(repository)
+
+    assert accounts == [
+        {
+            "id": "account",
+            "provider_type": "imap",
+            "host": "imap.example.com",
+            "port": 143,
+            "username": "user",
+            "tls_mode": "starttls",
+            "ca_cert_path": "/etc/ssl/mail-ca.pem",
+        }
+    ]
+    assert "password" not in accounts[0]
 
 
 def test_update_account_keeps_existing_password_when_blank() -> None:

@@ -104,4 +104,7 @@ def load_credentials(credential_store: BaseCredentialStore, account_id: str) -> 
 def list_accounts(repo: BaseMessageRepository) -> Sequence[MessageRecord]:
     """Return registered connection details without reading credential storage."""
 
-    return repo.list_accounts()
+    return [
+        {key: value for key, value in account.items() if key != "password"}
+        for account in repo.list_accounts()
+    ]
