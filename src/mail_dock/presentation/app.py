@@ -58,6 +58,7 @@ from mail_dock.presentation.views.setup_wizard import SetupWizard
 from mail_dock.presentation.web.schemes import register_schemes
 from mail_dock.usecases.snapshots import (
     backfill_snapshots,
+    reconcile_account_snapshots,
     recover_after_unclean_shutdown,
     repair_manifest_tails,
 )
@@ -448,6 +449,11 @@ def _start_session(
         session.__enter__()
         context = AppContext(session, session.settings)
         backfill_snapshots(
+            context.create_message_repository(),
+            context.create_manifest_writer,
+            context.create_manifest_reader,
+        )
+        reconcile_account_snapshots(
             context.create_message_repository(),
             context.create_manifest_writer,
             context.create_manifest_reader,

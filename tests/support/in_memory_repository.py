@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from copy import deepcopy
 from typing import Any
 
+from mail_dock.domain.errors import DatabaseError
 from mail_dock.domain.messages import StoredEml
 from mail_dock.domain.repository import (
     BaseMessageRepository,
@@ -43,11 +44,23 @@ class InMemoryMessageRepository(BaseMessageRepository):
         record = self._copy(account)
         account_id = str(record["id"] if "id" in record else record["account_id"])
         record["id"] = account_id
+        record.setdefault("provider_type", "imap")
+        record.setdefault("tls_mode", "implicit")
+        record.setdefault("ca_cert_path", None)
         self.accounts[account_id] = record
         return account_id
 
     def list_accounts(self) -> Sequence[MessageRecord]:
         return list(self.accounts.values())
+
+    def normalize_account_provider_type(self, account_id: str, provider_type: str) -> None:
+        if not account_id:
+            raise DatabaseError("Account id is required")
+        if not provider_type:
+            raise DatabaseError("Provider type is required")
+        if account_id not in self.accounts:
+            raise DatabaseError(f"Account does not exist: {account_id}")
+        self.accounts[account_id]["provider_type"] = provider_type
 
     def upsert_folder(self, folder: MessageRecord) -> int:
         record = self._copy(folder)

@@ -22,9 +22,15 @@ def test_empty_database_migrates_to_latest_version(
 ) -> None:
     db_path = tmp_path / "metadata.db"
 
-    assert migrate(db_conn, db_path) == 6
-    assert current_version(db_conn) == 6
+    assert migrate(db_conn, db_path) == 7
+    assert current_version(db_conn) == 7
     assert db_conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+    account_columns = {row[1] for row in db_conn.execute("PRAGMA table_info(accounts)")}
+    assert {"tls_mode", "ca_cert_path"}.issubset(account_columns)
+    db_conn.execute("INSERT INTO accounts (id, provider_type) VALUES (?, ?)", ("account", "imap"))
+    assert db_conn.execute(
+        "SELECT tls_mode, ca_cert_path FROM accounts WHERE id = ?", ("account",)
+    ).fetchone() == ("implicit", None)
 
     indexes = {
         row[1]: db_conn.execute(
@@ -52,7 +58,7 @@ def test_pst_import_migration_creates_import_tables_and_indexes(
     db_conn: sqlite3.Connection,
     tmp_path: Path,
 ) -> None:
-    assert migrate(db_conn, tmp_path / "metadata.db") == 6
+    assert migrate(db_conn, tmp_path / "metadata.db") == 7
 
     import_columns = {row[1] for row in db_conn.execute("PRAGMA table_info(pst_imports)")}
     assert import_columns == {
@@ -145,7 +151,7 @@ def test_phase4_migration_backs_up_existing_v4_database(
     )
     db_conn.commit()
 
-    assert migrate(db_conn, tmp_path / "metadata.db") == 6
+    assert migrate(db_conn, tmp_path / "metadata.db") == 7
 
     backup_path = tmp_path / "metadata.db.bak.4"
     assert backup_path.is_file()
@@ -164,7 +170,7 @@ def test_nonempty_v0_database_is_backed_up_before_migration(tmp_path: Path) -> N
         connection.execute("CREATE TABLE legacy (value TEXT)")
         connection.execute("INSERT INTO legacy VALUES ('old')")
         connection.commit()
-        assert migrate(connection, db_path) == 6
+        assert migrate(connection, db_path) == 7
     finally:
         connection.close()
 
@@ -179,7 +185,7 @@ def test_nonempty_v0_database_is_backed_up_before_migration(tmp_path: Path) -> N
 
     rerun = connect(db_path)
     try:
-        assert migrate(rerun, db_path) == 6
+        assert migrate(rerun, db_path) == 7
     finally:
         rerun.close()
     assert not (tmp_path / "metadata.db.bak.0.1").exists()
@@ -237,7 +243,7 @@ def test_timestamp_migration_normalizes_legacy_values_and_defaults(
     )
     db_conn.commit()
 
-    assert migrate(db_conn, tmp_path / "metadata.db") == 6
+    assert migrate(db_conn, tmp_path / "metadata.db") == 7
 
     values = db_conn.execute(
         """

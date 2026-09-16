@@ -172,14 +172,14 @@
 
 ### **Group B: 5.1 DBスキーマとリポジトリ**
 
-- [ ] `migrations/007_generic_imap_connection.sql` を追加し、`accounts.tls_mode` / `accounts.ca_cert_path` だけを追加する（`provider_type` のUPDATEは含めない）
-- [ ] `SqliteMessageRepository._ACCOUNT_COLUMNS` と `upsert_account` の `provider_type` 既定値を `"imap"` に変更する
-- [ ] `usecases/register_account.py` の `register_account` / `update_account` の `provider_type` ハードコードを `"imap"` に変更し、`tls_mode` / `ca_cert_path` 引数を追加する
-- [ ] `tests/support/in_memory_repository.py` のアカウント関連実装に新カラムを反映する
-- [ ] `usecases/snapshots.py` の `_ACCOUNT_FIELDS` に `tls_mode` / `ca_cert_path` を追加し、`_account_event()` の `provider_type` 既定値 `"onamae_imap"` を `"imap"` に修正する
-- [ ] `usecases/reindex.py` の `_account_record()` で `tls_mode` / `ca_cert_path` を復元し、旧snapshotに対しては確定済みの後方互換既定値を適用する
-- [ ] 既存の最新snapshotと全対象フィールドを比較する `reconcile_account_snapshots()` を新設する
-- [ ] `007` 後処理で新しいsnapshotを追記・fsyncしてから `BEGIN IMMEDIATE` でDBを正規化し、途中停止後もGUI/CLI共通起動経路から再試行できるようにする（D-4, D-34）
+- [x] `migrations/007_generic_imap_connection.sql` を追加し、`accounts.tls_mode` / `accounts.ca_cert_path` だけを追加する（`provider_type` のUPDATEは含めない）
+- [x] `SqliteMessageRepository._ACCOUNT_COLUMNS` と `upsert_account` の `provider_type` 既定値を `"imap"` に変更する
+- [x] `usecases/register_account.py` の `register_account` / `update_account` の `provider_type` ハードコードを `"imap"` に変更し、`tls_mode` / `ca_cert_path` 引数を追加する
+- [x] `tests/support/in_memory_repository.py` のアカウント関連実装に新カラムを反映する
+- [x] `usecases/snapshots.py` の `_ACCOUNT_FIELDS` に `tls_mode` / `ca_cert_path` を追加し、`_account_event()` の `provider_type` 既定値 `"onamae_imap"` を `"imap"` に修正する
+- [x] `usecases/reindex.py` の `_account_record()` で `tls_mode` / `ca_cert_path` を復元し、旧snapshotに対しては確定済みの後方互換既定値を適用する
+- [x] 既存の最新snapshotと全対象フィールドを比較する `reconcile_account_snapshots()` を新設する
+- [x] `007` 後処理で新しいsnapshotを追記・fsyncしてから `BEGIN IMMEDIATE` でDBを正規化し、途中停止後もGUI/CLI共通起動経路から再試行できるようにする（D-4, D-34）
 
 ### **Group C: 5.1 usecases**
 

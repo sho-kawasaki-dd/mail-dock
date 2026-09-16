@@ -47,12 +47,14 @@ def test_register_account_keeps_password_out_of_repository() -> None:
     assert repository.list_accounts() == [
         {
             "id": account_id,
-            "provider_type": "onamae_imap",
+            "provider_type": "imap",
             "display_name": "Example",
             "host": "imap.example.com",
             "port": 993,
             "username": "user@example.com",
             "is_enabled": 1,
+            "tls_mode": "implicit",
+            "ca_cert_path": None,
         }
     ]
     assert "password" not in repository.list_accounts()[0]

@@ -121,12 +121,16 @@ def _account_record(event: Mapping[str, JSONValue]) -> MessageRecord | None:
     host = _text(event, "host")
     username = _text(event, "username")
     port = _integer(event, "port")
+    tls_mode = event.get("tls_mode", "implicit")
+    ca_cert_path = event.get("ca_cert_path")
     if (
         account_id is None
         or provider_type is None
         or host is None
         or username is None
         or port is None
+        or not isinstance(tls_mode, str)
+        or (ca_cert_path is not None and not isinstance(ca_cert_path, str))
     ):
         return None
     return {
@@ -137,6 +141,8 @@ def _account_record(event: Mapping[str, JSONValue]) -> MessageRecord | None:
         "port": port,
         "username": username,
         "is_enabled": int(bool(event.get("is_enabled", True))),
+        "tls_mode": tls_mode,
+        "ca_cert_path": ca_cert_path,
     }
 
 

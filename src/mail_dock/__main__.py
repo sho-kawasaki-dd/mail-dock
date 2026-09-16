@@ -99,6 +99,7 @@ from mail_dock.usecases.search_messages import search_messages
 from mail_dock.usecases.search_query import parse_query
 from mail_dock.usecases.snapshots import (
     backfill_snapshots,
+    reconcile_account_snapshots,
     recover_after_unclean_shutdown,
     repair_manifest_tails,
 )
@@ -1403,10 +1404,19 @@ def _run_command(
     readonly = command == "verify" and verify_mode in {"quick", "full"}
     result = 0
     with StorageSession(settings, requested_root, readonly=readonly) as session:
+        repository: SqliteMessageRepository | None = None
+        if not readonly and command is not None:
+            repository = SqliteMessageRepository(session.connection_manager)
+            reconcile_account_snapshots(
+                repository,
+                lambda account_id: ManifestWriter(session.root, account_id),
+                lambda account_id: ManifestReader(session.root, account_id),
+            )
         if command not in {None, "migrate"}:
             if args is None:
                 raise ConfigError("Command arguments are missing")
-            repository = SqliteMessageRepository(session.connection_manager)
+            if repository is None:
+                raise DatabaseError("Repository is not configured")
             search_repository = SqliteSearchRepository(session.connection_manager)
             if command not in {"verify", "reindex"}:
                 backfill_snapshots(

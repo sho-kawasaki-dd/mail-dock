@@ -22,6 +22,9 @@ class BaseMessageRepository(ABC):
     def list_accounts(self) -> Sequence[MessageRecord]: ...
 
     @abstractmethod
+    def normalize_account_provider_type(self, account_id: str, provider_type: str) -> None: ...
+
+    @abstractmethod
     def upsert_folder(self, folder: MessageRecord) -> Any: ...
 
     @abstractmethod

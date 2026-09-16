@@ -27,6 +27,8 @@ _ACCOUNT_COLUMNS = (
     "port",
     "username",
     "is_enabled",
+    "tls_mode",
+    "ca_cert_path",
 )
 _FOLDER_COLUMNS = (
     "id",
@@ -142,12 +144,14 @@ class SqliteMessageRepository(BaseMessageRepository):
             raise DatabaseError("Account id is required")
         values = {
             "id": account_id,
-            "provider_type": str(account.get("provider_type", "onamae_imap")),
+            "provider_type": str(account.get("provider_type", "imap")),
             "display_name": account.get("display_name"),
             "host": account.get("host"),
             "port": account.get("port", 993),
             "username": account.get("username"),
             "is_enabled": int(account.get("is_enabled", 1)),
+            "tls_mode": str(account.get("tls_mode", "implicit")),
+            "ca_cert_path": account.get("ca_cert_path"),
         }
         with self._db_io("upsert account"):
             columns = ", ".join(_ACCOUNT_COLUMNS)
@@ -159,6 +163,26 @@ class SqliteMessageRepository(BaseMessageRepository):
                 tuple(values[column] for column in _ACCOUNT_COLUMNS),
             )
         return account_id
+
+    def normalize_account_provider_type(self, account_id: str, provider_type: str) -> None:
+        if not account_id:
+            raise DatabaseError("Account id is required")
+        if not provider_type:
+            raise DatabaseError("Provider type is required")
+        with self._db_io("normalize account provider type"):
+            connection = self._conn()
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                cursor = connection.execute(
+                    "UPDATE accounts SET provider_type = ? WHERE id = ?",
+                    (provider_type, account_id),
+                )
+                if cursor.rowcount != 1:
+                    raise DatabaseError(f"Account does not exist: {account_id}")
+                connection.commit()
+            except (DatabaseError, sqlite3.Error):
+                connection.rollback()
+                raise
 
     def list_accounts(self) -> Sequence[MessageRecord]:
         with self._db_io("list accounts"):

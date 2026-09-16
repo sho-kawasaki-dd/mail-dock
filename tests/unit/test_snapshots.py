@@ -17,6 +17,7 @@ from mail_dock.domain.ports import (
 from mail_dock.usecases.register_account import register_account, update_account
 from mail_dock.usecases.snapshots import (
     backfill_snapshots,
+    reconcile_account_snapshots,
     recover_after_unclean_shutdown,
     repair_manifest_tails,
 )
@@ -175,6 +176,55 @@ def test_backfill_records_each_existing_account_and_folder_once() -> None:
     assert first == (1, 1)
     assert second == (0, 0)
     assert len(manifests["account"].events) == 2
+
+
+def test_reconcile_account_snapshots_records_legacy_state_before_db_update() -> None:
+    repository = InMemoryMessageRepository()
+    repository.upsert_account(
+        {
+            "id": "account",
+            "provider_type": "onamae_imap",
+            "host": "imap.example.test",
+            "port": 993,
+            "username": "user",
+        }
+    )
+    manifest = MemoryManifest()
+    manifests = {"account": manifest}
+
+    assert reconcile_account_snapshots(
+        repository,
+        lambda account_id: manifests[account_id],
+        lambda account_id: manifests[account_id],
+    ) == 1
+
+    assert repository.list_accounts()[0]["provider_type"] == "imap"
+    snapshot = [event for event in manifest.events if event["event"] == "account_snapshot"][-1]
+    assert snapshot["provider_type"] == "imap"
+    assert snapshot["tls_mode"] == "implicit"
+    assert snapshot["ca_cert_path"] is None
+    assert manifest.flush_count == 1
+
+
+def test_reconcile_account_snapshots_retries_when_provider_already_normalized() -> None:
+    repository = InMemoryMessageRepository()
+    repository.upsert_account(
+        {
+            "id": "account",
+            "provider_type": "imap",
+            "host": "imap.example.test",
+            "port": 993,
+            "username": "user",
+        }
+    )
+    manifest = MemoryManifest()
+
+    assert reconcile_account_snapshots(
+        repository, lambda _account_id: manifest, lambda _account_id: manifest
+    ) == 0
+    snapshot = [event for event in manifest.events if event["event"] == "account_snapshot"][-1]
+    assert snapshot["tls_mode"] == "implicit"
+    assert snapshot["ca_cert_path"] is None
 
 
 def test_repair_manifest_tails_reads_each_existing_account_manifest() -> None:

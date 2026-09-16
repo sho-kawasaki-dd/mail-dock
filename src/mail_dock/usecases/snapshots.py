@@ -24,6 +24,8 @@ _ACCOUNT_FIELDS = (
     "port",
     "username",
     "is_enabled",
+    "tls_mode",
+    "ca_cert_path",
 )
 _FOLDER_FIELDS = (
     "account_id",
@@ -44,12 +46,14 @@ def _account_event(account: MessageRecord) -> dict[str, JSONValue]:
     return {
         "event": "account_snapshot",
         "account_id": account_id,
-        "provider_type": str(account.get("provider_type", "onamae_imap")),
+        "provider_type": str(account.get("provider_type", "imap")),
         "display_name": account.get("display_name"),
         "host": str(account.get("host", "")),
         "port": int(account.get("port", 993)),
         "username": str(account.get("username", "")),
         "is_enabled": bool(account.get("is_enabled", True)),
+        "tls_mode": str(account.get("tls_mode", "implicit")),
+        "ca_cert_path": account.get("ca_cert_path"),
         "timestamp": _timestamp(),
     }
 
@@ -170,6 +174,39 @@ def backfill_snapshots(
         finally:
             writer.close()
     return account_count, folder_count
+
+
+def reconcile_account_snapshots(
+    repo: BaseMessageRepository,
+    manifest_writer_factory: Callable[[str], BaseManifestWriter],
+    manifest_reader_factory: Callable[[str], BaseManifestReader],
+) -> int:
+    """Migrate legacy IMAP account state through the durable manifest first.
+
+    The manifest is updated and synced before the derived database provider
+    type is changed. This makes the migration retryable after an interruption.
+    """
+
+    normalized_count = 0
+    for account in repo.list_accounts():
+        account_id = str(account.get("id", account.get("account_id", "")))
+        provider_type = str(account.get("provider_type", ""))
+        if not account_id or provider_type not in {"onamae_imap", "imap"}:
+            continue
+        normalized = dict(account)
+        normalized["provider_type"] = "imap"
+        normalized.setdefault("tls_mode", "implicit")
+        normalized.setdefault("ca_cert_path", None)
+        writer = manifest_writer_factory(account_id)
+        try:
+            reader = manifest_reader_factory(account_id)
+            record_account_snapshot(writer, reader, normalized)
+        finally:
+            writer.close()
+        if provider_type != "imap":
+            repo.normalize_account_provider_type(account_id, "imap")
+            normalized_count += 1
+    return normalized_count
 
 
 def repair_manifest_tails(

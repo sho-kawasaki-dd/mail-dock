@@ -3,6 +3,9 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+import pytest
+
+from mail_dock.domain.errors import DatabaseError
 from mail_dock.infrastructure.database.connection import connect
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
 from mail_dock.infrastructure.database.migrator import migrate
@@ -33,6 +36,30 @@ def _message(folder_id: int, uidvalidity: int, uid: int = 7) -> dict[str, object
         "file_hash": f"hash-{uidvalidity}-{uid}",
         "size_bytes": 10,
     }
+
+
+def test_normalize_account_provider_type_rejects_unknown_account(
+    db_conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    repository, _folder_id = _repository(db_conn, tmp_path / "metadata.db")
+
+    with pytest.raises(DatabaseError, match="Account does not exist"):
+        repository.normalize_account_provider_type("missing", "imap")
+
+    assert db_conn.execute(
+        "SELECT provider_type FROM accounts WHERE id = ?", ("account",)
+    ).fetchone() == ("imap",)
+
+
+def test_normalize_account_provider_type_rejects_empty_values(
+    db_conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    repository, _folder_id = _repository(db_conn, tmp_path / "metadata.db")
+
+    with pytest.raises(DatabaseError, match="Account id is required"):
+        repository.normalize_account_provider_type("", "imap")
+    with pytest.raises(DatabaseError, match="Provider type is required"):
+        repository.normalize_account_provider_type("account", "")
 
 
 def test_add_message_separates_uid_generations_and_normalizes_contents(

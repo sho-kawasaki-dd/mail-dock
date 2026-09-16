@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Literal
 
 from mail_dock.domain.accounts import validate_account_id
 from mail_dock.domain.errors import AuthenticationError
@@ -21,6 +22,8 @@ def register_account(
     username: str,
     password: str,
     display_name: str | None,
+    tls_mode: Literal["implicit", "starttls"] = "implicit",
+    ca_cert_path: str | None = None,
     manifest: BaseManifestWriter | None = None,
     manifest_reader: BaseManifestReader | None = None,
 ) -> str:
@@ -30,12 +33,14 @@ def register_account(
     credential_store.set_password(account_id, password)
     account = {
         "id": account_id,
-        "provider_type": "onamae_imap",
+        "provider_type": "imap",
         "display_name": display_name,
         "host": host,
         "port": port,
         "username": username,
         "is_enabled": 1,
+        "tls_mode": tls_mode,
+        "ca_cert_path": ca_cert_path,
     }
     if manifest is not None and manifest_reader is not None:
         record_account_snapshot(manifest, manifest_reader, account)
@@ -54,6 +59,8 @@ def update_account(
     password: str | None,
     display_name: str | None,
     is_enabled: bool,
+    tls_mode: Literal["implicit", "starttls"] = "implicit",
+    ca_cert_path: str | None = None,
     manifest: BaseManifestWriter | None = None,
     manifest_reader: BaseManifestReader | None = None,
 ) -> str:
@@ -70,12 +77,14 @@ def update_account(
         credential_store.set_password(account_id, password)
     account = {
         "id": account_id,
-        "provider_type": "onamae_imap",
+        "provider_type": "imap",
         "display_name": display_name,
         "host": host,
         "port": port,
         "username": username,
         "is_enabled": int(is_enabled),
+        "tls_mode": tls_mode,
+        "ca_cert_path": ca_cert_path,
     }
     if manifest is not None and manifest_reader is not None:
         record_account_snapshot(manifest, manifest_reader, account)

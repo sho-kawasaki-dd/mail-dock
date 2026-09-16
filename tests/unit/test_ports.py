@@ -42,12 +42,14 @@ def test_register_account_uses_only_repository_and_credential_ports() -> None:
     assert repository.list_accounts() == [
         {
             "id": "account",
-            "provider_type": "onamae_imap",
+            "provider_type": "imap",
             "display_name": "Example",
             "host": "imap.example.com",
             "port": 993,
             "username": "user@example.com",
             "is_enabled": 1,
+            "tls_mode": "implicit",
+            "ca_cert_path": None,
         }
     ]
 
