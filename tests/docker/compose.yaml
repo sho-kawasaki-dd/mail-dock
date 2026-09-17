@@ -43,5 +43,58 @@ services:
       retries: 15
       start_period: 5s
 
+  # disable_plaintext_auth=yes on the shared plain listener (port 3144) already
+  # covers the STARTTLS-required scenario, so no dedicated service is needed
+  # for it. LOGINDISABLED and the custom-CA scenario each need server behavior
+  # (a forced capability, a differently-issued certificate) that cannot be
+  # expressed as another listener on the same dovecot process, so they get
+  # their own minimal services below.
+  dovecot-logindisabled:
+    image: dovecot/dovecot:2.3.21.1
+    hostname: dovecot-logindisabled
+    ports:
+      - "3995:3995"
+    volumes:
+      - ./dovecot/dovecot-logindisabled.conf:/etc/dovecot/dovecot.conf:ro
+      - ./dovecot/entrypoint.sh:/usr/local/bin/mail-dock-dovecot-entrypoint.sh:ro
+      - dovecot_logindisabled_mail:/var/mail/vmail
+    entrypoint: ["/usr/local/bin/mail-dock-dovecot-entrypoint.sh"]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          doveadm service status imap-login >/dev/null 2>&1 &&
+          bash -c 'echo > /dev/tcp/127.0.0.1/3995'
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 5s
+
+  dovecot-ca:
+    image: dovecot/dovecot:2.3.21.1
+    hostname: dovecot-ca
+    environment:
+      MAILDOCK_ISSUE_CA_CERT: "1"
+    ports:
+      - "3996:3996"
+    volumes:
+      - ./dovecot/dovecot-ca.conf:/etc/dovecot/dovecot.conf:ro
+      - ./dovecot/entrypoint.sh:/usr/local/bin/mail-dock-dovecot-entrypoint.sh:ro
+      - dovecot_ca_mail:/var/mail/vmail
+      - ./dovecot/ca:/etc/dovecot/ca-export
+    entrypoint: ["/usr/local/bin/mail-dock-dovecot-entrypoint.sh"]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          doveadm service status imap-login >/dev/null 2>&1 &&
+          bash -c 'echo > /dev/tcp/127.0.0.1/3996'
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 5s
+
 volumes:
   dovecot_mail:
+  dovecot_logindisabled_mail:
+  dovecot_ca_mail:

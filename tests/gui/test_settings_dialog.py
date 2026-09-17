@@ -187,8 +187,9 @@ def test_account_dialog_edit_handles_tls_mode_and_ca_certificate(qtbot: Any) -> 
     assert dialog._port_edit.value() == 143
     assert dialog._connection_fields_changed()
     dialog._ca_cert_path_edit.clear()
-    assert dialog._account_values() is not None
-    assert dialog._account_values()["ca_cert_path"] is None
+    account_values = dialog._account_values()
+    assert account_values is not None
+    assert account_values["ca_cert_path"] is None
     dialog._stop_worker()
 
 

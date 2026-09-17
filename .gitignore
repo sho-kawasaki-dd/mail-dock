@@ -39,6 +39,12 @@ test-storage/
 /tools/.bench_fts/
 /tools/.pst_poc/
 
+# CA certificate exported by the dovecot-ca Docker test service (Phase 5.1
+# Group E). Regenerated on each container start; may be root-owned on the
+# host because the container writes to it as root.
+/tests/docker/dovecot/ca/*
+!/tests/docker/dovecot/ca/.gitkeep
+
 # Bundled readpst binaries (Phase 4.5). The manifest is authored in-repo and
 # applied to readpst.exe by tools/fetch_readpst.ps1, so it must stay tracked (D-19).
 vendor/readpst/*

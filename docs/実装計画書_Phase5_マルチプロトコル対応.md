@@ -198,26 +198,18 @@
 
 > Group Aで追加した `tls_mode` / `LOGINDISABLED` PLAINフォールバック / カスタムCA証明書は、現行の `tests/unit/test_generic_imap.py` のFake接続テストだけでは実IMAPサーバーとの相互作用（実TLSネゴシエーション・実証明書検証・サーバー側の認証広告）を保証できない。既存の `tests/docker/compose.yaml` / `dovecot.conf` は暗黙的TLS＋通常`LOGIN`の1構成のみを提供しており、本グループで**改修**（新規追加ではなく既存構成の拡張）した上で、Docker/WSL環境が使える時点で**実際に実行して動作確認**する。
 
-- [ ] `tests/docker/compose.yaml` の `dovecot` サービスに、STARTTLS専用ポート（暗黙的TLSの `imaps` リスナーを持たない平文リスナー）を追加する。既存の暗黙的TLSポート（3994）は回帰用にそのまま維持し、既存の結合テストを壊さないことを確認する
-- [ ] `tests/docker/dovecot/dovecot.conf` を拡張し、以下の3構成を条件分岐または追加設定ファイルで再現する（新規サービスを増やさずポート/設定の出し分けで済ませられるか、Dovecotの `protocol imap { }` ブロックやポート単位の設定上書きで両立できるかをまず検証し、両立できない場合のみ `compose.yaml` にサービスを追加する）:
-  - 平文リスナー＋STARTTLS必須（`disable_plaintext_auth = yes` を非TLS接続に適用し、STARTTLS前の生`LOGIN`を拒否する）
-  - `LOGINDISABLED`（`disable_plaintext_auth = yes` をTLS確立後にも適用し、`LOGIN` コマンド自体を無効化してSASL PLAINのみ許可する）
-  - 自己署名証明書だが**テスト専用CA**が発行したサーバー証明書（`entrypoint.sh` でCA鍵・サーバー証明書のペアを起動時生成し、CA証明書だけをホスト側から読める場所へ書き出す。秘密鍵はコンテナ外へ出さない）
-- [ ] `tests/docker/dovecot/entrypoint.sh` を拡張し、上記のCA証明書生成・配置を行う（既存の自己署名証明書生成ロジックとの重複を避け、CA発行フローに置き換える）
-- [ ] `tests/support/imap_integration.py` の `ImapService` に `tls_mode` / `ca_cert_path` を追加し、`service()` が対応するポート・CA証明書パスを環境変数から解決できるようにする
-- [ ] `tests/support/imap_integration.py` の `make_fetcher()` を `tls_mode` / `ca_cert_path` に対応させ、`insecure_ssl_context()`（検証無効化）に頼らず、実際にCA証明書で検証させる接続経路を追加する（検証無効化はSTARTTLS/LOGINDISABLEDシナリオ用に残し、カスタムCA検証シナリオでは使わない）
-- [ ] `tests/integration/` に結合テストを追加し、実Dovecotに対して以下を確認する:
-  - STARTTLS接続 → `CAPABILITY` 再取得 → 通常`LOGIN`が成功すること
-  - `LOGINDISABLED`構成でSASL PLAIN認証が成功し、生の`LOGIN`が拒否されること
-  - 発行元CA証明書を指定した接続が証明書検証に成功すること
-  - 誤ったCA証明書パス、またはCA未指定でシステム信頼ストアに無い証明書に対しては、検証を無効化せずに接続が失敗すること
-  - STARTTLS必須構成に対しSTARTTLSを行わず`tls_mode="implicit"`で接続を試みると拒否されること
-- [ ] `tests/unit/` にTLSモード分岐・CA証明書読み込み失敗時の `ConfigError`・SASL PLAINコールバックの単体テストを追加する（Group Aで実施済み。上記Docker結合テストと重複させず、実サーバー特有の応答のみをDocker側に残す）
-- [ ] `tests/gui/test_settings_dialog.py` に接続方式・CA証明書欄の入力とダイアログ再検証ロジックのテストを追加する
-- [ ] `provider_type` 正規化マイグレーションと `account_snapshot` 再記録の結合テストを追加する
-- [ ] `tests/unit/test_onamae_imap.py` を `tests/unit/test_generic_imap.py` へリネームする（クラス名変更に追従。Group Aで実施済み）
-- [ ] `tests/support/README.md` に、STARTTLS/LOGINDISABLED/カスタムCA構成の起動手順・関連環境変数（ポート・CA証明書パス）を追記する
-- [ ] **動作確認**: Docker/WSL環境が利用可能になった時点で `docker compose up -d` の上、上記3シナリオの結合テストを実際に実行し、緑になることを確認する（既存の暗黙的TLS結合テストが回帰していないことも合わせて確認する）。確認結果（実施日・環境・結果）をリポジトリメモリまたは本書に記録する
+- [x] `tests/docker/compose.yaml` の `dovecot` サービスは既存のSTARTTLS対応済み平文リスナー（3144）と暗黙的TLS（3994）をそのまま流用する（`disable_plaintext_auth=yes`のみで両立できたため新サービス追加は不要と判断）。`LOGINDISABLED`と自己署名CA検証は`dovecot`単一プロセスでは両立できない挙動のため、`dovecot-logindisabled`（3995）・`dovecot-ca`（3996）の2最小サービスを追加した
+- [x] `tests/docker/dovecot/dovecot.conf` に `disable_plaintext_auth = yes` を追加してSTARTTLS必須シナリオを既存サービスで再現し、`dovecot-logindisabled.conf`（`imap_capability = +LOGINDISABLED`）と`dovecot-ca.conf`（CA発行証明書）を新設した
+- [x] `tests/docker/dovecot/entrypoint.sh` を拡張し、`MAILDOCK_ISSUE_CA_CERT=1`のとき自己署名の代わりにテスト専用CAで署名した証明書を発行し、CA証明書のみを`/etc/dovecot/ca-export`（ホスト`tests/docker/dovecot/ca/`）へ書き出す（秘密鍵はコンテナ内のみ）
+- [x] `tests/support/imap_integration.py` の `ImapService` に `tls_mode` / `ca_cert_path` を追加し、`service()` が `dovecot_starttls` / `dovecot_logindisabled` / `dovecot_ca` を含めて対応するポート・CA証明書パスを環境変数から解決できるようにした
+- [x] `tests/support/imap_integration.py` の `make_fetcher()` を `tls_mode` / `ca_cert_path` に対応させ、`ca_cert_path`が設定された場合は`insecure_ssl_context()`を使わず実際にCA証明書で検証させる経路にした
+- [x] `tests/integration/test_imap_tls_modes.py` を新設し、実Dovecotに対して次を確認する結合テスト6件を追加・実行して全て緑を確認した: STARTTLS接続→LOGIN成功／`tls_mode="implicit"`でSTARTTLS必須ポートへ接続すると拒否される／`LOGINDISABLED`構成でSASL PLAINへ自動フォールバックし認証・LIST成功／CA発行証明書での検証成功／誤ったCA証明書での検証失敗（`PermanentError`）／CA証明書ファイル不在時の`ConfigError`
+- [x] `tests/unit/` にTLSモード分岐・CA証明書読み込み失敗時の `ConfigError`・SASL PLAINコールバックの単体テストを追加する（Group Aで実施済み。上記Docker結合テストと重複させず、実サーバー特有の応答のみをDocker側に残す）
+- [x] `tests/gui/test_settings_dialog.py` に接続方式・CA証明書欄の入力とダイアログ再検証ロジックのテストを追加する（Group Dで実施済みであることを確認。型エラーを1件修正）
+- [x] `provider_type` 正規化マイグレーションと `account_snapshot` 再記録の結合テストを `tests/integration/test_migrator.py` に追加した（実SQLite + 実`ManifestWriter`/`ManifestReader`で`reconcile_account_snapshots()`の冪等性まで検証）
+- [x] `tests/unit/test_onamae_imap.py` を `tests/unit/test_generic_imap.py` へリネームする（クラス名変更に追従。Group Aで実施済み）
+- [x] `tests/support/README.md` に、STARTTLS/LOGINDISABLED/カスタムCA構成の起動手順・関連環境変数（ポート・CA証明書パス）を追記する
+- [x] **動作確認**: Docker環境（Docker 29.8.1 / Compose v5.5.1、Linux）で `docker compose up -d --wait` の上、`tests/integration/test_imap_tls_modes.py` の6シナリオを実行し全て緑（2026-09-17実施）。既存の暗黙的TLS結合テストは新規に3件の**既存**(Group E以前からの)失敗（`test_dovecot_delete_to_special_use_trash_and_expunge` / `test_delete_remote_message_trash_mode_moves_to_special_use_trash` / `test_flag_refresh_applies_server_changes_and_advances_modseq_after_success`）を確認したが、`git stash`でGroup E変更を除いた素の`main`でも同じ3件が同一原因（`GenericImapFetcher.connect()`がログイン**前**に取得したCAPABILITYにはこのDovecotバージョンでは`MOVE`/`CONDSTORE`が含まれず、ログイン後にのみ現れる）で失敗することを確認済み。Group Eの変更による回帰ではなく、Group A由来の別バグとして記録した（詳細はリポジトリメモリ参照）
 
 ### **Group F: 5.1 ドキュメント整合**
 

@@ -11,7 +11,10 @@ import pytest
 import mail_dock.infrastructure.database.migrator as migrator
 from mail_dock.domain.errors import MigrationError, SchemaVersionTooNewError
 from mail_dock.infrastructure.database.connection import connect
+from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
 from mail_dock.infrastructure.database.migrator import current_version, migrate
+from mail_dock.infrastructure.storage.manifest import ManifestReader, ManifestWriter
+from mail_dock.usecases.snapshots import reconcile_account_snapshots
 
 _UTC_ISO_TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
@@ -308,3 +311,52 @@ def test_failed_migration_restores_foreign_keys_and_schema(
     assert current_version(db_conn) == 0
     assert db_conn.execute("PRAGMA foreign_keys").fetchone() == (1,)
     assert db_conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'broken'").fetchone() is None
+
+
+def test_provider_type_normalization_records_manifest_before_db_update(
+    db_conn: sqlite3.Connection,
+    tmp_path: Path,
+) -> None:
+    """The 007 migration only adds columns; ``reconcile_account_snapshots``
+
+    (Group B) does the actual ``onamae_imap`` -> ``imap`` normalization as a
+    separate, retryable post-migration step against real SQLite and a real
+    on-disk manifest.
+    """
+
+    db_path = tmp_path / "metadata.db"
+    assert migrate(db_conn, db_path) == 7
+    db_conn.execute(
+        "INSERT INTO accounts (id, provider_type, host, port, username) VALUES (?, ?, ?, ?, ?)",
+        ("legacy-account", "onamae_imap", "imap.example.test", 993, "user"),
+    )
+    db_conn.commit()
+
+    repository = SqliteMessageRepository(db_conn)
+
+    def writer_factory(account_id: str) -> ManifestWriter:
+        return ManifestWriter(tmp_path, account_id)
+
+    def reader_factory(account_id: str) -> ManifestReader:
+        return ManifestReader(tmp_path, account_id)
+
+    normalized_count = reconcile_account_snapshots(repository, writer_factory, reader_factory)
+
+    assert normalized_count == 1
+    account = repository.list_accounts()[0]
+    assert account["provider_type"] == "imap"
+    assert account["tls_mode"] == "implicit"
+    assert account["ca_cert_path"] is None
+
+    reader = reader_factory("legacy-account")
+    snapshot = next(
+        event
+        for event in reversed(list(reader.read_all_events()))
+        if event["event"] == "account_snapshot"
+    )
+    assert snapshot["provider_type"] == "imap"
+    assert snapshot["tls_mode"] == "implicit"
+
+    # Retrying after the DB is already normalized must not error and must not
+    # normalize a second time (idempotent post-migration step, D-4/D-34).
+    assert reconcile_account_snapshots(repository, writer_factory, reader_factory) == 0

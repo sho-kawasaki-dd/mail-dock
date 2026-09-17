@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.message import EmailMessage
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -21,6 +22,13 @@ from mail_dock.infrastructure.database.connection import connect
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
 from mail_dock.infrastructure.database.migrator import migrate
 from mail_dock.infrastructure.fetchers.generic_imap import GenericImapFetcher
+
+# The compose.yaml default CA export path for the dovecot-ca service. Tests
+# that need an intentionally wrong CA file build their own throwaway cert
+# instead of pointing at this one.
+_DEFAULT_CA_CERT_PATH = str(
+    Path(__file__).resolve().parent.parent / "docker" / "dovecot" / "ca" / "mail-dock-ca.crt"
+)
 
 
 @dataclass(frozen=True)
@@ -32,18 +40,23 @@ class ImapService:
     port: int
     username: str
     password: str
+    tls_mode: Literal["implicit", "starttls"] = "implicit"
+    ca_cert_path: str | None = None
 
 
 def service(name: str) -> ImapService:
     """Build service settings from the documented test environment variables."""
 
     normalized = name.upper()
-    defaults = {
-        "GREENMAIL": ("127.0.0.1", 3993),
-        "DOVECOT": ("127.0.0.1", 3994),
+    defaults: dict[str, tuple[str, int, Literal["implicit", "starttls"], str | None]] = {
+        "GREENMAIL": ("127.0.0.1", 3993, "implicit", None),
+        "DOVECOT": ("127.0.0.1", 3994, "implicit", None),
+        "DOVECOT_STARTTLS": ("127.0.0.1", 3144, "starttls", None),
+        "DOVECOT_LOGINDISABLED": ("127.0.0.1", 3995, "implicit", None),
+        "DOVECOT_CA": ("127.0.0.1", 3996, "implicit", _DEFAULT_CA_CERT_PATH),
     }
     try:
-        default_host, default_port = defaults[normalized]
+        default_host, default_port, default_tls_mode, default_ca_cert_path = defaults[normalized]
     except KeyError as error:
         raise ValueError(f"unknown IMAP service: {name}") from error
     return ImapService(
@@ -52,6 +65,8 @@ def service(name: str) -> ImapService:
         port=int(os.environ.get(f"MAILDOCK_{normalized}_IMAPS_PORT", str(default_port))),
         username=os.environ.get(f"MAILDOCK_{normalized}_USERNAME", "testuser"),
         password=os.environ.get(f"MAILDOCK_{normalized}_PASSWORD", "password"),
+        tls_mode=default_tls_mode,
+        ca_cert_path=os.environ.get(f"MAILDOCK_{normalized}_CA_CERT_PATH", default_ca_cert_path),
     )
 
 
@@ -65,8 +80,25 @@ def insecure_ssl_context() -> ssl.SSLContext:
 
 
 def make_fetcher(settings: ImapService) -> GenericImapFetcher:
-    """Construct the production fetcher for a Compose service."""
+    """Construct the production fetcher for a Compose service.
 
+    Services with a configured ``ca_cert_path`` use real certificate
+    verification (no bypass) so the CA-file loading path is exercised
+    end-to-end; other services keep the existing insecure bypass, since their
+    certificates are self-signed and not the object under test.
+    """
+
+    if settings.ca_cert_path is not None:
+        return GenericImapFetcher(
+            settings.host,
+            settings.username,
+            settings.password,
+            port=settings.port,
+            timeout=5.0,
+            read_timeout=5.0,
+            tls_mode=settings.tls_mode,
+            ca_cert_path=settings.ca_cert_path,
+        )
     return GenericImapFetcher(
         settings.host,
         settings.username,
@@ -74,6 +106,7 @@ def make_fetcher(settings: ImapService) -> GenericImapFetcher:
         port=settings.port,
         timeout=5.0,
         read_timeout=5.0,
+        tls_mode=settings.tls_mode,
         ssl_context=insecure_ssl_context(),
     )
 
