@@ -219,6 +219,8 @@
 
 ### **Group G: 5.2a PoC（★最優先の方式ブロッカー判定）**
 
+> 各タスクの具体的な検証手順は [手順書_Phase5_GroupG_Gmail-OAuth2-PoC.md](./手順書_Phase5_GroupG_Gmail-OAuth2-PoC.md) を参照（実行用PoCスクリプト: [tools/gmail_oauth_poc/gmail_poc.py](../tools/gmail_oauth_poc/gmail_poc.py)）。
+
 - [ ] G-1: Google Cloud プロジェクトを作成し、OAuth同意画面（External）で制限付きスコープ `https://mail.google.com/` を追加し、テストユーザーとしてPoC用アカウントを登録する
 - [ ] G-2: デスクトップアプリ用OAuthクライアントを発行し、Authorization Code + PKCE + ループバックリダイレクトで認可コードを取得できることを確認する
 - [ ] G-3: 取得した `refresh_token` / `access_token` でXOAUTH2によるIMAP接続・`LIST`・`UID FETCH`（`X-GM-MSGID`/`X-GM-THRID`/`X-GM-LABELS`を含む）が成功することを実機で確認する
