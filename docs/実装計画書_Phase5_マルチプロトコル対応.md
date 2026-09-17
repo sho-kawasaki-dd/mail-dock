@@ -214,8 +214,8 @@
 
 ### **Group F: 5.1 ドキュメント整合**
 
-- [ ] 開発計画書中の `OnamaeImapFetcher` 表記・`provider_type` の例示値（`'onamae_imap'`）を更新する
-- [ ] `.github/copilot-instructions.md` の該当記述を更新する
+- [x] 開発計画書中の `OnamaeImapFetcher` 表記・`provider_type` の例示値（`'onamae_imap'`）を更新する
+- [x] `.github/copilot-instructions.md` の該当記述を更新する
 
 ### **Group G: 5.2a PoC（★最優先の方式ブロッカー判定）**
 

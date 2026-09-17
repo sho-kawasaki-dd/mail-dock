@@ -32,6 +32,7 @@ presentation/   ← PySide6固有（View/ViewModel/QThreadワーカー）
 - `BaseMessageRepository` は「SQLite差し替え用」ではなく「**ユースケースの単体テストをインメモリ実装に差し替えるため**」だけに存在する。目的を超えたメソッドを足さない。
 - infrastructure層は `imaplib`/`ssl`/`sqlite3`/`OSError` 等の生の例外を `domain/errors.py` の例外階層（`AuthenticationError`/`TransientError`/`StorageDetachedError`等）へラップしてから上位へ渡す。上位層はプロトコル固有の例外やwinerror/sqlite_errorname を知らない。
 - リトライは usecases 層に集約。fetcher/importer 実装にリトライを書かない。
+- IMAPフェッチャーは `GenericImapFetcher` に集約し、通常のIMAP・Gmail・Microsoft 365を `provider_type="imap"` と `auth_type` / `oauth_provider` の組み合わせで区別する。PST取込だけは `provider_type="pst_import"` とする。
 
 ## 実装計画書のルール
 
@@ -54,7 +55,7 @@ presentation/   ← PySide6固有（View/ViewModel/QThreadワーカー）
 - 添付ファイル名は敵性入力として扱い、パストラバーサル・NTFS禁止文字・予約名・実行可能拡張子を必ずサニタイズする（4.6-4参照）。
 - HTMLメール表示は5層防御（オフレコプロファイル・属性無効化・リクエストインターセプタ・`cid:`スキーム・CSP注入）をすべて実装する。JavaScript無効化だけで済ませない。
 - `subprocess`（readpst）は `shell=False`・引数リスト・同梱バイナリの絶対パス解決のみ。ユーザー入力をコマンド文字列に連結しない。
-- 資格情報は `keyring` のみに保管し、DB・設定ファイルへは書き込まない。
+- パスワード・`client_secret`・`refresh_token` は `keyring` のみに保管し、`access_token` はプロセスメモリのみに保持する。これらの秘密情報はDB・設定ファイル・マニフェスト・ログへ書き込まない。OAuth2の初回認可と再認可はGUI限定とする。
 - PST取込本体（Stage A/B・再変換）は対話確認が必要なためGUI限定とし、CLIへPST取込サブコマンドを追加しない。CLIの `verify` / `reindex` はPSTマニフェストを対象にする。
 
 ## ビルド・テスト
