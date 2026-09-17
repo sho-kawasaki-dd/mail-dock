@@ -169,6 +169,7 @@
 - [x] `imap_common.wrap_imap_errors` に STARTTLS失敗・SASL認証失敗のエラー分類を追加する
 - [x] `_TRASH_CANDIDATES` に英語圏の主要な慣用名を追加する
 - [x] 既存の `iter_message_refs` / `iter_flags` / `iter_flags_since` / `delete_remote_message` 等の挙動・シグネチャを変更しない（回帰させない）
+- [x] `connect()` はログイン/認証成功直後に `CAPABILITY` を再取得して `self._capabilities` を上書きする（`LOGINDISABLED` 判定用の事前取得はそのまま維持）。サーバーによっては `MOVE`/`CONDSTORE`/`UIDPLUS`/`SPECIAL-USE` 等をログイン後にしか広告しないため、事前取得のみに頼ると `find_trash_folder()` のMOVE分岐や `CONDSTORE` 有効化が機能しない（Group E動作確認で発見、2026-09-17修正）
 
 ### **Group B: 5.1 DBスキーマとリポジトリ**
 
@@ -209,7 +210,7 @@
 - [x] `provider_type` 正規化マイグレーションと `account_snapshot` 再記録の結合テストを `tests/integration/test_migrator.py` に追加した（実SQLite + 実`ManifestWriter`/`ManifestReader`で`reconcile_account_snapshots()`の冪等性まで検証）
 - [x] `tests/unit/test_onamae_imap.py` を `tests/unit/test_generic_imap.py` へリネームする（クラス名変更に追従。Group Aで実施済み）
 - [x] `tests/support/README.md` に、STARTTLS/LOGINDISABLED/カスタムCA構成の起動手順・関連環境変数（ポート・CA証明書パス）を追記する
-- [x] **動作確認**: Docker環境（Docker 29.8.1 / Compose v5.5.1、Linux）で `docker compose up -d --wait` の上、`tests/integration/test_imap_tls_modes.py` の6シナリオを実行し全て緑（2026-09-17実施）。既存の暗黙的TLS結合テストは新規に3件の**既存**(Group E以前からの)失敗（`test_dovecot_delete_to_special_use_trash_and_expunge` / `test_delete_remote_message_trash_mode_moves_to_special_use_trash` / `test_flag_refresh_applies_server_changes_and_advances_modseq_after_success`）を確認したが、`git stash`でGroup E変更を除いた素の`main`でも同じ3件が同一原因（`GenericImapFetcher.connect()`がログイン**前**に取得したCAPABILITYにはこのDovecotバージョンでは`MOVE`/`CONDSTORE`が含まれず、ログイン後にのみ現れる）で失敗することを確認済み。Group Eの変更による回帰ではなく、Group A由来の別バグとして記録した（詳細はリポジトリメモリ参照）
+- [x] **動作確認**: Docker環境（Docker 29.8.1 / Compose v5.5.1、Linux）で `docker compose up -d --wait` の上、`tests/integration/test_imap_tls_modes.py` の6シナリオを実行し全て緑（2026-09-17実施）。実行時点で新規に3件の**既存**(Group E以前からの)失敗（`test_dovecot_delete_to_special_use_trash_and_expunge` / `test_delete_remote_message_trash_mode_moves_to_special_use_trash` / `test_flag_refresh_applies_server_changes_and_advances_modseq_after_success`）を検出し、`git stash`でGroup E変更を除いた素の`main`でも同じ3件が同一原因（`GenericImapFetcher.connect()`がログイン**前**に取得したCAPABILITYにはこのDovecotバージョンでは`MOVE`/`CONDSTORE`が含まれず、ログイン後にのみ現れる）で失敗することを確認した。Group A由来の別バグと切り分けた上で、`connect()`にログイン/認証成功直後の`CAPABILITY`再取得を追加して修正済み（2026-09-17）。修正後は `pytest -m docker` 全22件・`pytest -m "not docker and not gui and not pst"` 全608件が緑（詳細はリポジトリメモリ参照）
 
 ### **Group F: 5.1 ドキュメント整合**
 

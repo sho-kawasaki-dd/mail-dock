@@ -135,8 +135,9 @@ class GenericImapFetcher(BaseMailFetcher):
                 connection.sock.settimeout(self._read_timeout)
                 capability_status, capability_data = connection.capability()
                 self._ensure_ok(capability_status, capability_data, "CAPABILITY")
-                self._capabilities = self._parse_capabilities(capability_data)
-                if "LOGINDISABLED" in self._capabilities:
+                pre_auth_capabilities = self._parse_capabilities(capability_data)
+                self._capabilities = pre_auth_capabilities
+                if "LOGINDISABLED" in pre_auth_capabilities:
                     credentials = f"\x00{self._username}\x00{self._password}".encode()
 
                     def plain_callback(_challenge: bytes) -> bytes:
@@ -147,6 +148,12 @@ class GenericImapFetcher(BaseMailFetcher):
                 else:
                     login_status, login_data = connection.login(self._username, self._password)
                     self._ensure_ok(login_status, login_data, "LOGIN")
+                # Some servers only advertise extensions such as MOVE,
+                # CONDSTORE, UIDPLUS, and SPECIAL-USE once authenticated, so
+                # the pre-auth snapshot above cannot be relied on for them.
+                post_auth_status, post_auth_data = connection.capability()
+                self._ensure_ok(post_auth_status, post_auth_data, "CAPABILITY")
+                self._capabilities = self._parse_capabilities(post_auth_data)
                 if "CONDSTORE" in self._capabilities:
                     enable_status, enable_data = connection.enable("CONDSTORE")
                     self._ensure_ok(enable_status, enable_data, "ENABLE CONDSTORE")
