@@ -18,6 +18,7 @@ Group Gの目的は、**Group H〜L（本実装）に着手する前に**、以�
 - 秘密情報（`client_secret` / `access_token` / `refresh_token`）は環境変数からのみ読み込み、ディスク・git・ログへ書き込まない。スクリプトはこれらの値そのものを標準出力へ出さず、長さや有無（`present=True/False`）のみ表示する。
 - ターミナル出力やチャット・Issueへ、コード・トークンの値そのものを貼り付けない。誤って貼り付けた場合は直ちに https://myaccount.google.com/permissions で当該アプリのアクセスを取り消す。
 - PoCで使うGoogleアカウントは、私物の本番メールアカウントではなく検証用アカウント（またはテスト用に許容できるアカウント）を推奨する。
+- 検証用GoogleアカウントのINBOXには、G-3の`UID FETCH`検証が実施できるよう、事前に最低1通メールを用意しておく。INBOXが空だとスクリプトは`X-GM-*`のサンプリングをスキップして正常終了してしまい、G-3の完了条件を確認できない。
 
 ---
 
@@ -34,34 +35,37 @@ Group Gの目的は、**Group H〜L（本実装）に着手する前に**、以�
 
 ---
 
-## G-2 / G-3: PKCE認可フロー・トークン交換・XOAUTH2接続の実行
+## G-2 / G-3 / G-4（必須半分）: PKCE認可フロー・トークン交換・XOAUTH2接続・即時refresh確認の実行
 
-1. 発行したクライアント情報とテストユーザーのメールアドレスを環境変数に設定する（値は貼り付け履歴に残さないよう、シェルの当該セッションのみで設定する）。
+1. 発行したクライアント情報とテストユーザーのメールアドレスを環境変数に設定する（値は貼り付け履歴に残さないよう、PowerShellの当該セッションのみで設定する。共有端末では作業後に `Remove-Item Env:\GMAIL_CLIENT_SECRET` 等で消去する）。
 
-   ```bash
-   export GMAIL_CLIENT_ID="xxxxxxxx.apps.googleusercontent.com"
-   export GMAIL_CLIENT_SECRET="xxxxxxxx"
-   export GMAIL_USER_EMAIL="test-user@gmail.com"
+   ```powershell
+   $env:GMAIL_CLIENT_ID = "xxxxxxxx.apps.googleusercontent.com"
+   $env:GMAIL_CLIENT_SECRET = "xxxxxxxx"
+   $env:GMAIL_USER_EMAIL = "test-user@gmail.com"
    ```
 
 2. PoCスクリプトを実行する。
 
-   ```bash
+   ```powershell
    python tools/gmail_oauth_poc/gmail_poc.py
    ```
 
 3. スクリプトが既定ブラウザを開くので、対象アカウントでログインし、同意画面（「Google はこのアプリを確認していません」の警告が出た場合は「詳細」→「(アプリ名)に移動」を選択）を完了する。
-4. ブラウザが `http://127.0.0.1:{一時ポート}/` へリダイレクトされ、スクリプトが`state`検証・認可コード取得（G-2）→ トークン交換（G-2後半）→ Gmail IMAPへのXOAUTH2接続・`LIST`・`UID FETCH`（G-3）を自動的に進める。
+4. ブラウザが `http://127.0.0.1:{一時ポート}/` へリダイレクトされ、スクリプトが`state`検証・認可コード取得（G-2）→ トークン交換（G-2後半）→ 即時のrefresh_token交換確認（G-4必須半分、D-25）→ Gmail IMAPへのXOAUTH2接続・`LIST`・`UID FETCH`（G-3）を自動的に進める。
 5. 標準出力に表示される以下を確認する。
    - `[G-2] Authorization code received and state verified.`
    - `[G-2] Token exchange succeeded (access_token length=..., refresh_token present=True)`
-     - `refresh_token present=False` の場合は、[Googleアカウントの権限ページ](https://myaccount.google.com/permissions)で当該アプリの連携を解除してから再実行する（`prompt=consent`により本来は毎回発行されるはずのため）。
+     - `refresh_token`が返らなかった場合、スクリプトは`[G-2] No refresh_token returned; ...`で中断する。[Googleアカウントの権限ページ](https://myaccount.google.com/permissions)で当該アプリの連携を解除してから再実行する（`prompt=consent`により本来は毎回発行されるはずのため）。
+   - `[G-4] Immediate refresh_token exchange succeeded (new access_token length=...)`
+     - これが出力されないまま終了した場合はG-4（必須半分）が未達であり、後述の完了条件を満たさない。
    - `[G-3] XOAUTH2 authenticate: OK`
    - `[G-3] LIST returned N folder(s):` に `[Gmail]/All Mail`（または `[Gmail]/すべてのメール`）や `[Gmail]/Trash` 等が含まれること
-   - `[G-3] UID FETCH ... response:` の行に `X-GM-MSGID` / `X-GM-THRID` / `X-GM-LABELS` がすべて含まれること（`WARNING: ... not found` が出ないこと）
+   - `[G-3] UID FETCH ... response:` の行に `X-GM-MSGID` / `X-GM-THRID` / `X-GM-LABELS` がすべて含まれること（`WARNING: ... not found` が出ないこと。INBOXが空の場合はこの行が出力されないため、事前準備でメールを用意しておくこと）
 
-**完了条件（G-2）**: ブラウザでの同意後、ローカルポートへリダイレクトされ、`state`一致・認可コード取得・トークン交換（`access_token`取得）まで成功すること。
+**完了条件（G-2）**: ブラウザでの同意後、ローカルポートへリダイレクトされ、`state`一致・認可コード取得・トークン交換（`access_token`/`refresh_token`取得）まで成功すること。
 **完了条件（G-3）**: `imap.gmail.com:993`へのXOAUTH2認証が`OK`となり、`UID FETCH`応答に`X-GM-MSGID` / `X-GM-THRID` / `X-GM-LABELS`が含まれること。
+**完了条件（G-4・必須半分）**: 取得した`refresh_token`で`grant_type=refresh_token`のトークン交換が成功し、新しい`access_token`を取得できること（D-25が必須とする「refresh」検証であり、7日待機は不要）。7日待機による失効確認は任意であり、後述のG-4（任意半分）で扱う。
 
 ### トラブルシューティング
 
@@ -71,20 +75,24 @@ Group Gの目的は、**Group H〜L（本実装）に着手する前に**、以�
 | `state mismatch` で中断 | ブラウザの多重タブ・多重実行を疑い、単一のスクリプト実行・単一タブでやり直す |
 | 120秒でタイムアウト | 同意画面の操作が120秒を超えている。スクリプトを再実行し、手早く同意を完了する |
 | `invalid_grant` (token exchange失敗) | 認可コードは1回しか使えない。スクリプトを最初から再実行する |
-| `refresh_token present=False` | 既存の連携が残っている。https://myaccount.google.com/permissions で解除してから再実行する |
+| `refresh_token`が返らず`[G-2] No refresh_token returned`で中断 | 既存の連携が残っている。https://myaccount.google.com/permissions で解除してから再実行する |
+| `[G-4] refresh_token exchange failed`で中断 | `refresh_token`自体が無効化・失効している。再度G-2からやり直してrefresh_tokenを取得し直す |
+| `[G-3] INBOX has no messages to FETCH`のまま終了 | 検証用アカウントのINBOXにメールが無い。事前準備でメールを1通用意してから再実行する |
 | XOAUTH2が`NO`で失敗 | スコープに`https://mail.google.com/`が付与されているか、テストユーザー登録が正しいかをG-1に戻って確認する |
 
 ---
 
-## G-4: 7日間トークン失効の扱い
+## G-4（任意半分）: 7日間トークン失効の扱い
 
-- OAuth同意画面が外部・テスト中の間、`https://mail.google.com/`を含むrefresh tokenは**7日で失効する**（Google公式仕様）。これは実装のブロッカーとしては扱わない（D-25）。
+前提: G-4の**必須半分**（即時の`grant_type=refresh_token`交換確認）は、前節「G-2 / G-3 / G-4（必須半分）」でPoCスクリプトの実行と同時にすでに満たしている。ここで扱うのは、7日失効そのものを実際に待って観測するかどうかという**任意**の確認である。
+
+- OAuth同意画面が外部・テスト中の間、`https://mail.google.com/`を含むrefresh tokenは**7日で失効する**（Google公式仕様）。実待機は実装のブロッカーとしては扱わない（D-25）。
 - 本タスクの完了条件は、以下を**READMEに記録すること**であり、7日間の実待機は必須にしない。
   1. 7日失効が公式仕様である旨
   2. 失効時に`invalid_grant`が返り、UIで「Googleと再連携」を促す想定の受入条件（実装はGroup Jで行う）
-- 任意で長期検証したい場合のみ、G-2/G-3のPoCで取得した`refresh_token`を安全な一時変数に保持し、7日後に`grant_type=refresh_token`でのトークン更新が`invalid_grant`になることを確認してよい（必須ではない）。
+- 任意で長期検証したい場合のみ、G-2で取得した`refresh_token`を安全な一時変数に保持し、7日後に`grant_type=refresh_token`でのトークン更新が`invalid_grant`になることを確認してよい（必須ではない）。
 
-**完了条件**: READMEへ7日失効の仕様と再連携の受入条件を記録すること。
+**完了条件**: 即時のrefresh確認（必須半分）が成功していることに加え、READMEへ7日失効の仕様と再連携の受入条件を記録すること。
 
 ---
 
@@ -135,7 +143,7 @@ Group G完了後、以下を[実装計画書_Phase5_マルチプロトコル対�
 | D-13 | IMAP+XOAUTH2で`X-GM-MSGID`/`X-GM-THRID`/`X-GM-LABELS`が実機取得できたことの実測結果 |
 | D-18 | 実際に観測した`X-GM-LABELS`のフォーマット（modified UTF-7の実例）と、`decode_modified_utf7`適用要否の再確認結果 |
 | D-19 | G-6で観測できたスロットル応答の実例（あれば）、無ければ合成応答方針の確定 |
-| D-25 | G-4で記録した7日失効の受入条件・README記載内容 |
+| D-25 | G-4で記録した7日失効の受入条件・README記載内容、および前節G-2/G-3/G-4（必須半分）で確認した即時refresh成功の実測結果 |
 | D-26 | G-7で判定したDocker結合テストの再現可否と、再現できない場合の代替方針 |
 
 その後、Group Gの全チェックボックス（G-1〜G-8）を実装計画書上でチェックし、Group H（OAuth2基盤の本実装）へ進む。

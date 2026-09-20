@@ -6,6 +6,9 @@ Verifies, against the real Google OAuth2 and Gmail IMAP endpoints, that:
     only the Python standard library (no third-party OAuth packages; D-15).
   - G-3: the resulting access/refresh token authenticates over IMAP XOAUTH2
     and `UID FETCH` returns X-GM-MSGID / X-GM-THRID / X-GM-LABELS.
+  - G-4 (mandatory half): the refresh_token immediately exercises a real
+    `grant_type=refresh_token` exchange (D-25 requires this now, not only
+    after the optional 7-day expiry wait).
 
 This script is NOT part of the application (src/mail_dock/). Per D-28, OAuth2
 consent flows are GUI-only in the product; this is a manual, one-off
@@ -91,7 +94,7 @@ def _generate_pkce_pair() -> tuple[str, str]:
     return verifier, challenge
 
 
-def _run_authorization_step(client_id: str) -> tuple[str, str]:
+def _run_authorization_step(client_id: str) -> tuple[str, str, str]:
     """Run G-2: obtain an authorization code via PKCE + loopback redirect.
 
     Returns (auth_code, redirect_uri). Raises SystemExit on any mismatch,
@@ -144,7 +147,7 @@ def _run_authorization_step(client_id: str) -> tuple[str, str]:
         raise SystemExit("[G-2] state mismatch on callback — aborting (possible CSRF).")
 
     print("[G-2] Authorization code received and state verified.")
-    return result.code, redirect_uri, code_verifier  # type: ignore[return-value]
+    return result.code, redirect_uri, code_verifier
 
 
 def _exchange_code_for_tokens(
@@ -169,6 +172,27 @@ def _exchange_code_for_tokens(
     except urllib.error.HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace")
         raise SystemExit(f"[G-2] token exchange failed ({error.code}): {detail}") from error
+
+
+def _refresh_access_token(*, client_id: str, client_secret: str, refresh_token: str) -> dict[str, object]:
+    """Run the mandatory immediate refresh check (D-25): exercise
+    grant_type=refresh_token now, not only after the 7-day expiry window."""
+
+    body = urllib.parse.urlencode(
+        {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+        }
+    ).encode("ascii")
+    request = urllib.request.Request(_TOKEN_ENDPOINT, data=body, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=30.0) as response:  # noqa: S310 (fixed HTTPS endpoint)
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        raise SystemExit(f"[G-4] refresh_token exchange failed ({error.code}): {detail}") from error
 
 
 class _Xoauth2Callback:
@@ -268,15 +292,26 @@ def main() -> int:
         "[G-2] Token exchange succeeded "
         f"(access_token length={len(access_token)}, refresh_token present={refresh_token is not None})."
     )
-    if refresh_token is None:
-        print(
-            "[G-2] WARNING: no refresh_token returned. Revoke prior consent at "
-            "https://myaccount.google.com/permissions and re-run so `prompt=consent` "
-            "forces a fresh one (needed for G-3/token-refresh verification later)."
+    if not isinstance(refresh_token, str):
+        raise SystemExit(
+            "[G-2] No refresh_token returned; the mandatory G-4 refresh check (D-25) cannot "
+            "run. Revoke prior consent at https://myaccount.google.com/permissions and re-run "
+            "so `prompt=consent` forces a fresh one."
         )
 
+    refreshed = _refresh_access_token(
+        client_id=client_id, client_secret=client_secret, refresh_token=refresh_token
+    )
+    refreshed_access_token = refreshed.get("access_token")
+    if not isinstance(refreshed_access_token, str):
+        raise SystemExit("[G-4] Refresh response did not include an access_token.")
+    print(
+        "[G-4] Immediate refresh_token exchange succeeded "
+        f"(new access_token length={len(refreshed_access_token)})."
+    )
+
     _verify_imap_xoauth2(user_email, access_token)
-    print("[G-2/G-3] PoC completed. Record the outcome in Group G of the implementation plan.")
+    print("[G-2/G-3/G-4] PoC completed. Record the outcome in Group G of the implementation plan.")
     return 0
 
 
