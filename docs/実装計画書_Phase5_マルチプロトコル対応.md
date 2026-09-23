@@ -221,10 +221,10 @@
 
 > 各タスクの具体的な検証手順は [手順書_Phase5_GroupG_Gmail-OAuth2-PoC.md](./手順書_Phase5_GroupG_Gmail-OAuth2-PoC.md) を参照（実行用PoCスクリプト: [tools/gmail_oauth_poc/gmail_poc.py](../tools/gmail_oauth_poc/gmail_poc.py)）。
 
-- [ ] G-1: Google Cloud プロジェクトを作成し、OAuth同意画面（External）で制限付きスコープ `https://mail.google.com/` を追加し、テストユーザーとしてPoC用アカウントを登録する
-- [ ] G-2: デスクトップアプリ用OAuthクライアントを発行し、Authorization Code + PKCE + ループバックリダイレクトで認可コードを取得できることを確認する
-- [ ] G-3: 取得した `refresh_token` / `access_token` でXOAUTH2によるIMAP接続・`LIST`・`UID FETCH`（`X-GM-MSGID`/`X-GM-THRID`/`X-GM-LABELS`を含む）が成功することを実機で確認する
-- [ ] G-4: 7日失効はGoogle公式仕様としてREADMEへ記録し、`invalid_grant`時に再連携へ遷移する受入条件を確定する。7日待機による実測は任意の長期観察とし、実装ブロッカーにしない（D-25）
+- [x] G-1: Google Cloud プロジェクトを作成し、OAuth同意画面（External）で制限付きスコープ `https://mail.google.com/` を追加し、テストユーザーとしてPoC用アカウントを登録する
+- [x] G-2: デスクトップアプリ用OAuthクライアントを発行し、Authorization Code + PKCE + ループバックリダイレクトで認可コードを取得できることを確認する
+- [x] G-3: 取得した `refresh_token` / `access_token` でXOAUTH2によるIMAP接続・`LIST`・`UID FETCH`（`X-GM-MSGID`/`X-GM-THRID`/`X-GM-LABELS`を含む）が成功することを実機で確認する
+- [] G-4: 7日失効はGoogle公式仕様としてREADMEへ記録し、`invalid_grant`時に再連携へ遷移する受入条件を確定する。7日待機による実測は任意の長期観察とし、実装ブロッカーにしない（D-25）
 - [ ] G-5: 「本番」公開・検証・CASAの要否を技術PoCから分離した運用判断として整理し、自己利用/100人未満の既知ユーザー利用と一般公開を混同しない
 - [ ] G-6: Gmailのスロットル応答は公式資料または実運用で観測できた場合にfixtureへ追加し、意図的に帯域制限へ到達する試験は行わない。未観測コードは合成応答で分類を検証する
 - [ ] G-7: Docker Dovecot で `auth_mechanisms = xoauth2` によるローカルトークン検証が結合テストとして再現可能かを確認する。再現できない場合はD-26に従いFakeフェッチャーへの切替方針を確定する
