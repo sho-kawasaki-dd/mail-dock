@@ -230,6 +230,31 @@
 - [ ] G-7: Docker Dovecot で `auth_mechanisms = xoauth2` によるローカルトークン検証が結合テストとして再現可能かを確認する。再現できない場合はD-26に従いFakeフェッチャーへの切替方針を確定する
 - [ ] G-8: PoCの実測結果を本書の該当D項目（D-13, D-18, D-19, D-25, D-26）へ反映し、必要であれば意思決定を更新する
 
+#### PoCスクリプト出力結果
+
+```text
+(mail-dock) PS ~> uv run python .\tools\gmail_oauth_poc\gmail_poc.py
+[G-2] Redirect URI for this run: http://127.0.0.1:60656/
+[G-2] Opening the default browser for Google sign-in/consent...
+[G-2] Authorization code received and state verified.
+[G-2] Token exchange succeeded (access_token length=253, refresh_token present=True).
+[G-4] Immediate refresh_token exchange succeeded (new access_token length=253).
+[G-3] XOAUTH2 authenticate: OK
+[G-3] LIST returned 9 folder(s):
+    (\HasNoChildren) "/" "INBOX"
+    (\HasChildren \Noselect) "/" "[Gmail]"
+    (\All \HasNoChildren) "/" "[Gmail]/All Mail"
+    (\Drafts \HasNoChildren) "/" "[Gmail]/Drafts"
+    (\HasNoChildren \Important) "/" "[Gmail]/Important"
+    (\HasNoChildren \Sent) "/" "[Gmail]/Sent Mail"
+    (\HasNoChildren \Junk) "/" "[Gmail]/Spam"
+    (\Flagged \HasNoChildren) "/" "[Gmail]/Starred"
+    (\HasNoChildren \Trash) "/" "[Gmail]/Trash"
+[G-3] UID FETCH 187 response:
+    187 (X-GM-THRID 1877086742295666415 X-GM-MSGID 1877087445657181022 X-GM-LABELS () UID 187 FLAGS ())
+[G-2/G-3/G-4] PoC completed. Record the outcome in Group G of the implementation plan.
+```
+
 ### **Group H: 5.2a OAuth2基盤**
 
 - [ ] `domain/ports.py` に `BaseOAuthClient` / `BaseAccessTokenProvider` の最小契約を追加し、usecaseとfetcherが `infrastructure.security.oauth2` を直接importしない構成にする
