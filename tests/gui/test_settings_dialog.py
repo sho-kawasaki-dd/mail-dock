@@ -6,6 +6,7 @@ import pytest
 from PySide6.QtGui import QStandardItemModel
 
 from mail_dock import config
+from mail_dock.domain.ports import OAuthAuthorizationRequest
 from mail_dock.presentation import strings
 from mail_dock.presentation.views.dialogs.settings_dialog import AccountDialog, SettingsDialog
 
@@ -65,6 +66,7 @@ class _AccountRepository:
 class _CredentialStore:
     def __init__(self) -> None:
         self.passwords: dict[str, str] = {}
+        self.secrets: dict[tuple[str, str], str] = {}
 
     def set_password(self, account_id: str, password: str) -> None:
         self.passwords[account_id] = password
@@ -74,6 +76,12 @@ class _CredentialStore:
 
     def delete_password(self, account_id: str) -> None:
         self.passwords.pop(account_id, None)
+
+    def get_secret(self, account_id: str, name: str) -> str | None:
+        return self.secrets.get((account_id, name))
+
+    def set_secret(self, account_id: str, name: str, value: str) -> None:
+        self.secrets[(account_id, name)] = value
 
 
 class _ManifestWriter:
@@ -106,6 +114,24 @@ class _AccountEditContext:
 
     def create_manifest_reader(self, _account_id: str) -> _ManifestReader:
         return _ManifestReader()
+
+    def begin_oauth_authorization(
+        self,
+        _account_id: str,
+        _client_id: str,
+    ) -> OAuthAuthorizationRequest:
+        return OAuthAuthorizationRequest(
+            "request-1", "http://127.0.0.1:12345/?state=test", "http://127.0.0.1:12345/"
+        )
+
+    def complete_oauth_authorization(
+        self,
+        account_id: str,
+        _request_id: str,
+        *,
+        cancel: object = None,
+    ) -> None:
+        self.credential_store.set_secret(account_id, "refresh_token", "refresh-value")
 
 
 def _editable_account() -> dict[str, object]:
@@ -193,6 +219,34 @@ def test_account_dialog_edit_handles_tls_mode_and_ca_certificate(qtbot: Any) -> 
     dialog._stop_worker()
 
 
+def test_account_dialog_oauth_authorization_completes_on_worker(
+    qtbot: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    credentials = _CredentialStore()
+    context = _AccountEditContext(_AccountRepository(_editable_account()), credentials)
+    monkeypatch.setattr(
+        "mail_dock.presentation.views.dialogs.settings_dialog.QDesktopServices.openUrl",
+        lambda _url: True,
+    )
+    dialog = AccountDialog(context)
+    qtbot.addWidget(dialog)
+
+    dialog._account_id_edit.setText("google-account")
+    dialog._username_edit.setText("user@gmail.com")
+    dialog._auth_type_edit.setCurrentIndex(dialog._auth_type_edit.findData("xoauth2"))
+    dialog._oauth_client_id_edit.setText("desktop-client-id")
+    assert dialog._host_edit.text() == "imap.gmail.com"
+    dialog._authorize_google()
+    qtbot.waitUntil(lambda: dialog._oauth_linked, timeout=2_000)
+
+    assert credentials.get_secret("google-account", "refresh_token") == "refresh-value"
+    values = dialog._account_values()
+    assert values is not None
+    assert values["auth_type"] == "xoauth2"
+    dialog._stop_worker()
+
+
 def test_active_settings_are_saved_with_purge_controls(qtbot: Any) -> None:
     context = _Context()
     dialog = SettingsDialog(context)
@@ -277,6 +331,42 @@ def test_account_added_and_updated_emit_accounts_changed(qtbot: Any) -> None:
         dialog._account_added("account-1")
     with qtbot.waitSignal(dialog.accounts_changed, timeout=2_000):
         dialog._account_updated("account-1")
+    dialog._stop_worker()
+
+
+def test_gmail_folder_selector_defaults_all_mail_and_warns_with_inbox(qtbot: Any) -> None:
+    dialog = SettingsDialog(_Context())
+    qtbot.addWidget(dialog)
+    dialog._accounts = (
+        {
+            "id": "google-account",
+            "auth_type": "xoauth2",
+            "oauth_provider": "google",
+        },
+    )
+    dialog._selected_account_id = "google-account"
+    dialog._set_folder_items(
+        (
+            {
+                "raw_name": "INBOX",
+                "display_name": "受信箱",
+                "is_sync_target": 0,
+                "special_use": ("\\Inbox",),
+            },
+            {
+                "raw_name": "server-all-folder",
+                "display_name": "すべてのメール",
+                "is_sync_target": 0,
+                "special_use": ("\\All",),
+            },
+        )
+    )
+
+    assert dialog._folder_list.item(1).checkState().value == 2
+    dialog._folder_list.item(0).setCheckState(dialog._folder_list.item(0).checkState().Checked)
+    assert dialog._gmail_duplicate_warning.text() == strings.WIZARD_WARNING_GMAIL_DUPLICATE_TARGETS
+    dialog._folder_list.item(0).setCheckState(dialog._folder_list.item(0).checkState().Unchecked)
+    assert dialog._gmail_duplicate_warning.text() == ""
     dialog._stop_worker()
 
 

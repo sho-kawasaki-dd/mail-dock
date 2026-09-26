@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from mail_dock import config
 from mail_dock.domain.errors import ConfigError
-from mail_dock.domain.fetcher import BaseMailFetcher
+from mail_dock.domain.fetcher import BaseMailFetcher, CancelToken
 from mail_dock.domain.ports import (
     BaseCredentialStore,
     BaseEmlStorage,
@@ -48,6 +48,7 @@ from mail_dock.infrastructure.storage.eml_storage import EmlStorage
 from mail_dock.infrastructure.storage.manifest import ManifestReader, ManifestWriter
 from mail_dock.infrastructure.storage.pst_import_storage import PstImportStorage
 from mail_dock.infrastructure.storage.pst_manifest import PstManifestWriter
+from mail_dock.usecases.oauth_authorize import begin_authorization, complete_authorization
 from mail_dock.usecases.register_account import load_credentials
 
 if TYPE_CHECKING:
@@ -124,6 +125,7 @@ class AppContext:
         self.keyring_supported = detect_backend() is KeyringBackendStatus.SUPPORTED
         self._session = session
         self._renderer_factory = renderer_factory
+        self._oauth_client = OAuth2Client()
         self.storage_root_switch_handler: Callable[[Path], None] | None = None
         self.storage_setup_handler: Callable[[Path | None], None] | None = None
         self.storage_detach_handler: Callable[[], None] | None = None
@@ -141,6 +143,42 @@ class AppContext:
         """Return the shared credential-store adapter."""
 
         return self._session.active_credential_store
+
+    def begin_oauth_authorization(
+        self,
+        account_id: str,
+        client_id: str,
+        *,
+        provider: str = "google",
+        tenant: str | None = None,
+    ) -> Any:
+        """Start an OAuth flow using the shared, allow-listed client."""
+
+        return begin_authorization(
+            self._oauth_client,
+            self.credential_store,
+            account_id=account_id,
+            provider=provider,
+            client_id=client_id,
+            tenant=tenant,
+        )
+
+    def complete_oauth_authorization(
+        self,
+        account_id: str,
+        request_id: str,
+        *,
+        cancel: CancelToken | None = None,
+    ) -> None:
+        """Wait for OAuth in a worker and persist its refresh token to keyring."""
+
+        complete_authorization(
+            self._oauth_client,
+            self.credential_store,
+            account_id=account_id,
+            request_id=request_id,
+            cancel=cancel,
+        )
 
     def create_message_repository(self) -> SqliteMessageRepository:
         """Create a message repository for the calling thread."""
@@ -307,12 +345,42 @@ class AppContext:
         host: str,
         port: int,
         username: str,
-        password: str,
+        password: str | None = None,
         tls_mode: Literal["implicit", "starttls"] = "implicit",
         ca_cert_path: str | None = None,
+        auth_type: Literal["password", "xoauth2"] = "password",
+        account_id: str | None = None,
+        oauth_provider: str | None = None,
+        oauth_client_id: str | None = None,
+        oauth_tenant: str | None = None,
     ) -> BaseMailFetcher:
         """Create an unaffiliated fetcher for the setup connection test."""
 
+        if auth_type == "xoauth2":
+            if not account_id or not oauth_provider or not oauth_client_id:
+                raise ConfigError("OAuth connection test configuration is incomplete")
+            return GenericImapFetcher(
+                host,
+                username,
+                None,
+                port=port,
+                remote_trash_folder=self.settings.remote_trash_folder,
+                tls_mode=tls_mode,
+                ca_cert_path=ca_cert_path or None,
+                auth_type="xoauth2",
+                account_id=account_id,
+                oauth_provider=oauth_provider,
+                oauth_client_id=oauth_client_id,
+                oauth_tenant=oauth_tenant,
+                access_token_provider=OAuthAccessTokenProvider(
+                    self._oauth_client,
+                    self.credential_store,
+                    account_id=account_id,
+                    provider=oauth_provider,
+                    client_id=oauth_client_id,
+                    tenant=oauth_tenant,
+                ),
+            )
         return GenericImapFetcher(
             host,
             username,

@@ -31,8 +31,9 @@ from PySide6.QtWidgets import (
 
 from mail_dock import config
 from mail_dock.domain.accounts import validate_account_id
-from mail_dock.domain.errors import MailDockError
+from mail_dock.domain.errors import AuthenticationError, MailDockError
 from mail_dock.domain.fetcher import CancelToken
+from mail_dock.domain.ports import OAuthAuthorizationRequest
 from mail_dock.domain.repository import MessageRecord
 from mail_dock.presentation import strings
 from mail_dock.presentation.errors import present_error
@@ -64,6 +65,10 @@ def _register_account_with_snapshot(context: Any, values: Mapping[str, Any]) -> 
             display_name=values["display_name"] or None,
             tls_mode=values["tls_mode"],
             ca_cert_path=values["ca_cert_path"],
+            auth_type=values["auth_type"],
+            oauth_provider=values["oauth_provider"],
+            oauth_client_id=values["oauth_client_id"],
+            oauth_tenant=values["oauth_tenant"],
             manifest=manifest,
             manifest_reader=context.create_manifest_reader(account_id),
         )
@@ -91,6 +96,10 @@ def _update_account_with_snapshot(
             is_enabled=is_enabled,
             tls_mode=values["tls_mode"],
             ca_cert_path=values["ca_cert_path"],
+            auth_type=values["auth_type"],
+            oauth_provider=values["oauth_provider"],
+            oauth_client_id=values["oauth_client_id"],
+            oauth_tenant=values["oauth_tenant"],
             manifest=manifest,
             manifest_reader=context.create_manifest_reader(account_id),
         )
@@ -128,7 +137,10 @@ class AccountDialog(QDialog):
         self._operation: str | None = None
         self._progress_dialog: ProgressDialog | None = None
         self._connection_test_passed = False
+        self._oauth_linked = False
         self._build_ui()
+        if self._editing and account is not None and account.get("auth_type") == "xoauth2":
+            self._load_oauth_status()
 
     def _build_ui(self) -> None:
         account = self._existing_account
@@ -152,6 +164,17 @@ class AccountDialog(QDialog):
         self._username_edit = QLineEdit(self)
         self._password_edit = QLineEdit(self)
         self._password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._auth_type_edit = QComboBox(self)
+        self._auth_type_edit.setObjectName("accountAuthTypeComboBox")
+        self._auth_type_edit.addItem(strings.SETTINGS_AUTH_TYPE_PASSWORD, "password")
+        self._auth_type_edit.addItem(strings.SETTINGS_AUTH_TYPE_GOOGLE, "xoauth2")
+        self._oauth_client_id_edit = QLineEdit(self)
+        self._oauth_client_id_edit.setObjectName("oauthClientIdLineEdit")
+        self._oauth_status_label = QLabel(strings.SETTINGS_STATUS_OAUTH_NOT_LINKED, self)
+        self._oauth_status_label.setWordWrap(True)
+        self._oauth_button = QPushButton(strings.SETTINGS_BUTTON_GOOGLE_AUTH, self)
+        self._oauth_button.setObjectName("googleAuthorizationButton")
+        self._oauth_button.clicked.connect(self._authorize_google)
         self._ca_cert_path_edit = QLineEdit(self)
         self._ca_cert_path_edit.setPlaceholderText(strings.SETTINGS_HINT_CA_CERT_PATH)
         self._ca_cert_browse_button = QPushButton(strings.SETTINGS_BUTTON_BROWSE_CA_CERT, self)
@@ -171,6 +194,9 @@ class AccountDialog(QDialog):
             self._port_default = self._default_port_for_tls_mode()
             self._port_edit.setValue(int(account.get("port") or self._port_default))
             self._username_edit.setText(str(account.get("username", "")))
+            auth_index = self._auth_type_edit.findData(account.get("auth_type", "password"))
+            self._auth_type_edit.setCurrentIndex(max(0, auth_index))
+            self._oauth_client_id_edit.setText(str(account.get("oauth_client_id") or ""))
             self._ca_cert_path_edit.setText(str(account.get("ca_cert_path") or ""))
             self._display_name_edit.setText(str(account.get("display_name") or ""))
             self._password_edit.setPlaceholderText(strings.SETTINGS_HINT_PASSWORD_UNCHANGED)
@@ -181,6 +207,8 @@ class AccountDialog(QDialog):
             self._username_edit.text().strip(),
             self._tls_mode_edit.currentData(),
             self._ca_cert_path_edit.text().strip(),
+            self._auth_type_edit.currentData(),
+            self._oauth_client_id_edit.text().strip(),
         )
 
         for field in (
@@ -193,17 +221,25 @@ class AccountDialog(QDialog):
         self._port_edit.valueChanged.connect(self._invalidate_connection_test)
         self._tls_mode_edit.currentIndexChanged.connect(self._tls_mode_changed)
         self._ca_cert_path_edit.textChanged.connect(self._invalidate_connection_test)
+        self._auth_type_edit.currentIndexChanged.connect(self._auth_type_changed)
+        self._oauth_client_id_edit.textChanged.connect(self._oauth_client_id_changed)
         form.addRow(strings.SETTINGS_LABEL_ACCOUNT_ID, self._account_id_edit)
         form.addRow(strings.SETTINGS_LABEL_HOST, self._host_edit)
         form.addRow(strings.SETTINGS_LABEL_TLS_MODE, self._tls_mode_edit)
         form.addRow(strings.SETTINGS_LABEL_PORT, self._port_edit)
         form.addRow(strings.SETTINGS_LABEL_USERNAME, self._username_edit)
         form.addRow(strings.SETTINGS_LABEL_PASSWORD, self._password_edit)
+        form.addRow(strings.SETTINGS_LABEL_AUTH_TYPE, self._auth_type_edit)
+        form.addRow(strings.SETTINGS_LABEL_OAUTH_CLIENT_ID, self._oauth_client_id_edit)
+        form.addRow(self._oauth_button)
+        form.addRow(self._oauth_status_label)
         ca_cert_row = QHBoxLayout()
         ca_cert_row.addWidget(self._ca_cert_path_edit)
         ca_cert_row.addWidget(self._ca_cert_browse_button)
         form.addRow(strings.SETTINGS_LABEL_CA_CERT_PATH, ca_cert_row)
         form.addRow(strings.SETTINGS_LABEL_DISPLAY_NAME, self._display_name_edit)
+        self._account_form = form
+        self._auth_type_changed()
         layout.addLayout(form)
 
         self._test_button = QPushButton(strings.SETTINGS_BUTTON_TEST_CONNECTION, self)
@@ -222,6 +258,84 @@ class AccountDialog(QDialog):
 
     def _invalidate_connection_test(self, *_args: object) -> None:
         self._connection_test_passed = False
+
+    def _auth_type_changed(self, *_args: object) -> None:
+        is_oauth = self._auth_type_edit.currentData() == "xoauth2"
+        password_label = self._account_form.labelForField(self._password_edit)
+        if password_label is not None:
+            password_label.setVisible(not is_oauth)
+        self._password_edit.setVisible(not is_oauth)
+        self._oauth_client_id_edit.setVisible(is_oauth)
+        self._oauth_button.setVisible(is_oauth)
+        self._oauth_status_label.setVisible(is_oauth)
+        if is_oauth and not self._host_edit.text().strip():
+            self._host_edit.setText("imap.gmail.com")
+            self._port_edit.setValue(993)
+            self._tls_mode_edit.setCurrentIndex(self._tls_mode_edit.findData("implicit"))
+        self._invalidate_connection_test()
+
+    def _oauth_client_id_changed(self, *_args: object) -> None:
+        self._oauth_linked = False
+        if self._auth_type_edit.currentData() == "xoauth2":
+            self._oauth_status_label.setText(strings.SETTINGS_STATUS_OAUTH_REAUTH)
+        self._invalidate_connection_test()
+
+    def _update_oauth_status(self, linked: bool) -> None:
+        self._oauth_linked = linked
+        self._oauth_status_label.setText(
+            strings.SETTINGS_STATUS_OAUTH_LINKED
+            if linked
+            else strings.SETTINGS_STATUS_OAUTH_NOT_LINKED
+        )
+        self._oauth_button.setText(
+            strings.SETTINGS_BUTTON_GOOGLE_REAUTH if linked else strings.SETTINGS_BUTTON_GOOGLE_AUTH
+        )
+
+    def _load_oauth_status(self) -> None:
+        account_id = self._account_id_edit.text().strip()
+        credential_store = getattr(self._context, "credential_store", None)
+        getter = getattr(credential_store, "get_secret", None)
+        if not account_id or not callable(getter):
+            self._oauth_status_label.setText(strings.SETTINGS_STATUS_OAUTH_REAUTH)
+            return
+        self._submit(
+            "oauth_status",
+            lambda: "linked" if getter(account_id, "refresh_token") else "reauth",
+        )
+
+    def _authorize_google(self) -> None:
+        account_id = self._account_id_edit.text().strip()
+        client_id = self._oauth_client_id_edit.text().strip()
+        if not account_id or not client_id:
+            self._status_label.setText(strings.SETTINGS_STATUS_ACCOUNT_REQUIRED)
+            return
+        try:
+            validate_account_id(account_id)
+        except Exception as error:
+            self._show_error(error)
+            return
+        self._oauth_button.setEnabled(False)
+        self._status_label.setText(strings.SETTINGS_STATUS_OAUTH_WAITING)
+        token = self._submit(
+            "oauth_begin",
+            lambda: self._context.begin_oauth_authorization(account_id, client_id),
+        )
+        self._show_progress(strings.SETTINGS_STATUS_OAUTH_WAITING, token)
+
+    def _wait_for_google_callback(self, request_id: str, *, cancel_now: bool = False) -> None:
+        account_id = self._account_id_edit.text().strip()
+        token = CancelToken()
+        if cancel_now:
+            token.cancel()
+        self._submit(
+            "oauth_cleanup" if cancel_now else "oauth_complete",
+            lambda: self._context.complete_oauth_authorization(
+                account_id, request_id, cancel=token
+            ),
+            token=token,
+        )
+        if not cancel_now:
+            self._show_progress(strings.SETTINGS_STATUS_OAUTH_WAITING, token)
 
     def _default_port_for_tls_mode(self) -> int:
         return 143 if self._tls_mode_edit.currentData() == "starttls" else 993
@@ -259,6 +373,8 @@ class AccountDialog(QDialog):
             self._username_edit.text().strip(),
             self._tls_mode_edit.currentData(),
             self._ca_cert_path_edit.text().strip(),
+            self._auth_type_edit.currentData(),
+            self._oauth_client_id_edit.text().strip(),
         )
         return current != self._original_connection_values
 
@@ -272,6 +388,9 @@ class AccountDialog(QDialog):
         if values is None:
             self._status_label.setText(strings.SETTINGS_STATUS_ACCOUNT_REQUIRED)
             return
+        if values["auth_type"] == "xoauth2" and not self._oauth_linked:
+            self._status_label.setText(strings.SETTINGS_STATUS_OAUTH_NOT_LINKED)
+            return
         try:
             validate_account_id(values["account_id"])
         except Exception as error:
@@ -284,7 +403,15 @@ class AccountDialog(QDialog):
         token = self._submit(
             "connection",
             lambda: _test_connection(
-                self._context, {**values, "password": self._resolved_test_password(values)}
+                self._context,
+                {
+                    **values,
+                    "password": (
+                        self._resolved_test_password(values)
+                        if values["auth_type"] == "password"
+                        else None
+                    ),
+                },
             ),
         )
         self._show_progress(strings.SETTINGS_STATUS_TESTING_CONNECTION, token)
@@ -293,6 +420,13 @@ class AccountDialog(QDialog):
         values = self._account_values()
         if values is None:
             self._status_label.setText(strings.SETTINGS_STATUS_ACCOUNT_REQUIRED)
+            return
+        if (
+            values["auth_type"] == "xoauth2"
+            and (not self._editing or self._connection_fields_changed())
+            and not self._oauth_linked
+        ):
+            self._status_label.setText(strings.SETTINGS_STATUS_OAUTH_NOT_LINKED)
             return
         if self._connection_fields_changed() and not self._connection_test_passed:
             self._status_label.setText(strings.SETTINGS_STATUS_CONNECTION_REQUIRED)
@@ -318,7 +452,11 @@ class AccountDialog(QDialog):
         password = self._password_edit.text()
         if not account_id or not host or not username:
             return None
-        if not self._editing and not password:
+        auth_type = self._auth_type_edit.currentData()
+        oauth_client_id = self._oauth_client_id_edit.text().strip()
+        if auth_type == "password" and not self._editing and not password:
+            return None
+        if auth_type == "xoauth2" and not oauth_client_id:
             return None
         return {
             "account_id": account_id,
@@ -326,15 +464,25 @@ class AccountDialog(QDialog):
             "port": self._port_edit.value(),
             "username": username,
             "password": password,
+            "auth_type": auth_type,
+            "oauth_provider": "google" if auth_type == "xoauth2" else None,
+            "oauth_client_id": oauth_client_id if auth_type == "xoauth2" else None,
+            "oauth_tenant": None,
             "tls_mode": self._tls_mode_edit.currentData(),
             "ca_cert_path": self._ca_cert_path_edit.text().strip() or None,
             "display_name": self._display_name_edit.text().strip(),
         }
 
-    def _submit(self, operation: str, callback: Callable[[], object]) -> CancelToken:
+    def _submit(
+        self,
+        operation: str,
+        callback: Callable[[], object],
+        *,
+        token: CancelToken | None = None,
+    ) -> CancelToken:
         self._worker.cancel_all()
         self._operation = operation
-        return self._worker.submit(lambda: _OperationResult(operation, callback()))
+        return self._worker.submit(lambda: _OperationResult(operation, callback()), token)
 
     def _show_progress(self, message: str, token: CancelToken) -> None:
         self._close_progress()
@@ -364,23 +512,68 @@ class AccountDialog(QDialog):
                 self.account_updated.emit(account_id)
                 self._stop_worker()
                 super().accept()
+        elif value.operation == "oauth_status":
+            if value.value == "linked":
+                self._update_oauth_status(True)
+            else:
+                self._oauth_linked = False
+                self._oauth_status_label.setText(strings.SETTINGS_STATUS_OAUTH_REAUTH)
+                self._oauth_button.setText(strings.SETTINGS_BUTTON_GOOGLE_REAUTH)
+        elif value.operation == "oauth_begin":
+            request = value.value
+            if not isinstance(request, OAuthAuthorizationRequest):
+                self._status_label.setText("OAuth authorization did not start")
+                self._oauth_button.setEnabled(True)
+                return
+            if QDesktopServices.openUrl(QUrl(request.authorization_url)):
+                self._wait_for_google_callback(request.request_id)
+            else:
+                self._status_label.setText(strings.SETTINGS_STATUS_OAUTH_BROWSER_FAILED)
+                self._wait_for_google_callback(request.request_id, cancel_now=True)
+        elif value.operation == "oauth_complete":
+            self._update_oauth_status(True)
+            self._connection_test_passed = False
+            self._oauth_button.setEnabled(True)
+            self._status_label.setText(strings.SETTINGS_STATUS_OAUTH_LINKED)
 
     def _operation_failed(self, error: object) -> None:
         if self._operation is None:
             return
+        operation = self._operation
         self._operation = None
         self._close_progress()
         self._test_button.setEnabled(True)
+        self._oauth_button.setEnabled(True)
         self._buttons.setEnabled(True)
+        if operation == "oauth_complete" and not self._oauth_linked:
+            self._oauth_status_label.setText(strings.SETTINGS_STATUS_OAUTH_REAUTH)
+        if (
+            operation == "connection"
+            and self._auth_type_edit.currentData() == "xoauth2"
+            and isinstance(error, AuthenticationError)
+        ):
+            self._oauth_linked = False
+            self._oauth_status_label.setText(strings.SETTINGS_STATUS_OAUTH_REAUTH)
+            self._oauth_button.setText(strings.SETTINGS_BUTTON_GOOGLE_REAUTH)
         self._show_error(
             error if isinstance(error, BaseException) else MailDockError("account operation failed")
         )
 
     def _operation_cancelled(self) -> None:
+        operation = self._operation
         self._operation = None
         self._close_progress()
         self._test_button.setEnabled(True)
+        self._oauth_button.setEnabled(True)
         self._buttons.setEnabled(True)
+        if operation == "oauth_cleanup":
+            self._status_label.setText(strings.SETTINGS_STATUS_OAUTH_BROWSER_FAILED)
+        elif operation == "oauth_complete":
+            self._status_label.setText(
+                strings.SETTINGS_STATUS_OAUTH_LINKED
+                if self._oauth_linked
+                else strings.SETTINGS_STATUS_OAUTH_NOT_LINKED
+            )
 
     def _show_error(self, error: BaseException) -> None:
         self._status_label.setText(present_error(error).message)
@@ -699,6 +892,10 @@ class SettingsDialog(QDialog):
         folders_layout = QVBoxLayout(folder_group)
         self._folder_list = QListWidget(folder_group)
         self._folder_list.setObjectName("syncTargetFolderList")
+        self._folder_list.itemChanged.connect(self._update_gmail_duplicate_warning)
+        self._gmail_duplicate_warning = QLabel(folder_group)
+        self._gmail_duplicate_warning.setObjectName("gmailDuplicateTargetWarningLabel")
+        self._gmail_duplicate_warning.setWordWrap(True)
         self._folder_status = QLabel(folder_group)
         self._folder_status.setWordWrap(True)
         folder_controls = QHBoxLayout()
@@ -712,6 +909,7 @@ class SettingsDialog(QDialog):
         folder_controls.addWidget(self._refresh_folders_button)
         folder_controls.addWidget(self._save_folders_button)
         folders_layout.addWidget(self._folder_list)
+        folders_layout.addWidget(self._gmail_duplicate_warning)
         folders_layout.addWidget(self._folder_status)
         folders_layout.addLayout(folder_controls)
         layout.addWidget(folder_group)
@@ -810,10 +1008,20 @@ class SettingsDialog(QDialog):
                     manifest_reader=self._context.create_manifest_reader(account_id),
                 )
                 detected_trash_folder = fetcher.find_trash_folder()
+                remote_folders = fetcher.list_folders()
         finally:
             manifest.close()
+            special_use_by_name = {
+                folder.raw_name: tuple(folder.special_use) for folder in remote_folders
+            }
         return (
-            tuple(repository.list_folders(account_id)),
+            tuple(
+                {
+                    **folder,
+                    "special_use": special_use_by_name.get(str(folder.get("raw_name", "")), ()),
+                }
+                for folder in repository.list_folders(account_id)
+            ),
             detected_trash_folder.raw_name if detected_trash_folder is not None else None,
         )
 
@@ -941,17 +1149,66 @@ class SettingsDialog(QDialog):
     def _set_folder_items(self, records: tuple[MessageRecord, ...]) -> None:
         self._folders = records
         self._folder_list.clear()
+        account = next(
+            (item for item in self._accounts if item.get("id") == self._selected_account_id),
+            None,
+        )
+        is_gmail = (
+            account is not None
+            and account.get("auth_type") == "xoauth2"
+            and account.get("oauth_provider") == "google"
+        )
+        has_existing_targets = any(bool(folder.get("is_sync_target", 0)) for folder in records)
         for folder in records:
             display_name = str(folder.get("display_name", folder.get("raw_name", "")))
             item = QListWidgetItem(display_name, self._folder_list)
             item.setData(Qt.ItemDataRole.UserRole, folder.get("raw_name"))
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(
-                Qt.CheckState.Checked
-                if bool(folder.get("is_sync_target", 0))
-                else Qt.CheckState.Unchecked
+            raw_name = str(folder.get("raw_name", ""))
+            use_flags = folder.get("special_use", ())
+            is_all_mail = (
+                isinstance(use_flags, (tuple, list, set, frozenset))
+                and any(str(flag).casefold() == r"\all" for flag in use_flags)
+            ) or "all mail" in raw_name.casefold()
+            is_sync_target = bool(folder.get("is_sync_target", 0)) or (
+                is_gmail and not has_existing_targets and is_all_mail
             )
+            item.setCheckState(Qt.CheckState.Checked if is_sync_target else Qt.CheckState.Unchecked)
         self._folder_status.setText("" if records else strings.SETTINGS_STATUS_NO_FOLDERS)
+        self._update_gmail_duplicate_warning()
+
+    def _update_gmail_duplicate_warning(self, *_args: object) -> None:
+        account = next(
+            (item for item in self._accounts if item.get("id") == self._selected_account_id),
+            None,
+        )
+        if (
+            account is None
+            or account.get("auth_type") != "xoauth2"
+            or account.get("oauth_provider") != "google"
+        ):
+            self._gmail_duplicate_warning.clear()
+            return
+        all_mail_checked = False
+        inbox_checked = False
+        for index, folder in enumerate(self._folders):
+            item = self._folder_list.item(index)
+            if item is None or item.checkState() != Qt.CheckState.Checked:
+                continue
+            raw_name = str(folder.get("raw_name", "")).casefold()
+            use_flags = folder.get("special_use", ())
+            flags = (
+                tuple(str(flag).casefold() for flag in use_flags)
+                if isinstance(use_flags, (tuple, list, set, frozenset))
+                else ()
+            )
+            all_mail_checked = all_mail_checked or (r"\all" in flags or "all mail" in raw_name)
+            inbox_checked = inbox_checked or (r"\inbox" in flags or raw_name == "inbox")
+        self._gmail_duplicate_warning.setText(
+            strings.WIZARD_WARNING_GMAIL_DUPLICATE_TARGETS
+            if all_mail_checked and inbox_checked
+            else ""
+        )
 
     def _set_remote_trash_status(self, raw_name: str | None) -> None:
         self._remote_trash_status.setText(
@@ -1068,6 +1325,11 @@ def _test_connection(context: Any, values: dict[str, Any]) -> None:
         password=values["password"],
         tls_mode=values["tls_mode"],
         ca_cert_path=values["ca_cert_path"],
+        auth_type=values["auth_type"],
+        account_id=values["account_id"],
+        oauth_provider=values["oauth_provider"],
+        oauth_client_id=values["oauth_client_id"],
+        oauth_tenant=values["oauth_tenant"],
     )
     with fetcher:
         return None

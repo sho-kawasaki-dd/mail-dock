@@ -3,11 +3,14 @@ from __future__ import annotations
 import ast
 import inspect
 from pathlib import Path
+from threading import Event
 from typing import Any
 
 import pytest
 
-from mail_dock.domain.errors import InsufficientSpaceError
+from mail_dock.domain.errors import InsufficientSpaceError, OperationCancelledError
+from mail_dock.domain.fetcher import CancelToken
+from mail_dock.domain.ports import OAuthAuthorizationRequest
 from mail_dock.infrastructure.storage.storage_root import DriveKind, SpaceStatus
 from mail_dock.presentation import strings
 from mail_dock.presentation.views.setup_wizard import SetupWizard
@@ -25,6 +28,9 @@ class _Repository:
 
     def list_folders(self, _account_id: str) -> tuple[dict[str, object], ...]:
         return self.folders
+
+    def list_accounts(self) -> tuple[dict[str, object], ...]:
+        return ({"id": "account-1", "provider_type": "imap"},)
 
     def set_sync_target(self, account_id: str, raw_name: str, enabled: bool) -> None:
         self.targets.append((account_id, raw_name, enabled))
@@ -49,6 +55,7 @@ class _ManifestReader:
 class _Context:
     def __init__(self) -> None:
         self.repository = _Repository()
+        self.oauth_cancelled = Event()
 
     def create_message_repository(self) -> _Repository:
         return self.repository
@@ -58,6 +65,28 @@ class _Context:
 
     def create_manifest_reader(self, _account_id: str) -> _ManifestReader:
         return _ManifestReader()
+
+    def begin_oauth_authorization(
+        self,
+        _account_id: str,
+        _client_id: str,
+    ) -> OAuthAuthorizationRequest:
+        return OAuthAuthorizationRequest(
+            "request-1", "http://127.0.0.1:12345/?state=test", "http://127.0.0.1:12345/"
+        )
+
+    def complete_oauth_authorization(
+        self,
+        _account_id: str,
+        _request_id: str,
+        *,
+        cancel: CancelToken | None = None,
+    ) -> None:
+        assert cancel is not None
+        while not cancel.is_cancelled:
+            cancel.event.wait(0.01)
+        self.oauth_cancelled.set()
+        raise OperationCancelledError("cancelled")
 
 
 def test_wizard_has_three_pages_and_confirms_a_temporary_root(
@@ -158,6 +187,60 @@ def test_folder_validation_requires_selection_and_persists_selected_targets(qtbo
         ("account-1", "INBOX", False),
         ("account-1", "Archive", True),
     ]
+
+
+def test_gmail_folder_selection_defaults_all_mail_and_warns_with_inbox(qtbot: Any) -> None:
+    wizard = SetupWizard(context=_Context())
+    qtbot.addWidget(wizard)
+    wizard._gmail_account = True
+    wizard._set_folder_checks(
+        (
+            {
+                "raw_name": "INBOX",
+                "display_name": "受信箱",
+                "is_sync_target": 1,
+                "special_use": ("\\Inbox",),
+            },
+            {
+                "raw_name": "server-all-folder",
+                "display_name": "すべてのメール",
+                "is_sync_target": 0,
+                "special_use": ("\\All",),
+            },
+        )
+    )
+
+    assert wizard._folder_checks[1].isChecked()
+    assert wizard._gmail_duplicate_warning.text() == strings.WIZARD_WARNING_GMAIL_DUPLICATE_TARGETS
+    wizard._folder_checks[0].setChecked(False)
+    assert wizard._gmail_duplicate_warning.text() == ""
+
+
+def test_setup_wizard_oauth_wait_can_be_cancelled_without_blocking_gui(
+    qtbot: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _Context()
+    monkeypatch.setattr(
+        "mail_dock.presentation.views.setup_wizard.QDesktopServices.openUrl",
+        lambda _url: True,
+    )
+    wizard = SetupWizard(context=context)
+    qtbot.addWidget(wizard)
+    wizard._account_id_edit.setText("google-account")
+    wizard._username_edit.setText("user@gmail.com")
+    wizard._auth_type_edit.setCurrentIndex(wizard._auth_type_edit.findData("xoauth2"))
+    wizard._oauth_client_id_edit.setText("desktop-client-id")
+    wizard._authorize_google()
+    qtbot.waitUntil(lambda: wizard._operation == "oauth_complete", timeout=2_000)
+
+    progress = wizard._progress_dialog
+    assert progress is not None
+    progress.canceled.emit()
+    qtbot.waitUntil(lambda: wizard._worker is None, timeout=2_000)
+
+    assert context.oauth_cancelled.is_set()
+    assert wizard._oauth_status_label.text() == strings.WIZARD_STATUS_OAUTH_NOT_LINKED
 
 
 def test_unsupported_capability_blocks_root_confirmation(

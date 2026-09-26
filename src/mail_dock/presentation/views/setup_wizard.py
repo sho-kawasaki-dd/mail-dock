@@ -7,6 +7,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -22,8 +24,9 @@ from PySide6.QtWidgets import (
 )
 
 from mail_dock.domain.accounts import validate_account_id
-from mail_dock.domain.errors import MailDockError, StorageForeignRootError
+from mail_dock.domain.errors import AuthenticationError, MailDockError, StorageForeignRootError
 from mail_dock.domain.fetcher import CancelToken
+from mail_dock.domain.ports import OAuthAuthorizationRequest
 from mail_dock.domain.repository import MessageRecord
 from mail_dock.presentation import strings
 from mail_dock.presentation.errors import present_error
@@ -93,6 +96,8 @@ class SetupWizard(QWizard):
         self._progress_dialog: ProgressDialog | None = None
         self._operation: str | None = None
         self._connection_test_passed = False
+        self._oauth_linked = False
+        self._gmail_account = False
         self._account_id: str | None = None
         self._folder_records: tuple[MessageRecord, ...] = ()
         self._folder_checks: list[QCheckBox] = []
@@ -222,6 +227,17 @@ class SetupWizard(QWizard):
         self._username_edit = QLineEdit()
         self._password_edit = QLineEdit()
         self._password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._auth_type_edit = QComboBox()
+        self._auth_type_edit.setObjectName("wizardAuthTypeComboBox")
+        self._auth_type_edit.addItem(strings.SETTINGS_AUTH_TYPE_PASSWORD, "password")
+        self._auth_type_edit.addItem(strings.SETTINGS_AUTH_TYPE_GOOGLE, "xoauth2")
+        self._oauth_client_id_edit = QLineEdit()
+        self._oauth_client_id_edit.setObjectName("wizardOAuthClientIdLineEdit")
+        self._oauth_status_label = QLabel(strings.WIZARD_STATUS_OAUTH_NOT_LINKED)
+        self._oauth_status_label.setWordWrap(True)
+        self._oauth_button = QPushButton(strings.WIZARD_BUTTON_GOOGLE_AUTH, self._account_page)
+        self._oauth_button.setObjectName("wizardGoogleAuthorizationButton")
+        self._oauth_button.clicked.connect(self._authorize_google)
         self._display_name_edit = QLineEdit()
         for field in (
             self._account_id_edit,
@@ -231,11 +247,17 @@ class SetupWizard(QWizard):
         ):
             field.textChanged.connect(self._invalidate_connection_test)
         self._port_edit.valueChanged.connect(self._invalidate_connection_test)
+        self._auth_type_edit.currentIndexChanged.connect(self._auth_type_changed)
+        self._oauth_client_id_edit.textChanged.connect(self._oauth_client_id_changed)
         layout.addRow(strings.WIZARD_LABEL_ACCOUNT_ID, self._account_id_edit)
         layout.addRow(strings.WIZARD_LABEL_HOST, self._host_edit)
         layout.addRow(strings.WIZARD_LABEL_PORT, self._port_edit)
         layout.addRow(strings.WIZARD_LABEL_USERNAME, self._username_edit)
         layout.addRow(strings.WIZARD_LABEL_PASSWORD, self._password_edit)
+        layout.addRow(strings.WIZARD_LABEL_AUTH_TYPE, self._auth_type_edit)
+        layout.addRow(strings.WIZARD_LABEL_OAUTH_CLIENT_ID, self._oauth_client_id_edit)
+        layout.addRow(self._oauth_button)
+        layout.addRow(self._oauth_status_label)
         layout.addRow(strings.WIZARD_LABEL_DISPLAY_NAME, self._display_name_edit)
         self._connection_test_button = QPushButton(
             strings.WIZARD_BUTTON_CONNECTION_TEST,
@@ -246,6 +268,8 @@ class SetupWizard(QWizard):
         self._account_status = QLabel()
         self._account_status.setWordWrap(True)
         layout.addRow(self._account_status)
+        self._account_form = layout
+        self._auth_type_changed()
         self._account_page_id = self.addPage(self._account_page)
 
     def _build_folders_page(self) -> None:
@@ -258,6 +282,9 @@ class SetupWizard(QWizard):
         self._folders_status = QLabel()
         self._folders_status.setWordWrap(True)
         layout.addWidget(self._folders_status)
+        self._gmail_duplicate_warning = QLabel()
+        self._gmail_duplicate_warning.setWordWrap(True)
+        layout.addWidget(self._gmail_duplicate_warning)
         self._folders_layout = QVBoxLayout()
         layout.addLayout(self._folders_layout)
         self._folders_page_id = self.addPage(self._folders_page)
@@ -384,8 +411,19 @@ class SetupWizard(QWizard):
         host = _text(self._host_edit)
         username = _text(self._username_edit)
         password = self._password_edit.text()
-        if not account_id or not host or not username or not password:
+        auth_type = self._auth_type_edit.currentData()
+        oauth_client_id = _text(self._oauth_client_id_edit)
+        if (
+            not account_id
+            or not host
+            or not username
+            or (auth_type == "password" and not password)
+            or (auth_type == "xoauth2" and not oauth_client_id)
+        ):
             self._account_status.setText(strings.WIZARD_STATUS_ACCOUNT_REQUIRED)
+            return False
+        if auth_type == "xoauth2" and not self._oauth_linked:
+            self._account_status.setText(strings.WIZARD_STATUS_OAUTH_NOT_LINKED)
             return False
         try:
             validate_account_id(account_id)
@@ -408,8 +446,12 @@ class SetupWizard(QWizard):
                     host=host,
                     port=self._port_edit.value(),
                     username=username,
-                    password=password,
+                    password=password if auth_type == "password" else None,
                     display_name=_text(self._display_name_edit) or None,
+                    auth_type=auth_type,
+                    oauth_provider="google" if auth_type == "xoauth2" else None,
+                    oauth_client_id=oauth_client_id if auth_type == "xoauth2" else None,
+                    oauth_tenant=None,
                     manifest=manifest,
                     manifest_reader=self._context.create_manifest_reader(account_id),
                 )
@@ -419,6 +461,7 @@ class SetupWizard(QWizard):
             self._show_inline_error(self._account_status, error)
             return False
         self._account_id = account_id
+        self._gmail_account = auth_type == "xoauth2"
         return True
 
     def _validate_folders(self) -> bool:
@@ -457,7 +500,15 @@ class SetupWizard(QWizard):
         host = _text(self._host_edit)
         username = _text(self._username_edit)
         password = self._password_edit.text()
-        if not account_id or not host or not username or not password:
+        auth_type = self._auth_type_edit.currentData()
+        oauth_client_id = _text(self._oauth_client_id_edit)
+        if (
+            not account_id
+            or not host
+            or not username
+            or (auth_type == "password" and not password)
+            or (auth_type == "xoauth2" and (not oauth_client_id or not self._oauth_linked))
+        ):
             self._account_status.setText(strings.WIZARD_STATUS_ACCOUNT_REQUIRED)
             return
         try:
@@ -476,13 +527,77 @@ class SetupWizard(QWizard):
                 host=host,
                 port=self._port_edit.value(),
                 username=username,
-                password=password,
+                password=password if auth_type == "password" else None,
+                auth_type=auth_type,
+                account_id=account_id,
+                oauth_provider="google" if auth_type == "xoauth2" else None,
+                oauth_client_id=oauth_client_id if auth_type == "xoauth2" else None,
+                oauth_tenant=None,
             ),
         )
         self._show_progress(strings.WIZARD_STATUS_TESTING_CONNECTION, token)
 
     def _invalidate_connection_test(self, *_args: object) -> None:
         self._connection_test_passed = False
+
+    def _auth_type_changed(self, *_args: object) -> None:
+        is_oauth = self._auth_type_edit.currentData() == "xoauth2"
+        password_label = self._account_form.labelForField(self._password_edit)
+        if password_label is not None:
+            password_label.setVisible(not is_oauth)
+        self._password_edit.setVisible(not is_oauth)
+        self._oauth_client_id_edit.setVisible(is_oauth)
+        self._oauth_button.setVisible(is_oauth)
+        self._oauth_status_label.setVisible(is_oauth)
+        if is_oauth and not _text(self._host_edit):
+            self._host_edit.setText("imap.gmail.com")
+            self._port_edit.setValue(993)
+        self._invalidate_connection_test()
+
+    def _oauth_client_id_changed(self, *_args: object) -> None:
+        self._oauth_linked = False
+        if self._auth_type_edit.currentData() == "xoauth2":
+            self._oauth_status_label.setText(strings.WIZARD_STATUS_OAUTH_REAUTH)
+        self._invalidate_connection_test()
+
+    def _authorize_google(self) -> None:
+        account_id = _text(self._account_id_edit)
+        client_id = _text(self._oauth_client_id_edit)
+        if not account_id or not client_id or not _text(self._username_edit):
+            self._account_status.setText(strings.WIZARD_STATUS_ACCOUNT_REQUIRED)
+            return
+        try:
+            validate_account_id(account_id)
+        except Exception as error:
+            self._show_inline_error(self._account_status, error)
+            return
+        if self._context is None:
+            self._account_status.setText(strings.ERROR_STARTUP_FAILED)
+            return
+        context = self._context
+        self._oauth_button.setEnabled(False)
+        self._account_status.setText(strings.WIZARD_STATUS_OAUTH_WAITING)
+        token = self._submit_operation(
+            "oauth_begin",
+            lambda: context.begin_oauth_authorization(account_id, client_id),
+        )
+        self._show_progress(strings.WIZARD_STATUS_OAUTH_WAITING, token)
+
+    def _wait_for_google_callback(self, request_id: str, *, cancel_now: bool = False) -> None:
+        account_id = _text(self._account_id_edit)
+        if self._context is None:
+            return
+        context = self._context
+        token = CancelToken()
+        if cancel_now:
+            token.cancel()
+        self._submit_operation(
+            "oauth_cleanup" if cancel_now else "oauth_complete",
+            lambda: context.complete_oauth_authorization(account_id, request_id, cancel=token),
+            token=token,
+        )
+        if not cancel_now:
+            self._show_progress(strings.WIZARD_STATUS_OAUTH_WAITING, token)
 
     def _load_folders(self) -> None:
         account_id = self._account_id
@@ -516,11 +631,27 @@ class SetupWizard(QWizard):
                     manifest=manifest,
                     manifest_reader=self._context.create_manifest_reader(account_id),
                 )
+                remote_folders = fetcher.list_folders()
         finally:
             manifest.close()
-        return tuple(repository.list_folders(account_id))
+        special_use_by_name = {
+            folder.raw_name: tuple(folder.special_use) for folder in remote_folders
+        }
+        return tuple(
+            {
+                **record,
+                "special_use": special_use_by_name.get(str(record.get("raw_name", "")), ()),
+            }
+            for record in repository.list_folders(account_id)
+        )
 
-    def _submit_operation(self, operation: str, callback: Callable[[], object]) -> CancelToken:
+    def _submit_operation(
+        self,
+        operation: str,
+        callback: Callable[[], object],
+        *,
+        token: CancelToken | None = None,
+    ) -> CancelToken:
         self._stop_worker()
         connection_manager = getattr(self._context, "connection_manager", None)
         worker = Worker(connection_manager)
@@ -530,7 +661,7 @@ class SetupWizard(QWizard):
         worker.failed.connect(self._operation_failed)
         worker.cancelled.connect(self._operation_cancelled)
         worker.start()
-        return worker.submit(callback)
+        return worker.submit(callback, token)
 
     def _show_progress(self, message: str, token: CancelToken) -> None:
         self._close_progress()
@@ -543,10 +674,29 @@ class SetupWizard(QWizard):
         operation = self._operation
         self._operation = None
         self._close_progress()
+        if operation == "oauth_begin":
+            self._stop_worker()
+            if not isinstance(value, OAuthAuthorizationRequest):
+                self._oauth_button.setEnabled(True)
+                self._account_status.setText(strings.WIZARD_STATUS_OAUTH_REAUTH)
+                return
+            if QDesktopServices.openUrl(QUrl(value.authorization_url)):
+                self._wait_for_google_callback(value.request_id)
+            else:
+                self._account_status.setText(strings.WIZARD_STATUS_OAUTH_BROWSER_FAILED)
+                self._wait_for_google_callback(value.request_id, cancel_now=True)
+            return
         if operation == "connection":
             self._connection_test_passed = True
             self._connection_test_button.setEnabled(True)
             self._account_status.setText(strings.WIZARD_STATUS_CONNECTION_OK)
+        elif operation == "oauth_complete":
+            self._oauth_linked = True
+            self._connection_test_passed = False
+            self._oauth_status_label.setText(strings.WIZARD_STATUS_OAUTH_LINKED)
+            self._oauth_button.setText(strings.SETTINGS_BUTTON_GOOGLE_REAUTH)
+            self._oauth_button.setEnabled(True)
+            self._account_status.setText(strings.WIZARD_STATUS_OAUTH_LINKED)
         elif operation == "folders":
             records = value if isinstance(value, tuple) else ()
             self._set_folder_checks(records)
@@ -561,14 +711,34 @@ class SetupWizard(QWizard):
         if operation == "connection":
             self._connection_test_button.setEnabled(True)
             self._account_status.setText(message)
+            if self._auth_type_edit.currentData() == "xoauth2" and isinstance(
+                error, AuthenticationError
+            ):
+                self._oauth_linked = False
+                self._oauth_status_label.setText(strings.WIZARD_STATUS_OAUTH_REAUTH)
+                self._oauth_button.setText(strings.SETTINGS_BUTTON_GOOGLE_REAUTH)
         elif operation == "folders":
             self._folders_status.setText(message)
             self._set_finish_enabled(False)
+        elif operation in {"oauth_begin", "oauth_complete"}:
+            self._oauth_button.setEnabled(True)
+            self._oauth_linked = False
+            self._oauth_status_label.setText(strings.WIZARD_STATUS_OAUTH_REAUTH)
+            self._account_status.setText(message)
         self._stop_worker()
 
     def _operation_cancelled(self) -> None:
+        operation = self._operation
         self._operation = None
         self._close_progress()
+        if operation in {"oauth_complete", "oauth_cleanup"}:
+            self._oauth_button.setEnabled(True)
+            self._oauth_linked = False
+            self._oauth_status_label.setText(strings.WIZARD_STATUS_OAUTH_NOT_LINKED)
+            if operation == "oauth_cleanup":
+                self._account_status.setText(strings.WIZARD_STATUS_OAUTH_BROWSER_FAILED)
+            else:
+                self._account_status.setText(strings.WIZARD_STATUS_OAUTH_NOT_LINKED)
         self._stop_worker()
 
     def _set_folder_checks(self, records: tuple[MessageRecord, ...]) -> None:
@@ -584,11 +754,49 @@ class SetupWizard(QWizard):
         for record in records:
             display_name = record.get("display_name", record.get("raw_name", ""))
             check = QCheckBox(str(display_name), self._folders_page)
-            check.setChecked(bool(record.get("is_sync_target", 0)))
+            use_flags = record.get("special_use", ())
+            if isinstance(use_flags, (tuple, list, set, frozenset)):
+                is_all_mail = any(str(flag).casefold() == r"\all" for flag in use_flags)
+            else:
+                is_all_mail = False
+            raw_name = str(record.get("raw_name", ""))
+            is_all_mail = is_all_mail or "all mail" in raw_name.casefold()
+            default_checked = bool(record.get("is_sync_target", 0))
+            if self._gmail_account and is_all_mail:
+                default_checked = True
+            check.setChecked(default_checked)
+            check.toggled.connect(self._update_gmail_duplicate_warning)
             self._folder_checks.append(check)
             self._folders_layout.addWidget(check)
         self._folders_status.setText("" if records else strings.WIZARD_STATUS_FOLDER_EMPTY)
+        self._update_gmail_duplicate_warning()
         self._set_finish_enabled(bool(records))
+
+    def _update_gmail_duplicate_warning(self, *_args: object) -> None:
+        if not self._gmail_account:
+            self._gmail_duplicate_warning.clear()
+            return
+        all_mail_checked = False
+        inbox_checked = False
+        for record, check in zip(self._folder_records, self._folder_checks, strict=False):
+            raw_name = str(record.get("raw_name", "")).casefold()
+            use_flags = record.get("special_use", ())
+            flags = (
+                tuple(str(flag).casefold() for flag in use_flags)
+                if isinstance(use_flags, (tuple, list, set, frozenset))
+                else ()
+            )
+            all_mail_checked = all_mail_checked or (
+                check.isChecked() and (r"\all" in flags or "all mail" in raw_name)
+            )
+            inbox_checked = inbox_checked or (
+                check.isChecked() and (r"\inbox" in flags or raw_name == "inbox")
+            )
+        self._gmail_duplicate_warning.setText(
+            strings.WIZARD_WARNING_GMAIL_DUPLICATE_TARGETS
+            if all_mail_checked and inbox_checked
+            else ""
+        )
 
     def _set_finish_enabled(self, enabled: bool) -> None:
         button = self.button(QWizard.WizardButton.FinishButton)
@@ -627,13 +835,23 @@ def _test_connection(
     host: str,
     port: int,
     username: str,
-    password: str,
+    password: str | None,
+    auth_type: str,
+    account_id: str,
+    oauth_provider: str | None,
+    oauth_client_id: str | None,
+    oauth_tenant: str | None,
 ) -> None:
     fetcher = context.create_fetcher_for_credentials(
         host=host,
         port=port,
         username=username,
         password=password,
+        auth_type=auth_type,
+        account_id=account_id,
+        oauth_provider=oauth_provider,
+        oauth_client_id=oauth_client_id,
+        oauth_tenant=oauth_tenant,
     )
     with fetcher:
         return None
