@@ -36,6 +36,14 @@ class RemoteMessageRef:
     gmail_labels: tuple[str, ...] | None = None
 
 
+@dataclass(frozen=True)
+class RemoteMoveResult:
+    """Server-confirmed destination UID for a MOVE/COPY (RFC 4315 COPYUID)."""
+
+    uidvalidity: int
+    uid: int
+
+
 class CancelToken:
     """A small cancellation boundary shared by synchronous and future UI workers."""
 
@@ -160,8 +168,14 @@ class BaseMailFetcher(ABC):
         """Remove one message from the selected folder or Gmail label."""
 
     @abstractmethod
-    def move_remote_message_to_trash(self, raw_name: str, uid: int) -> None:
-        """Move one message to the provider's remote trash folder."""
+    def move_remote_message_to_trash(self, raw_name: str, uid: int) -> RemoteMoveResult | None:
+        """Move one message to the provider's remote trash folder.
+
+        Returns the destination UID confirmed via COPYUID when the server
+        supports UIDPLUS, or ``None`` when the mapping cannot be confirmed
+        immediately (the next synchronization may still merge it via
+        conservative move estimation).
+        """
 
     @abstractmethod
     def expunge_remote_message(self, raw_name: str, uid: int) -> None:

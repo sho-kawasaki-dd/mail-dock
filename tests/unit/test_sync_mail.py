@@ -891,6 +891,172 @@ def test_missing_uid_is_classified_without_deleting_eml(
     assert source_message["moved_to_folder_id"] is None
 
 
+def test_missing_uid_merges_into_a_fresh_same_cycle_destination() -> None:
+    """A genuine MOVE: the destination is discovered in the same cycle the
+    source disappears in, so it merges into one canonical message instead of
+    creating a duplicate row (D-30's strict, same-cycle evidence)."""
+
+    repo = InMemoryMessageRepository()
+    repo.upsert_account({"id": "account", "provider_type": "imap"})
+    source_id = repo.upsert_folder(
+        {
+            "account_id": "account",
+            "raw_name": "Source",
+            "display_name": "Source",
+            "is_sync_target": 1,
+        }
+    )
+    dest_id = repo.upsert_folder(
+        {
+            "account_id": "account",
+            "raw_name": "Destination",
+            "display_name": "Destination",
+            "is_sync_target": 1,
+        }
+    )
+    raw = _eml(1)
+    ref = RemoteMessageRef(uid=1, size_bytes=len(raw))
+    fetcher = FakeFetcher(
+        folders=[
+            RemoteFolder("Source", "Source", uidvalidity=41),
+            RemoteFolder("Destination", "Destination", uidvalidity=41),
+        ],
+        messages={"Source": [ref]},
+        eml_bytes={("Source", 1): raw},
+    )
+    storage = MemoryStorage()
+    manifest = MemoryManifest()
+
+    sync_account(
+        fetcher,
+        repo,
+        storage,
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+        cancel=CancelToken(),
+    )
+
+    # Simulate an external MOVE between the two syncs: the source UID
+    # disappears and the destination copy is only now discoverable.
+    fetcher.delete_remote_message("Source", 1)
+    fetcher.add_message("Destination", 1, raw)
+    manifest.events.clear()
+
+    sync_account(
+        fetcher,
+        repo,
+        storage,
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+        cancel=CancelToken(),
+    )
+
+    source_message = repo.get_message_by_uid("account", source_id, 41, 1)
+    dest_message = repo.get_message_by_uid("account", dest_id, 41, 1)
+    assert source_message is not None
+    assert dest_message is not None
+    assert source_message["id"] == dest_message["id"]
+    assert source_message["remote_state"] == "moved"
+    assert source_message["moved_to_folder_id"] == dest_id
+    assert dest_message["remote_state"] == "present"
+    event_names = [event["event"] for event in manifest.events]
+    identity_index = event_names.index("message_identity_linked")
+    assert event_names.index("moved") < identity_index
+    assert "message_membership_snapshot" in event_names[identity_index:]
+    # The EML is reused, not duplicated, for the merged canonical message.
+    assert len(storage.raw_by_path) == 1
+
+
+def test_missing_uid_does_not_merge_when_the_destination_folder_scan_failed() -> None:
+    """Even a single, otherwise-matching candidate is not merged when its own
+    folder could not be fully scanned this cycle (D-30's conservative gate)."""
+
+    class FlakyDestinationFetcher(FakeFetcher):
+        fail_destination: bool = False
+
+        def iter_message_refs(
+            self,
+            raw_name: str,
+            *,
+            min_uid: int = 1,
+            max_uid: int | None = None,
+            descending: bool = True,
+            cancel: CancelToken | None = None,
+        ) -> Iterator[RemoteMessageRef]:
+            if raw_name == "Destination" and self.fail_destination:
+                raise PermanentError("simulated folder scan failure")
+            yield from super().iter_message_refs(
+                raw_name,
+                min_uid=min_uid,
+                max_uid=max_uid,
+                descending=descending,
+                cancel=cancel,
+            )
+
+    repo = InMemoryMessageRepository()
+    repo.upsert_account({"id": "account", "provider_type": "imap"})
+    source_id = repo.upsert_folder(
+        {
+            "account_id": "account",
+            "raw_name": "Source",
+            "display_name": "Source",
+            "is_sync_target": 1,
+        }
+    )
+    repo.upsert_folder(
+        {
+            "account_id": "account",
+            "raw_name": "Destination",
+            "display_name": "Destination",
+            "is_sync_target": 1,
+        }
+    )
+    raw = _eml(1)
+    ref = RemoteMessageRef(uid=1, size_bytes=len(raw))
+    fetcher = FlakyDestinationFetcher(
+        folders=[
+            RemoteFolder("Source", "Source", uidvalidity=41),
+            RemoteFolder("Destination", "Destination", uidvalidity=41),
+        ],
+        messages={"Source": [ref], "Destination": [ref]},
+        eml_bytes={("Source", 1): raw, ("Destination", 1): raw},
+    )
+    storage = MemoryStorage()
+    manifest = MemoryManifest()
+
+    # First cycle: both Source and Destination already legitimately hold a
+    # copy of the message (this is not a move, just pre-existing content).
+    sync_account(
+        fetcher,
+        repo,
+        storage,
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+        cancel=CancelToken(),
+    )
+    fetcher.delete_remote_message("Source", 1)
+    fetcher.fail_destination = True
+    manifest.events.clear()
+
+    sync_account(
+        fetcher,
+        repo,
+        storage,
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+        cancel=CancelToken(),
+    )
+
+    source_message = repo.get_message_by_uid("account", source_id, 41, 1)
+    assert source_message is not None
+    assert source_message["remote_state"] == "unknown"
+    assert [event["event"] for event in manifest.events] == ["remote_state_unknown"]
+
+
 def test_missing_gmail_uid_removes_membership_after_snapshot_is_recorded() -> None:
     repo, _folder_id = _repository()
     repo.upsert_account({"id": "account", "provider_type": "imap", "oauth_provider": "google"})

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from mail_dock.domain.errors import PermanentError, TransientError
@@ -12,6 +12,7 @@ from mail_dock.domain.fetcher import (
     CancelToken,
     RemoteFolder,
     RemoteMessageRef,
+    RemoteMoveResult,
 )
 
 
@@ -35,12 +36,14 @@ class FakeFetcher(BaseMailFetcher):
         uidvalidities: Mapping[str, int] | None = None,
         transient_failures: Mapping[tuple[str, int], int] | None = None,
         permanent_failures: Iterable[tuple[str, int]] = (),
+        copyuid_moves: bool = False,
     ) -> None:
         self._folders = {folder.raw_name: folder for folder in folders}
         self._messages: dict[tuple[str, int], FakeMessage] = {}
         self._uidvalidities = dict(uidvalidities or {})
         self._transient_failures = dict(transient_failures or {})
         self._permanent_failures = set(permanent_failures)
+        self._copyuid_moves = copyuid_moves
         self._connected = False
 
         for raw_name, definitions in (messages or {}).items():
@@ -212,8 +215,25 @@ class FakeFetcher(BaseMailFetcher):
         except KeyError as exc:
             raise PermanentError(f"unknown message: {raw_name}:{uid}") from exc
 
-    def move_remote_message_to_trash(self, raw_name: str, uid: int) -> None:
-        self._remove_message(raw_name, uid)
+    def move_remote_message_to_trash(self, raw_name: str, uid: int) -> RemoteMoveResult | None:
+        if not self._copyuid_moves:
+            self._remove_message(raw_name, uid)
+            return None
+        trash_folder = self.find_trash_folder()
+        if trash_folder is None:
+            raise PermanentError("could not identify the remote trash folder")
+        try:
+            message = self._messages.pop((raw_name, uid))
+        except KeyError as exc:
+            raise PermanentError(f"unknown message: {raw_name}:{uid}") from exc
+        dest_uid = max((u for f, u in self._messages if f == trash_folder.raw_name), default=0) + 1
+        dest_uidvalidity = self._uidvalidities.get(
+            trash_folder.raw_name, trash_folder.uidvalidity or 1
+        )
+        self._messages[(trash_folder.raw_name, dest_uid)] = FakeMessage(
+            replace(message.ref, uid=dest_uid), message.raw
+        )
+        return RemoteMoveResult(uidvalidity=dest_uidvalidity, uid=dest_uid)
 
     def expunge_remote_message(self, raw_name: str, uid: int) -> None:
         self._remove_message(raw_name, uid)

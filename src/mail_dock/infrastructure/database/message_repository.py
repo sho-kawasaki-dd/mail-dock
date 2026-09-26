@@ -789,6 +789,151 @@ class SqliteMessageRepository(BaseMessageRepository):
                 (state, moved_to_folder_id, message_id),
             )
 
+    def supports_message_folders(self) -> bool:
+        return self._uses_memberships()
+
+    def find_message_id_by_source_item_key(
+        self, account_id: str, source_item_key: str
+    ) -> Any | None:
+        with self._db_io("find message by source item key"):
+            row = (
+                self._conn()
+                .execute(
+                    "SELECT id FROM messages WHERE account_id = ? AND source_item_key = ?",
+                    (account_id, source_item_key),
+                )
+                .fetchone()
+            )
+        return None if row is None else int(row[0])
+
+    def merge_duplicate_message(
+        self, account_id: str, canonical_message_id: Any, duplicate_message_id: Any
+    ) -> None:
+        """Fold a duplicate canonical row into an existing one, in place.
+
+        Reserved for confirmed remote MOVEs (COPYUID) and conservative
+        external-move estimation; the caller is responsible for verifying
+        the two rows share the same EML content before calling this.
+        """
+
+        if not self._uses_memberships():
+            raise DatabaseError("Duplicate message merging requires the finalized message schema")
+        canonical_id = int(canonical_message_id)
+        duplicate_id = int(duplicate_message_id)
+        if canonical_id == duplicate_id:
+            return
+        with self._db_io("merge duplicate message"):
+            connection = self._conn()
+            canonical = connection.execute(
+                "SELECT file_hash, local_state, relative_path FROM messages WHERE id = ? "
+                "AND account_id = ?",
+                (canonical_id, account_id),
+            ).fetchone()
+            duplicate = connection.execute(
+                "SELECT file_hash, local_state, relative_path FROM messages WHERE id = ? "
+                "AND account_id = ?",
+                (duplicate_id, account_id),
+            ).fetchone()
+            if canonical is None or duplicate is None:
+                raise DatabaseError("Cannot merge a message that no longer exists")
+            canonical_hash, canonical_state, canonical_path = canonical
+            duplicate_hash, duplicate_state, duplicate_path = duplicate
+            if (
+                canonical_hash is not None
+                and duplicate_hash is not None
+                and canonical_hash != duplicate_hash
+            ):
+                raise DatabaseError("Cannot merge messages with different EML hashes")
+            if canonical_path is None and canonical_hash is None:
+                connection.execute(
+                    "UPDATE messages SET file_hash = ?, relative_path = ? WHERE id = ?",
+                    (duplicate_hash, duplicate_path, canonical_id),
+                )
+            if {canonical_state, duplicate_state} & {"active"}:
+                merged_state = "active"
+            elif {canonical_state, duplicate_state} & {"trashed"}:
+                merged_state = "trashed"
+            else:
+                merged_state = "purged"
+            if merged_state != canonical_state:
+                connection.execute(
+                    "UPDATE messages SET local_state = ? WHERE id = ?",
+                    (merged_state, canonical_id),
+                )
+            content_exists = connection.execute(
+                "SELECT EXISTS(SELECT 1 FROM message_contents WHERE message_id = ?)",
+                (canonical_id,),
+            ).fetchone()
+            duplicate_content_exists = connection.execute(
+                "SELECT EXISTS(SELECT 1 FROM message_contents WHERE message_id = ?)",
+                (duplicate_id,),
+            ).fetchone()
+            if not bool(content_exists and content_exists[0]) and bool(
+                duplicate_content_exists and duplicate_content_exists[0]
+            ):
+                connection.execute(
+                    "UPDATE message_contents SET message_id = ? WHERE message_id = ?",
+                    (canonical_id, duplicate_id),
+                )
+            duplicate_source_item_key = connection.execute(
+                "SELECT source_item_key FROM messages WHERE id = ?", (duplicate_id,)
+            ).fetchone()
+            aliases = connection.execute(
+                "SELECT observed_source_item_key, evidence_kind FROM message_identity_aliases "
+                "WHERE message_id = ? AND account_id = ?",
+                (duplicate_id, account_id),
+            ).fetchall()
+            for observed_source_item_key, evidence_kind in aliases:
+                connection.execute(
+                    "INSERT OR IGNORE INTO message_identity_aliases "
+                    "(account_id, observed_source_item_key, message_id, evidence_kind) "
+                    "VALUES (?, ?, ?, ?)",
+                    (account_id, observed_source_item_key, canonical_id, evidence_kind),
+                )
+            if duplicate_source_item_key is not None:
+                connection.execute(
+                    "INSERT OR IGNORE INTO message_identity_aliases "
+                    "(account_id, observed_source_item_key, message_id, evidence_kind) "
+                    "VALUES (?, ?, ?, 'merged_duplicate')",
+                    (account_id, duplicate_source_item_key[0], canonical_id),
+                )
+            connection.execute(
+                "DELETE FROM message_identity_aliases WHERE message_id = ?", (duplicate_id,)
+            )
+            memberships = connection.execute(
+                "SELECT folder_id, uid, uidvalidity, remote_state, moved_to_folder_id, "
+                "imap_flags, flags_seen_at, last_seen_at FROM message_folders "
+                "WHERE message_id = ?",
+                (duplicate_id,),
+            ).fetchall()
+            for membership in memberships:
+                folder_id = membership[0]
+                existing = connection.execute(
+                    "SELECT uid, uidvalidity FROM message_folders "
+                    "WHERE message_id = ? AND folder_id = ?",
+                    (canonical_id, folder_id),
+                ).fetchone()
+                if existing is not None and tuple(existing) != (membership[1], membership[2]):
+                    raise DatabaseError(
+                        "Cannot merge duplicate memberships with conflicting folder UIDs"
+                    )
+                if existing is None:
+                    connection.execute(
+                        "UPDATE message_folders SET message_id = ? "
+                        "WHERE message_id = ? AND folder_id = ?",
+                        (canonical_id, duplicate_id, folder_id),
+                    )
+                else:
+                    connection.execute(
+                        "DELETE FROM message_folders WHERE message_id = ? AND folder_id = ?",
+                        (duplicate_id, folder_id),
+                    )
+            connection.execute(
+                "UPDATE pst_import_items SET message_row_id = ? WHERE message_row_id = ?",
+                (canonical_id, duplicate_id),
+            )
+            connection.execute("DELETE FROM messages WHERE id = ?", (duplicate_id,))
+
     def get_message(self, message_id: Any) -> MessageRecord | None:
         with self._db_io("get message"):
             if self._uses_memberships():

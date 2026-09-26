@@ -15,7 +15,7 @@ from mail_dock.domain.errors import (
     PermanentError,
     RateLimitedError,
 )
-from mail_dock.domain.fetcher import CancelToken, RemoteFolder
+from mail_dock.domain.fetcher import CancelToken, RemoteFolder, RemoteMoveResult
 from mail_dock.domain.ports import AccessToken, BaseAccessTokenProvider, OAuthTokenResponse
 from mail_dock.infrastructure.fetchers.generic_imap import GenericImapFetcher
 from mail_dock.infrastructure.security.oauth2 import OAuth2Client, OAuthAccessTokenProvider
@@ -38,6 +38,7 @@ class FakeImap:
     capability_response: ClassVar[bytes] = b"CAPABILITY IMAP4rev1 MOVE UIDPLUS SPECIAL-USE"
     highest_modseq: ClassVar[int | None] = None
     nomodseq: ClassVar[bool] = False
+    copyuid_response: ClassVar[bytes | None] = None
     commands: list[tuple[str, tuple[object, ...]]]
     login_result: ClassVar[tuple[str, builtins.list[bytes]]] = ("OK", [b"LOGIN completed"])
     authenticate_result: ClassVar[tuple[str, builtins.list[bytes]]] = (
@@ -107,6 +108,10 @@ class FakeImap:
             if self.highest_modseq is None:
                 return "", []
             return "HIGHESTMODSEQ", [str(self.highest_modseq).encode("ascii")]
+        if code == "COPYUID":
+            if self.copyuid_response is None:
+                return code, [str(self.uidvalidity).encode("ascii")]
+            return code, [self.copyuid_response]
         return code, [str(self.uidvalidity).encode("ascii")]
 
     def uid(self, command: str, *args: str) -> tuple[str, builtins.list[object]]:
@@ -161,6 +166,7 @@ def fake_imap(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     FakeImap.capability_response = b"CAPABILITY IMAP4rev1 MOVE UIDPLUS SPECIAL-USE"
     FakeImap.highest_modseq = None
     FakeImap.nomodseq = False
+    FakeImap.copyuid_response = None
     FakeImap.login_result = ("OK", [b"LOGIN completed"])
     FakeImap.authenticate_result = ("OK", [b"AUTHENTICATE completed"])
     FakeImap.auth_challenges = [b"+"]
@@ -301,6 +307,25 @@ def test_delete_uses_move_when_server_supports_it(fake_imap: None) -> None:
     assert not any(command[0] == "STORE" for command in commands)
 
 
+def test_move_to_trash_returns_copyuid_confirmed_destination(fake_imap: None) -> None:
+    FakeImap.copyuid_response = b"5 7 42"
+    fetcher = GenericImapFetcher("imap.example.test", "user", "password")
+    fetcher.connect()
+
+    result = fetcher.move_remote_message_to_trash("INBOX", 7)
+
+    assert result == RemoteMoveResult(uidvalidity=5, uid=42)
+
+
+def test_move_to_trash_returns_none_when_server_has_no_copyuid(fake_imap: None) -> None:
+    fetcher = GenericImapFetcher("imap.example.test", "user", "password")
+    fetcher.connect()
+
+    result = fetcher.move_remote_message_to_trash("INBOX", 7)
+
+    assert result is None
+
+
 def test_gmail_membership_removal_removes_only_the_selected_label(fake_imap: None) -> None:
     fetcher = GenericImapFetcher("imap.example.test", "user", "password", oauth_provider="google")
     fetcher.connect()
@@ -375,6 +400,22 @@ def test_copy_trash_path_uses_uid_expunge(fake_imap: None) -> None:
     assert ("COPY", ("7", "Trash")) in commands
     assert ("STORE", ("7", "+FLAGS.SILENT", r"(\Deleted)")) in commands
     assert ("EXPUNGE", ("7",)) in commands
+
+
+def test_copy_expunge_fallback_still_returns_copyuid(fake_imap: None) -> None:
+    FakeImap.capability_response = b"CAPABILITY IMAP4rev1 UIDPLUS SPECIAL-USE"
+    FakeImap.copyuid_response = b"9 7 100"
+    fetcher = GenericImapFetcher(
+        "imap.example.test",
+        "user",
+        "password",
+        remote_trash_folder="Trash",
+    )
+    fetcher.connect()
+
+    result = fetcher.move_remote_message_to_trash("INBOX", 7)
+
+    assert result == RemoteMoveResult(uidvalidity=9, uid=100)
 
 
 def test_expunge_is_rejected_without_uidplus(fake_imap: None) -> None:

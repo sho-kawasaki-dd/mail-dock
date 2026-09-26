@@ -477,3 +477,149 @@ def test_reindex_restores_gmail_aliases_and_membership_snapshot(tmp_path: Path) 
         assert rebuilt_connection.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
         rebuilt_connection.close()
+
+
+def test_reindex_restores_a_copyuid_confirmed_move_as_one_canonical_message(
+    tmp_path: Path,
+) -> None:
+    """A trash MOVE merged via COPYUID reindexes back to one canonical row
+    with both folder memberships restored, using the same generic
+    identity-link/snapshot path as the Gmail case above (D-34's
+    evidence-kind-agnostic restoration), after ``metadata.db`` is deleted."""
+
+    root = tmp_path / "storage"
+    initialize_root(root)
+    database_path = tmp_path / "metadata.db"
+    storage = EmlStorage(root)
+    message = EmailMessage()
+    message["From"] = "sender@example.test"
+    message["Subject"] = "moved message"
+    message["Message-ID"] = "<moved@example.test>"
+    message.set_content("moved body")
+    stored = storage.save("account", datetime(2026, 1, 2, tzinfo=UTC), message.as_bytes())
+    canonical_key = imap_source_item_key("INBOX", 42, 7)
+    alias_key = imap_source_item_key("Trash", 7, 99)
+    writer = ManifestWriter(root, "account")
+    writer.append(
+        {
+            "event": "account_snapshot",
+            "account_id": "account",
+            "provider_type": "imap",
+            "display_name": "Account",
+            "host": "imap.example.test",
+            "port": 993,
+            "username": "user@example.test",
+            "timestamp": "2026-01-01T00:00:00+00:00",
+        }
+    )
+    for raw_name, uidvalidity in (("INBOX", 42), ("Trash", 7)):
+        writer.append(
+            {
+                "event": "folder_snapshot",
+                "account_id": "account",
+                "folder_raw_name": raw_name,
+                "display_name": raw_name,
+                "uidvalidity": uidvalidity,
+                "delimiter": "/",
+                "is_sync_target": True,
+                "timestamp": "2026-01-01T00:00:00+00:00",
+            }
+        )
+    writer.append(
+        {
+            "event": "fetch",
+            "account_id": "account",
+            "folder_raw_name": "INBOX",
+            "uid": 7,
+            "uidvalidity": 42,
+            "source_item_key": canonical_key,
+            "message_id": "<moved@example.test>",
+            "relative_path": stored.relative_path,
+            "file_hash": stored.file_hash,
+            "size_bytes": stored.size_bytes,
+            "internal_date": "2026-01-02T03:04:05+00:00",
+            "timestamp": "2026-01-02T03:04:05+00:00",
+            "deduplicated": False,
+        }
+    )
+    writer.append(
+        {
+            "event": "fetch",
+            "account_id": "account",
+            "folder_raw_name": "Trash",
+            "uid": 99,
+            "uidvalidity": 7,
+            "source_item_key": canonical_key,
+            "message_id": "<moved@example.test>",
+            "relative_path": stored.relative_path,
+            "file_hash": stored.file_hash,
+            "size_bytes": stored.size_bytes,
+            "internal_date": "2026-01-02T03:04:05+00:00",
+            "timestamp": "2026-01-03T00:00:00+00:00",
+            "deduplicated": True,
+        }
+    )
+    writer.append(
+        {
+            "event": "message_identity_linked",
+            "account_id": "account",
+            "canonical_source_item_key": canonical_key,
+            "alias_source_item_key": alias_key,
+            "evidence_kind": "copyuid",
+            "file_hash": stored.file_hash,
+            "timestamp": "2026-01-03T00:00:01+00:00",
+        }
+    )
+    writer.append(
+        {
+            "event": "message_membership_snapshot",
+            "account_id": "account",
+            "source_item_key": canonical_key,
+            "memberships": [
+                {
+                    "folder_raw_name": "INBOX",
+                    "uid": 7,
+                    "uidvalidity": 42,
+                    "remote_state": "moved",
+                    "moved_to_folder_raw_name": "Trash",
+                    "imap_flags": None,
+                    "flags_seen_at": None,
+                    "last_seen_at": "2026-01-03T00:00:01+00:00",
+                },
+                {
+                    "folder_raw_name": "Trash",
+                    "uid": 99,
+                    "uidvalidity": 7,
+                    "remote_state": "present",
+                    "moved_to_folder_raw_name": None,
+                    "imap_flags": None,
+                    "flags_seen_at": None,
+                    "last_seen_at": "2026-01-03T00:00:01+00:00",
+                },
+            ],
+            "timestamp": "2026-01-03T00:00:01+00:00",
+        }
+    )
+    writer.close()
+
+    result = rebuild_database(database_path, storage, [ManifestReader(root, "account")])
+
+    assert result.message_count == 2
+    connection = connect(database_path)
+    try:
+        assert connection.execute(
+            "SELECT source_item_key FROM messages WHERE account_id = ?", ("account",)
+        ).fetchall() == [(canonical_key,)]
+        assert connection.execute(
+            "SELECT observed_source_item_key FROM message_identity_aliases"
+        ).fetchall() == [(alias_key,)]
+        memberships = dict(
+            connection.execute(
+                "SELECT f.raw_name, mf.remote_state FROM message_folders AS mf "
+                "JOIN folders AS f ON f.id = mf.folder_id ORDER BY f.raw_name"
+            ).fetchall()
+        )
+        assert memberships == {"INBOX": "moved", "Trash": "present"}
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        connection.close()

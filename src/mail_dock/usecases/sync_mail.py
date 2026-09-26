@@ -119,6 +119,19 @@ class _LocalMessage:
     record: MessageRecord
 
 
+@dataclass(frozen=True)
+class _MoveStateEvent:
+    """One deletion/move-detection outcome, staged for the durable write order."""
+
+    message_id: Any
+    folder_id: Any
+    moved_to: Any
+    event: Mapping[str, JSONValue]
+    record: Mapping[str, Any]
+    remove_membership: bool
+    merge_candidate: Mapping[str, Any] | None = None
+
+
 def _now_iso() -> str:
     return to_utc_iso8601(datetime.now(UTC))
 
@@ -263,19 +276,29 @@ def _membership_snapshot_event(
     if remove_folder_id is not None:
         memberships.pop(remove_folder_id, None)
     else:
-        for incoming_record in (record, *additional_records):
-            incoming_folder_id = incoming_record.get("folder_id")
-            incoming = {
-                "folder_id": incoming_folder_id,
-                "uid": incoming_record.get("uid"),
-                "uidvalidity": incoming_record.get("uidvalidity"),
-                "remote_state": incoming_record.get("remote_state", "present"),
-                "moved_to_folder_id": incoming_record.get("moved_to_folder_id"),
-                "imap_flags": incoming_record.get("imap_flags"),
-                "flags_seen_at": incoming_record.get("flags_seen_at"),
-                "last_seen_at": incoming_record.get("last_seen_at"),
-            }
-            memberships[incoming_folder_id] = incoming
+        incoming_folder_id = record.get("folder_id")
+        memberships[incoming_folder_id] = {
+            "folder_id": incoming_folder_id,
+            "uid": record.get("uid"),
+            "uidvalidity": record.get("uidvalidity"),
+            "remote_state": record.get("remote_state", "present"),
+            "moved_to_folder_id": record.get("moved_to_folder_id"),
+            "imap_flags": record.get("imap_flags"),
+            "flags_seen_at": record.get("flags_seen_at"),
+            "last_seen_at": record.get("last_seen_at"),
+        }
+    for incoming_record in additional_records:
+        incoming_folder_id = incoming_record.get("folder_id")
+        memberships[incoming_folder_id] = {
+            "folder_id": incoming_folder_id,
+            "uid": incoming_record.get("uid"),
+            "uidvalidity": incoming_record.get("uidvalidity"),
+            "remote_state": incoming_record.get("remote_state", "present"),
+            "moved_to_folder_id": incoming_record.get("moved_to_folder_id"),
+            "imap_flags": incoming_record.get("imap_flags"),
+            "flags_seen_at": incoming_record.get("flags_seen_at"),
+            "last_seen_at": incoming_record.get("last_seen_at"),
+        }
     serialized = [
         {
             "folder_raw_name": folders.get(folder_id, membership.get("folder_raw_name", "")),
@@ -1147,6 +1170,7 @@ def sync_account(
                 commit_pending(pending)
             raise
 
+    scanned_folder_ids: set[Any] = set()
     for folder in targets:
         try:
             if sync_folder(folder):
@@ -1161,6 +1185,14 @@ def sync_account(
             raise
         except FetchError as error:
             _LOGGER.error("Folder synchronization failed: account=%s error=%s", account_id, error)
+        else:
+            scanned_folder_ids.add(folder["id"])
+
+    # A duplicate is only folded automatically when both the folder that lost
+    # the UID and the folder holding the matching content were both fully
+    # scanned this cycle; anything less certain stays "unknown" (D-30).
+    supports_move_merge = not google_account and repo.supports_message_folders()
+    folder_raw_names_by_id = {folder["id"]: str(folder["raw_name"]) for folder in targets}
 
     # Deletion and move detection deliberately never removes the EML itself.
     for folder in targets:
@@ -1175,9 +1207,7 @@ def sync_account(
             )
             continue
         missing_uids = repo.local_uids(account_id, folder_id, uidvalidity) - remote_uids
-        state_events: list[
-            tuple[Any, Any, Any, Mapping[str, JSONValue], Mapping[str, Any], bool]
-        ] = []
+        state_events: list[_MoveStateEvent] = []
         for uid in sorted(missing_uids):
             local = known_messages.get((folder_id, uidvalidity, uid)) or _get_local_message(
                 repo, account_id, folder_id, uidvalidity, uid
@@ -1197,22 +1227,45 @@ def sync_account(
                     if candidate.get("content_key") == content_key
                     and candidate.get("file_hash") == file_hash
                 )
-            if google_account or (len(candidates) == 0 and isinstance(file_hash, str)):
-                state = "deleted"
+            merge_candidate: Mapping[str, Any] | None = None
+            can_merge = (
+                supports_move_merge
+                and isinstance(file_hash, str)
+                and folder_id in scanned_folder_ids
+            )
+            if can_merge:
+                # Require the candidate to be a fetch freshly observed this
+                # cycle, not content that already existed at that location
+                # before now (which would signal a COPY, not a MOVE).
+                fully_scanned_candidates = tuple(
+                    candidate
+                    for candidate in candidates
+                    if candidate.get("folder_id") in scanned_folder_ids
+                    and (
+                        candidate.get("folder_id"),
+                        candidate.get("uidvalidity"),
+                        candidate.get("uid"),
+                    )
+                    in known_messages
+                )
+                if len(fully_scanned_candidates) == 1:
+                    merge_candidate = fully_scanned_candidates[0]
+            moved_to_raw_name: str | None = None
+            if merge_candidate is not None:
+                moved_to = merge_candidate.get("folder_id")
+                moved_to_raw_name = folder_raw_names_by_id.get(moved_to)
+                event_name = "moved"
+            elif google_account or (len(candidates) == 0 and isinstance(file_hash, str)):
                 moved_to = None
-                moved_to_raw_name = None
                 event_name = "delete_detected"
             else:
-                state = "unknown"
                 moved_to = None
-                moved_to_raw_name = None
                 event_name = "remote_state_unknown"
             source_item_key = str(
                 local.record.get("source_item_key")
                 or _source_item_key(folder_raw_name, uidvalidity, uid)
             )
             remove_membership = google_account
-            del state
             event: dict[str, JSONValue] = {
                 "event": event_name,
                 "account_id": account_id,
@@ -1228,33 +1281,61 @@ def sync_account(
             if moved_to_raw_name is not None:
                 event["moved_to_folder_raw_name"] = moved_to_raw_name
             state_events.append(
-                (local.message_id, folder_id, moved_to, event, local.record, remove_membership)
+                _MoveStateEvent(
+                    message_id=local.message_id,
+                    folder_id=folder_id,
+                    moved_to=moved_to,
+                    event=event,
+                    record=local.record,
+                    remove_membership=remove_membership,
+                    merge_candidate=merge_candidate,
+                )
             )
         if state_events:
-            for _, _, _, state_event, _, _ in state_events:
-                manifest.append(state_event)
-            for _, folder_id, _, _state_event, record, remove_membership in state_events:
-                if remove_membership:
+            for item in state_events:
+                manifest.append(item.event)
+            for item in state_events:
+                if item.remove_membership:
                     manifest.append(
                         _membership_snapshot_event(
                             repo,
                             account_id,
-                            record,
-                            remove_folder_id=folder_id,
+                            item.record,
+                            remove_folder_id=item.folder_id,
+                        )
+                    )
+                elif item.merge_candidate is not None:
+                    canonical_key = str(item.record["source_item_key"])
+                    alias_key = str(item.merge_candidate.get("source_item_key"))
+                    merge_file_hash = item.merge_candidate.get("file_hash")
+                    manifest.append(
+                        {
+                            "event": "message_identity_linked",
+                            "account_id": account_id,
+                            "canonical_source_item_key": canonical_key,
+                            "alias_source_item_key": alias_key,
+                            "evidence_kind": "file_hash_move",
+                            "file_hash": merge_file_hash,
+                            "timestamp": _now_iso(),
+                        }
+                    )
+                    manifest.append(
+                        _membership_snapshot_event(
+                            repo,
+                            account_id,
+                            {
+                                **item.record,
+                                "remote_state": "moved",
+                                "moved_to_folder_id": item.moved_to,
+                            },
+                            additional_records=(item.merge_candidate,),
                         )
                     )
             manifest.flush_and_sync()
             repo.begin_batch()
-            for (
-                message_id,
-                source_folder_id,
-                moved_to,
-                state_event,
-                _record,
-                remove_membership,
-            ) in state_events:
-                if remove_membership:
-                    state_source_key = state_event.get("source_item_key")
+            for item in state_events:
+                if item.remove_membership:
+                    state_source_key = item.event.get("source_item_key")
                     if not isinstance(state_source_key, str) or not state_source_key:
                         raise StorageError("Gmail membership removal has no canonical source key")
                     remaining = [
@@ -1262,17 +1343,24 @@ def sync_account(
                         for membership in repo.list_message_memberships(
                             account_id, state_source_key
                         )
-                        if membership.get("folder_id") != source_folder_id
+                        if membership.get("folder_id") != item.folder_id
                     ]
-                    repo.replace_message_memberships(message_id, remaining)
+                    repo.replace_message_memberships(item.message_id, remaining)
                     continue
-                event_name = str(state_event["event"])
+                if item.merge_candidate is not None:
+                    duplicate_id = item.merge_candidate.get("id")
+                    repo.merge_duplicate_message(account_id, item.message_id, duplicate_id)
+                    repo.update_remote_state(
+                        item.message_id, "moved", item.moved_to, item.folder_id
+                    )
+                    continue
+                event_name = str(item.event["event"])
                 state = {
                     "delete_detected": "deleted",
                     "remote_state_unknown": "unknown",
                     "moved": "moved",
                 }[event_name]
-                repo.update_remote_state(message_id, state, moved_to, source_folder_id)
+                repo.update_remote_state(item.message_id, state, item.moved_to, item.folder_id)
             repo.commit_batch()
 
     return SyncResult(

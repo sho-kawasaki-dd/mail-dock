@@ -140,6 +140,21 @@ class BaseMessageRepository(ABC):
     ) -> None: ...
 
     @abstractmethod
+    def supports_message_folders(self) -> bool:
+        """Return whether the finalized per-folder membership schema is active."""
+
+    @abstractmethod
+    def find_message_id_by_source_item_key(
+        self, account_id: str, source_item_key: str
+    ) -> Any | None: ...
+
+    @abstractmethod
+    def merge_duplicate_message(
+        self, account_id: str, canonical_message_id: Any, duplicate_message_id: Any
+    ) -> None:
+        """Fold a duplicate canonical row (and its memberships) into another one."""
+
+    @abstractmethod
     def get_message(self, message_id: Any) -> MessageRecord | None: ...
 
     @abstractmethod

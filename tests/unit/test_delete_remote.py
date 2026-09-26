@@ -12,7 +12,8 @@ from mail_dock.domain.errors import (
     StorageError,
     TransientError,
 )
-from mail_dock.domain.fetcher import RemoteFolder
+from mail_dock.domain.fetcher import RemoteFolder, RemoteMoveResult
+from mail_dock.domain.message_identity import imap_source_item_key
 from mail_dock.domain.messages import StoredEml
 from mail_dock.domain.ports import BaseEmlStorage, BaseManifestReader, BaseManifestWriter, JSONValue
 from mail_dock.domain.storage_state import StorageState, StorageStateMachine
@@ -138,11 +139,11 @@ class DeleteFetcher(FakeFetcher):
     def supports_uid_expunge(self) -> bool:
         return self.uidplus
 
-    def move_remote_message_to_trash(self, raw_name: str, uid: int) -> None:
+    def move_remote_message_to_trash(self, raw_name: str, uid: int) -> RemoteMoveResult | None:
         self.calls.append((raw_name, uid, "trash"))
         if self.transient:
             raise TransientError("connection dropped after command was sent")
-        super().move_remote_message_to_trash(raw_name, uid)
+        return super().move_remote_message_to_trash(raw_name, uid)
 
     def expunge_remote_message(self, raw_name: str, uid: int) -> None:
         self.calls.append((raw_name, uid, "expunge"))
@@ -650,3 +651,146 @@ def test_reconcile_leaves_uncertain_delete_unresolved_when_uid_still_exists() ->
 
     assert repository.messages[1]["remote_state"] == "present"
     assert [event["event"] for event in manifest.events] == ["remote_delete_intent"]
+
+
+def _folder_id(repository: InMemoryMessageRepository, raw_name: str) -> Any:
+    return next(
+        folder["id"] for folder in repository.folders.values() if folder["raw_name"] == raw_name
+    )
+
+
+class CopyUidFetcher(DeleteFetcher):
+    """A trash-mode fetcher that confirms the destination UID via COPYUID."""
+
+    def __init__(self, *, dest_uid: int = 99, dest_uidvalidity: int = 7) -> None:
+        super().__init__()
+        self._dest_uid = dest_uid
+        self._dest_uidvalidity = dest_uidvalidity
+
+    def move_remote_message_to_trash(self, raw_name: str, uid: int) -> RemoteMoveResult:
+        self.calls.append((raw_name, uid, "trash"))
+        return RemoteMoveResult(uidvalidity=self._dest_uidvalidity, uid=self._dest_uid)
+
+
+def test_execute_trash_mode_links_a_confirmed_move_without_a_duplicate_row() -> None:
+    repository = InMemoryMessageRepository()
+    raw = b"message"
+    path = _record(repository, message_id=1, raw=raw)
+    repository.upsert_folder({"account_id": "account", "raw_name": "Trash", "uidvalidity": 7})
+    storage = MemoryStorage({path: raw})
+    state = StorageStateMachine(StorageState.ATTACHED)
+    plan = dry_run(repository, storage, message_ids=(1,), storage_state=state)
+    manifest = MemoryManifest()
+    fetcher = CopyUidFetcher()
+
+    result = execute(
+        fetcher,
+        repository,
+        storage,
+        manifest,
+        plan=plan,
+        mode="trash",
+        storage_state=state,
+    )
+
+    assert result.completed_ids == (1,)
+    assert [event["event"] for event in manifest.events] == [
+        "remote_delete_intent",
+        "remote_delete_completed",
+        "message_identity_linked",
+        "message_membership_snapshot",
+    ]
+    linked = manifest.events[2]
+    alias_key = imap_source_item_key("Trash", 7, 99)
+    assert linked["canonical_source_item_key"] == "42:1"
+    assert linked["alias_source_item_key"] == alias_key
+    assert linked["evidence_kind"] == "copyuid"
+    memberships = {
+        membership["folder_id"]: membership for membership in repository.message_memberships[1]
+    }
+    trash_id = _folder_id(repository, "Trash")
+    inbox_id = _folder_id(repository, "INBOX")
+    assert memberships[trash_id]["remote_state"] == "present"
+    assert memberships[inbox_id]["remote_state"] == "moved"
+    assert memberships[inbox_id]["moved_to_folder_id"] == trash_id
+    assert repository.message_identity_aliases[("account", alias_key)]["message_id"] == 1
+
+
+def test_execute_trash_mode_merges_into_an_existing_duplicate_row() -> None:
+    repository = InMemoryMessageRepository()
+    raw = b"message"
+    path = _record(repository, message_id=1, raw=raw)
+    repository.upsert_folder({"account_id": "account", "raw_name": "Trash", "uidvalidity": 7})
+    trash_id = _folder_id(repository, "Trash")
+    duplicate_key = imap_source_item_key("Trash", 7, 99)
+    repository.add_message(
+        {
+            "id": 2,
+            "account_id": "account",
+            "folder_id": trash_id,
+            "uid": 99,
+            "uidvalidity": 7,
+            "source_item_key": duplicate_key,
+            "remote_state": "present",
+            "local_state": "active",
+            "relative_path": path,
+            "file_hash": hashlib.sha256(raw).hexdigest(),
+            "size_bytes": len(raw),
+            "subject": "Subject 1",
+        },
+        {"subject": "Subject 1", "body_text": "body"},
+    )
+    storage = MemoryStorage({path: raw})
+    state = StorageStateMachine(StorageState.ATTACHED)
+    plan = dry_run(repository, storage, message_ids=(1,), storage_state=state)
+    manifest = MemoryManifest()
+    fetcher = CopyUidFetcher()
+
+    result = execute(
+        fetcher,
+        repository,
+        storage,
+        manifest,
+        plan=plan,
+        mode="trash",
+        storage_state=state,
+    )
+
+    assert result.completed_ids == (1,)
+    assert 2 not in repository.messages
+    memberships = {
+        membership["folder_id"]: membership for membership in repository.message_memberships[1]
+    }
+    assert memberships[trash_id]["remote_state"] == "present"
+    inbox_id = _folder_id(repository, "INBOX")
+    assert memberships[inbox_id]["remote_state"] == "moved"
+    assert memberships[inbox_id]["moved_to_folder_id"] == trash_id
+
+
+def test_execute_trash_mode_falls_back_when_copyuid_is_unavailable() -> None:
+    repository = InMemoryMessageRepository()
+    raw = b"message"
+    path = _record(repository, message_id=1, raw=raw)
+    storage = MemoryStorage({path: raw})
+    state = StorageStateMachine(StorageState.ATTACHED)
+    plan = dry_run(repository, storage, message_ids=(1,), storage_state=state)
+    manifest = MemoryManifest()
+    fetcher = DeleteFetcher()
+    fetcher.add_message("INBOX", 1, raw)
+
+    result = execute(
+        fetcher,
+        repository,
+        storage,
+        manifest,
+        plan=plan,
+        mode="trash",
+        storage_state=state,
+    )
+
+    assert result.completed_ids == (1,)
+    assert [event["event"] for event in manifest.events] == [
+        "remote_delete_intent",
+        "remote_delete_completed",
+    ]
+    assert repository.messages[1]["remote_state"] == "deleted"

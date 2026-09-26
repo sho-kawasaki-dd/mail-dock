@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol, cast
@@ -16,7 +16,8 @@ from mail_dock.domain.errors import (
     StorageError,
     TransientError,
 )
-from mail_dock.domain.fetcher import BaseMailFetcher
+from mail_dock.domain.fetcher import BaseMailFetcher, RemoteMoveResult
+from mail_dock.domain.message_identity import imap_source_item_key
 from mail_dock.domain.ports import BaseEmlStorage, BaseManifestReader, BaseManifestWriter, JSONValue
 from mail_dock.domain.repository import BaseMessageRepository, MessageRecord
 from mail_dock.usecases.account_guards import ensure_imap_account, ensure_imap_message
@@ -324,6 +325,8 @@ def _commit_completed_state(
     mode: str,
     timestamp: str,
     record: MessageRecord,
+    *,
+    merge_plan: _TrashMergePlan | None = None,
 ) -> None:
     repo.begin_batch()
     if mode == "remove_membership":
@@ -336,10 +339,156 @@ def _commit_completed_state(
             if membership.get("folder_id") != candidate.folder_id
         ]
         repo.replace_message_memberships(candidate.message_id, remaining)
+    elif merge_plan is not None:
+        if merge_plan.duplicate_message_id is not None:
+            repo.merge_duplicate_message(
+                candidate.account_id, candidate.message_id, merge_plan.duplicate_message_id
+            )
+            repo.update_remote_state(
+                candidate.message_id, "moved", merge_plan.trash_folder_id, candidate.folder_id
+            )
+        elif merge_plan.new_membership is not None:
+            repo.replace_message_memberships(candidate.message_id, merge_plan.new_membership)
+            repo.add_message_identity_alias(
+                candidate.account_id,
+                merge_plan.alias_source_item_key,
+                candidate.message_id,
+                "copyuid",
+            )
     else:
         repo.update_remote_state(candidate.message_id, "deleted", folder_id=candidate.folder_id)
     repo.record_audit(_audit_entry(candidate, mode, timestamp))
     repo.commit_batch()
+
+
+@dataclass(frozen=True)
+class _TrashMergePlan:
+    """Durable facts needed to fold a COPYUID-confirmed MOVE into one row."""
+
+    alias_source_item_key: str
+    duplicate_message_id: Any | None
+    identity_event: Mapping[str, JSONValue]
+    snapshot_event: Mapping[str, JSONValue]
+    new_membership: list[MessageRecord] | None
+    trash_folder_id: Any
+
+
+def _build_trash_merge_plan(
+    repo: BaseMessageRepository,
+    candidate: DeleteCandidate,
+    record: MessageRecord,
+    trash_folder_raw_name: str,
+    move_result: RemoteMoveResult,
+) -> _TrashMergePlan | None:
+    """Compute the identity link needed when our own MOVE lands on a known UID.
+
+    Returns ``None`` when the destination folder is not tracked locally,
+    leaving conservative move estimation on the next sync as the fallback.
+    """
+
+    canonical_key = record.get("source_item_key")
+    if not isinstance(canonical_key, str) or not canonical_key:
+        return None
+    alias_key = imap_source_item_key(
+        trash_folder_raw_name, move_result.uidvalidity, move_result.uid
+    )
+    if alias_key == canonical_key:
+        return None
+    trash_folder_id = next(
+        (
+            folder.get("id")
+            for folder in repo.list_folders(candidate.account_id)
+            if folder.get("raw_name") == trash_folder_raw_name
+        ),
+        None,
+    )
+    if trash_folder_id is None:
+        return None
+    timestamp = _timestamp()
+    identity_event: dict[str, JSONValue] = {
+        "event": "message_identity_linked",
+        "account_id": candidate.account_id,
+        "canonical_source_item_key": canonical_key,
+        "alias_source_item_key": alias_key,
+        "evidence_kind": "copyuid",
+        "file_hash": candidate.file_hash,
+        "timestamp": timestamp,
+    }
+    remaining = [
+        {
+            **membership,
+            "remote_state": (
+                "moved"
+                if membership.get("folder_id") == candidate.folder_id
+                else membership.get("remote_state", "present")
+            ),
+            "moved_to_folder_id": (
+                trash_folder_id
+                if membership.get("folder_id") == candidate.folder_id
+                else membership.get("moved_to_folder_id")
+            ),
+            "moved_to_folder_raw_name": (
+                trash_folder_raw_name
+                if membership.get("folder_id") == candidate.folder_id
+                else membership.get("moved_to_folder_raw_name")
+            ),
+        }
+        for membership in repo.list_message_memberships(candidate.account_id, canonical_key)
+    ]
+    new_trash_membership: dict[str, Any] = {
+        "folder_id": trash_folder_id,
+        "folder_raw_name": trash_folder_raw_name,
+        "uid": move_result.uid,
+        "uidvalidity": move_result.uidvalidity,
+        "remote_state": "present",
+        "moved_to_folder_id": None,
+        "imap_flags": None,
+        "flags_seen_at": None,
+        "last_seen_at": timestamp,
+    }
+    snapshot_memberships = [
+        {
+            "folder_raw_name": membership.get("folder_raw_name"),
+            "uid": membership.get("uid"),
+            "uidvalidity": membership.get("uidvalidity"),
+            "remote_state": membership.get("remote_state", "present"),
+            "moved_to_folder_raw_name": membership.get("moved_to_folder_raw_name"),
+            "imap_flags": membership.get("imap_flags"),
+            "flags_seen_at": membership.get("flags_seen_at"),
+            "last_seen_at": membership.get("last_seen_at"),
+        }
+        for membership in remaining
+    ]
+    snapshot_memberships.append(
+        {
+            "folder_raw_name": trash_folder_raw_name,
+            "uid": move_result.uid,
+            "uidvalidity": move_result.uidvalidity,
+            "remote_state": "present",
+            "moved_to_folder_raw_name": None,
+            "imap_flags": None,
+            "flags_seen_at": None,
+            "last_seen_at": timestamp,
+        }
+    )
+    snapshot_event: dict[str, JSONValue] = {
+        "event": "message_membership_snapshot",
+        "account_id": candidate.account_id,
+        "source_item_key": canonical_key,
+        "memberships": cast(list[JSONValue], snapshot_memberships),
+        "timestamp": timestamp,
+    }
+    duplicate_message_id = repo.find_message_id_by_source_item_key(candidate.account_id, alias_key)
+    return _TrashMergePlan(
+        alias_source_item_key=alias_key,
+        duplicate_message_id=duplicate_message_id,
+        identity_event=identity_event,
+        snapshot_event=snapshot_event,
+        new_membership=(
+            None if duplicate_message_id is not None else [*remaining, new_trash_membership]
+        ),
+        trash_folder_id=trash_folder_id,
+    )
 
 
 def _membership_snapshot_event(
@@ -429,27 +578,23 @@ def execute(
 
     if len(items) > delete_batch_limit:
         raise ValueError(f"delete plan exceeds the batch limit ({delete_batch_limit})")
+    google_account_ids = {
+        account.get("id")
+        for account in repo.list_accounts()
+        if account.get("oauth_provider") == "google"
+    }
     if mode == "expunge":
         account_ids = {candidate.account_id for candidate in items}
-        google_account_ids = {
-            account.get("id")
-            for account in repo.list_accounts()
-            if account.get("oauth_provider") == "google"
-        }
         if account_ids & google_account_ids:
             raise PermanentError("Gmail accounts do not support remote expunge")
     if mode == "remove_membership":
         account_ids = {candidate.account_id for candidate in items}
-        google_account_ids = {
-            account.get("id")
-            for account in repo.list_accounts()
-            if account.get("oauth_provider") == "google"
-        }
         if not account_ids <= google_account_ids:
             raise PermanentError("remote membership removal is only supported for Gmail labels")
     if mode == "expunge" and not fetcher.supports_uid_expunge():
         raise PermanentError("UID EXPUNGE is not supported by this IMAP server")
-    if mode == "trash" and items and fetcher.find_trash_folder() is None:
+    trash_folder = fetcher.find_trash_folder() if mode == "trash" and items else None
+    if mode == "trash" and items and trash_folder is None:
         raise PermanentError("could not identify the remote trash folder")
 
     completed_ids: list[Any] = []
@@ -485,9 +630,12 @@ def execute(
         timestamp = _timestamp()
         manifest.append(_event("remote_delete_intent", candidate, mode, timestamp))
         manifest.flush_and_sync()
+        move_result: RemoteMoveResult | None = None
         try:
             if mode == "trash":
-                fetcher.move_remote_message_to_trash(candidate.folder_raw_name, candidate.uid)
+                move_result = fetcher.move_remote_message_to_trash(
+                    candidate.folder_raw_name, candidate.uid
+                )
             elif mode == "expunge":
                 fetcher.expunge_remote_message(candidate.folder_raw_name, candidate.uid)
             else:
@@ -503,12 +651,29 @@ def execute(
             errors.append((candidate.message_id, str(error)))
             continue
 
+        merge_plan: _TrashMergePlan | None = None
+        if (
+            mode == "trash"
+            and move_result is not None
+            and trash_folder is not None
+            and candidate.account_id not in google_account_ids
+            and repo.supports_message_folders()
+        ):
+            merge_plan = _build_trash_merge_plan(
+                repo, candidate, record, trash_folder.raw_name, move_result
+            )
+
         completed_timestamp = _timestamp()
         manifest.append(_event("remote_delete_completed", candidate, mode, completed_timestamp))
         if mode == "remove_membership":
             manifest.append(_membership_snapshot_event(repo, candidate, record))
+        elif merge_plan is not None:
+            manifest.append(merge_plan.identity_event)
+            manifest.append(merge_plan.snapshot_event)
         manifest.flush_and_sync()
-        _commit_completed_state(repo, candidate, mode, completed_timestamp, record)
+        _commit_completed_state(
+            repo, candidate, mode, completed_timestamp, record, merge_plan=merge_plan
+        )
         completed_ids.append(candidate.message_id)
         total_size_bytes += candidate.size_bytes
 

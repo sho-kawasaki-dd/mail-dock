@@ -325,14 +325,16 @@ class InMemoryMessageRepository(BaseMessageRepository):
     def get_message_by_uid(
         self, account_id: str, folder_id: Any, uidvalidity: int, uid: int
     ) -> MessageRecord | None:
-        for item in self.messages.values():
-            if (
-                item.get("account_id") == account_id
-                and item.get("folder_id") == folder_id
-                and item.get("uidvalidity") == uidvalidity
-                and item.get("uid") == uid
-            ):
-                return item
+        for message_id, item in self.messages.items():
+            if item.get("account_id") != account_id:
+                continue
+            for membership in self._memberships_for(message_id):
+                if (
+                    membership.get("folder_id") == folder_id
+                    and membership.get("uidvalidity") == uidvalidity
+                    and membership.get("uid") == uid
+                ):
+                    return {**item, **membership, "id": message_id}
         return None
 
     def find_move_candidates(
@@ -359,11 +361,106 @@ class InMemoryMessageRepository(BaseMessageRepository):
         moved_to_folder_id: Any = None,
         folder_id: Any | None = None,
     ) -> None:
-        item = self.messages[int(message_id)]
+        key = int(message_id)
+        item = self.messages[key]
+        memberships = self.message_memberships.get(key)
+        if memberships is not None:
+            for membership in memberships:
+                if folder_id is not None and membership.get("folder_id") != folder_id:
+                    continue
+                membership["remote_state"] = state
+                membership["moved_to_folder_id"] = moved_to_folder_id
+            return
         if folder_id is not None and item.get("folder_id") != folder_id:
             return
         item["remote_state"] = state
         item["moved_to_folder_id"] = moved_to_folder_id
+
+    def supports_message_folders(self) -> bool:
+        return True
+
+    def find_message_id_by_source_item_key(
+        self, account_id: str, source_item_key: str
+    ) -> Any | None:
+        return next(
+            (
+                message_id
+                for message_id, item in self.messages.items()
+                if item.get("account_id") == account_id
+                and item.get("source_item_key") == source_item_key
+            ),
+            None,
+        )
+
+    def _memberships_for(self, message_id: int) -> list[dict[str, Any]]:
+        explicit = self.message_memberships.get(message_id)
+        if explicit is not None:
+            return [self._copy(item) for item in explicit]
+        message = self.messages[message_id]
+        return [
+            {
+                key: message.get(key)
+                for key in (
+                    "folder_id",
+                    "folder_raw_name",
+                    "uid",
+                    "uidvalidity",
+                    "remote_state",
+                    "moved_to_folder_id",
+                    "imap_flags",
+                    "flags_seen_at",
+                    "last_seen_at",
+                )
+            }
+        ]
+
+    def merge_duplicate_message(
+        self, account_id: str, canonical_message_id: Any, duplicate_message_id: Any
+    ) -> None:
+        canonical_id = int(canonical_message_id)
+        duplicate_id = int(duplicate_message_id)
+        if canonical_id == duplicate_id:
+            return
+        canonical = self.messages[canonical_id]
+        duplicate = self.messages[duplicate_id]
+        canonical_hash = canonical.get("file_hash")
+        duplicate_hash = duplicate.get("file_hash")
+        if (
+            canonical_hash is not None
+            and duplicate_hash is not None
+            and canonical_hash != duplicate_hash
+        ):
+            raise DatabaseError("Cannot merge messages with different EML hashes")
+        if canonical.get("relative_path") is None and duplicate.get("relative_path") is not None:
+            canonical["relative_path"] = duplicate["relative_path"]
+            canonical["file_hash"] = duplicate_hash
+        states = {canonical.get("local_state"), duplicate.get("local_state")}
+        canonical["local_state"] = (
+            "active" if "active" in states else "trashed" if "trashed" in states else "purged"
+        )
+        if canonical_id not in self.contents and duplicate_id in self.contents:
+            self.contents[canonical_id] = self.contents[duplicate_id]
+        self.contents.pop(duplicate_id, None)
+        existing_folder_ids = {
+            membership.get("folder_id") for membership in self._memberships_for(canonical_id)
+        }
+        merged_memberships = self._memberships_for(canonical_id) + [
+            membership
+            for membership in self._memberships_for(duplicate_id)
+            if membership.get("folder_id") not in existing_folder_ids
+        ]
+        self.replace_message_memberships(canonical_id, merged_memberships)
+        for key, alias in list(self.message_identity_aliases.items()):
+            if alias["message_id"] == duplicate_id:
+                self.message_identity_aliases[key] = {**alias, "message_id": canonical_id}
+        duplicate_key = duplicate.get("source_item_key")
+        if isinstance(duplicate_key, str):
+            self.message_identity_aliases[(account_id, duplicate_key)] = {
+                "message_id": canonical_id,
+                "evidence_kind": "merged_duplicate",
+            }
+        self.messages.pop(duplicate_id, None)
+        self.message_memberships.pop(duplicate_id, None)
 
     def get_message(self, message_id: Any) -> MessageRecord | None:
         item = self.messages.get(int(message_id))

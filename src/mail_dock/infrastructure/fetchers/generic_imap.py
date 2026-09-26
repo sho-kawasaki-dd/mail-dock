@@ -26,6 +26,7 @@ from mail_dock.domain.fetcher import (
     CancelToken,
     RemoteFolder,
     RemoteMessageRef,
+    RemoteMoveResult,
 )
 from mail_dock.domain.ports import BaseAccessTokenProvider
 from mail_dock.infrastructure.fetchers.imap_common import (
@@ -39,6 +40,7 @@ _FETCH_CHUNK_SIZE = 500
 _UIDVALIDITY_PATTERN = re.compile(r"\bUIDVALIDITY\s+(\d+)", re.IGNORECASE)
 _HIGHEST_MODSEQ_PATTERN = re.compile(r"\bHIGHESTMODSEQ\s+(\d+)", re.IGNORECASE)
 _NOMODSEQ_PATTERN = re.compile(r"\bNOMODSEQ\b", re.IGNORECASE)
+_COPYUID_PATTERN = re.compile(r"^\s*(\d+)\s+(\S+)\s+(\S+)")
 _TRASH_CANDIDATES = (
     "Trash",
     "ゴミ箱",
@@ -463,22 +465,25 @@ class GenericImapFetcher(BaseMailFetcher):
         self._select_folder_for_delete(raw_name)
         self._uid_command("STORE", str(uid), "-X-GM-LABELS.SILENT", f'("{raw_name}")')
 
-    def move_remote_message_to_trash(self, raw_name: str, uid: int) -> None:
+    def move_remote_message_to_trash(self, raw_name: str, uid: int) -> RemoteMoveResult | None:
         """Move one message to trash without using a folder-wide EXPUNGE."""
 
         self._select_folder_for_delete(raw_name)
         trash_folder = self.find_trash_folder()
         if trash_folder is None:
             raise PermanentError("could not identify the remote trash folder")
+        connection = self._require_connection()
         if "MOVE" in self._capabilities:
             self._uid_command("MOVE", str(uid), trash_folder.raw_name)
-            return
+            return self._copyuid_from_response(connection)
         if not self.supports_uid_expunge():
             raise PermanentError(
                 "UID EXPUNGE is required when MOVE is not supported by this IMAP server"
             )
         self._uid_command("COPY", str(uid), trash_folder.raw_name)
+        move_result = self._copyuid_from_response(connection)
         self._expunge_selected_uid(uid)
+        return move_result
 
     def expunge_remote_message(self, raw_name: str, uid: int) -> None:
         """Permanently remove one message through UID EXPUNGE."""
@@ -493,6 +498,27 @@ class GenericImapFetcher(BaseMailFetcher):
             raise PermanentError("UID EXPUNGE is not supported by this IMAP server")
         self._uid_command("STORE", str(uid), "+FLAGS.SILENT", r"(\Deleted)")
         self._uid_command("EXPUNGE", str(uid))
+
+    def _copyuid_from_response(self, connection: imaplib.IMAP4) -> RemoteMoveResult | None:
+        """Read the ``[COPYUID uidvalidity src dest]`` code left by the last command.
+
+        ``imaplib`` records bracketed response codes for any completed
+        command, tagged or not, so this must be read immediately after the
+        MOVE/COPY it belongs to and before any other command is issued.
+        """
+
+        _response_type, response_data = connection.response("COPYUID")
+        for item in self._response_items(response_data):
+            if item is None:
+                continue
+            match = _COPYUID_PATTERN.match(self._response_text(item))
+            if match is None:
+                continue
+            dest_match = re.search(r"\d+", match.group(3))
+            if dest_match is None:
+                continue
+            return RemoteMoveResult(uidvalidity=int(match.group(1)), uid=int(dest_match.group()))
+        return None
 
     def _build_ssl_context(self) -> ssl.SSLContext:
         context = self._ssl_context or ssl.create_default_context()
