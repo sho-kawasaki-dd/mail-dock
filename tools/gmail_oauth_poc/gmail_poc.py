@@ -133,7 +133,9 @@ def _run_authorization_step(client_id: str) -> tuple[str, str, str]:
     print(f"[G-2] Redirect URI for this run: {redirect_uri}")
     print("[G-2] Opening the default browser for Google sign-in/consent...")
     if not webbrowser.open(auth_url):
-        print(f"[G-2] Could not launch a browser automatically. Open this URL manually:\n{auth_url}")
+        print(
+            f"[G-2] Could not launch a browser automatically. Open this URL manually:\n{auth_url}"
+        )
 
     def _stop_after_timeout() -> None:
         server.server_close()
@@ -182,7 +184,9 @@ def _exchange_code_for_tokens(
         raise SystemExit(f"[G-2] token exchange failed ({error.code}): {detail}") from error
 
 
-def _refresh_access_token(*, client_id: str, client_secret: str, refresh_token: str) -> dict[str, object]:
+def _refresh_access_token(
+    *, client_id: str, client_secret: str, refresh_token: str
+) -> dict[str, object]:
     """Run the mandatory immediate refresh check (D-25): exercise
     grant_type=refresh_token now, not only after the 7-day expiry window."""
 

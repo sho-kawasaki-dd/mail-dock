@@ -50,6 +50,10 @@ def test_oauth_account_and_gmail_metadata_round_trip(
             "oauth_provider": "google",
             "oauth_client_id": "client-id",
             "oauth_tenant": None,
+            "password": "db-password-sentinel",
+            "client_secret": "db-client-secret-sentinel",
+            "refresh_token": "db-refresh-token-sentinel",
+            "access_token": "db-access-token-sentinel",
         }
     )
     repository.begin_batch()
@@ -71,6 +75,23 @@ def test_oauth_account_and_gmail_metadata_round_trip(
     assert db_conn.execute(
         "SELECT gmail_msgid, gmail_thrid, gmail_labels FROM messages"
     ).fetchone() == ("123456789", "987654321", "[]")
+    account_columns = {
+        str(row[1]) for row in db_conn.execute("PRAGMA table_info(accounts)").fetchall()
+    }
+    assert not account_columns.intersection(
+        {"password", "client_secret", "refresh_token", "access_token"}
+    )
+    account_row = db_conn.execute("SELECT * FROM accounts WHERE id = ?", ("account",)).fetchone()
+    assert account_row is not None
+    assert not any(
+        secret in account_row
+        for secret in (
+            "db-password-sentinel",
+            "db-client-secret-sentinel",
+            "db-refresh-token-sentinel",
+            "db-access-token-sentinel",
+        )
+    )
 
 
 def test_normalize_account_provider_type_rejects_unknown_account(

@@ -321,14 +321,14 @@
 
 ### **Group L: 5.2a テスト**
 
-- [ ] `infrastructure/security/oauth2.py` の単体テスト（PKCE生成・`state`検証・ループバックサーバー・トークン交換・リフレッシュ・失効処理）をローカルHTTPスタブで実施する
-- [ ] `GenericImapFetcher` のXOAUTH2認証分岐・トークン事前リフレッシュの単体テストをFakeフェッチャー相当のスタブで実施する
-- [ ] XOAUTH2の正常系・エラーチャレンジ後の`NO`・コールバック複数回呼び出しを固定する単体テストを追加する
-- [ ] refresh tokenのローテーション（新値あり/なし/keyring保存失敗）と、許可されていないエンドポイントへトークンを送信しないことをテストする
-- [ ] 5.2aの時点でDB削除後のreindexにより `gmail_msgid` / `gmail_thrid` / `gmail_labels` が復元されることをテストする
-- [ ] 秘密情報がDB・`config.json`・ログ・マニフェストへ出力されないことを固定するテストを追加する
-- [ ] `delete_remote.py` のGmailアカウントに対する `expunge` 拒否テストを追加する
-- [ ] 可能であれば実Gmailアカウントでの結合テスト（`pst`マーカーと同様に通常CIでは除外し、手動実行専用のマーカーを新設する）を追加する
+- [x] `infrastructure/security/oauth2.py` の単体テスト（PKCE生成・`state`検証・ループバックサーバー・トークン交換・リフレッシュ・失効処理）をローカルHTTPスタブで実施する
+- [x] `GenericImapFetcher` のXOAUTH2認証分岐・トークン事前リフレッシュの単体テストをFakeフェッチャー相当のスタブで実施する
+- [x] XOAUTH2の正常系・エラーチャレンジ後の`NO`・コールバック複数回呼び出しを固定する単体テストを追加する
+- [x] refresh tokenのローテーション（新値あり/なし/keyring保存失敗）と、許可されていないエンドポイントへトークンを送信しないことをテストする
+- [x] 5.2aの時点でDB削除後のreindexにより `gmail_msgid` / `gmail_thrid` / `gmail_labels` が復元されることをテストする
+- [x] 秘密情報がDB・`config.json`・ログ・マニフェストへ出力されないことを固定するテストを追加する
+- [x] `delete_remote.py` のGmailアカウントに対する `expunge` 拒否テストを追加する
+- [ ] 可能であれば実Gmailアカウントでの結合テスト（`pst`マーカーと同様に通常CIでは除外し、手動実行専用のマーカーを新設する）。実アカウントの認証情報を利用できないため今回は未追加
 
 ### **Group M: 5.2b Gmailラベル対応（`message_folders`）**
 

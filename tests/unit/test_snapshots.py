@@ -87,9 +87,9 @@ def test_account_snapshot_includes_oauth_settings_but_no_secrets() -> None:
         "oauth_provider": "google",
         "oauth_client_id": "public-client-id",
         "oauth_tenant": None,
-        "client_secret": "must-not-persist",
-        "refresh_token": "must-not-persist",
-        "access_token": "must-not-persist",
+        "client_secret": "client-secret-sentinel",
+        "refresh_token": "refresh-token-sentinel",
+        "access_token": "access-token-sentinel",
     }
 
     assert record_account_snapshot(manifest, manifest, account)
@@ -101,6 +101,14 @@ def test_account_snapshot_includes_oauth_settings_but_no_secrets() -> None:
     assert "client_secret" not in snapshot
     assert "refresh_token" not in snapshot
     assert "access_token" not in snapshot
+    assert all(
+        secret not in repr(snapshot)
+        for secret in (
+            "client-secret-sentinel",
+            "refresh-token-sentinel",
+            "access-token-sentinel",
+        )
+    )
 
 
 def test_account_snapshot_skips_unchanged_state_and_records_changes() -> None:
@@ -221,11 +229,14 @@ def test_reconcile_account_snapshots_records_legacy_state_before_db_update() -> 
     manifest = MemoryManifest()
     manifests = {"account": manifest}
 
-    assert reconcile_account_snapshots(
-        repository,
-        lambda account_id: manifests[account_id],
-        lambda account_id: manifests[account_id],
-    ) == 1
+    assert (
+        reconcile_account_snapshots(
+            repository,
+            lambda account_id: manifests[account_id],
+            lambda account_id: manifests[account_id],
+        )
+        == 1
+    )
 
     assert repository.list_accounts()[0]["provider_type"] == "imap"
     snapshot = [event for event in manifest.events if event["event"] == "account_snapshot"][-1]
@@ -248,9 +259,12 @@ def test_reconcile_account_snapshots_retries_when_provider_already_normalized() 
     )
     manifest = MemoryManifest()
 
-    assert reconcile_account_snapshots(
-        repository, lambda _account_id: manifest, lambda _account_id: manifest
-    ) == 0
+    assert (
+        reconcile_account_snapshots(
+            repository, lambda _account_id: manifest, lambda _account_id: manifest
+        )
+        == 0
+    )
     snapshot = [event for event in manifest.events if event["event"] == "account_snapshot"][-1]
     assert snapshot["tls_mode"] == "implicit"
     assert snapshot["ca_cert_path"] is None

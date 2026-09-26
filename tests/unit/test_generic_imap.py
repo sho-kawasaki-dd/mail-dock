@@ -16,8 +16,10 @@ from mail_dock.domain.errors import (
     RateLimitedError,
 )
 from mail_dock.domain.fetcher import CancelToken, RemoteFolder
-from mail_dock.domain.ports import AccessToken, BaseAccessTokenProvider
+from mail_dock.domain.ports import AccessToken, BaseAccessTokenProvider, OAuthTokenResponse
 from mail_dock.infrastructure.fetchers.generic_imap import GenericImapFetcher
+from mail_dock.infrastructure.security.oauth2 import OAuth2Client, OAuthAccessTokenProvider
+from mail_dock.infrastructure.security.session_store import SessionCredentialStore
 
 
 class FakeSocket:
@@ -438,6 +440,61 @@ def test_google_fetch_requests_gmail_extensions(fake_imap: None) -> None:
         command for command in FakeImap.instances[0].commands if command[0] == "FETCH"
     )
     assert "X-GM-MSGID X-GM-THRID X-GM-LABELS" in str(fetch_command[1][1])
+
+
+def test_xoauth2_connect_refreshes_and_uses_the_access_token(
+    fake_imap: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    credentials = SessionCredentialStore()
+    credentials.set_secret("account", "refresh_token", "stored-refresh-token")
+    client = OAuth2Client()
+    refresh_calls: list[tuple[str, str, str]] = []
+
+    def refresh_access_token(
+        provider: str,
+        client_id: str,
+        refresh_token: str,
+        client_secret: str | None = None,
+        *,
+        tenant: str | None = None,
+        on_refresh_token_rotated: object = None,
+    ) -> OAuthTokenResponse:
+        del client_secret, tenant
+        refresh_calls.append((provider, client_id, refresh_token))
+        if callable(on_refresh_token_rotated):
+            on_refresh_token_rotated("rotated-refresh-token")
+        return OAuthTokenResponse(
+            "fresh-access-token",
+            datetime.now(UTC) + timedelta(hours=1),
+        )
+
+    monkeypatch.setattr(client, "refresh_access_token", refresh_access_token)
+    token_provider = OAuthAccessTokenProvider(
+        client,
+        credentials,
+        account_id="account",
+        provider="google",
+        client_id="client-id",
+    )
+    fetcher = GenericImapFetcher(
+        "imap.example.test",
+        "user@example.test",
+        None,
+        auth_type="xoauth2",
+        account_id="account",
+        oauth_provider="google",
+        oauth_client_id="client-id",
+        access_token_provider=token_provider,
+    )
+
+    fetcher.connect()
+
+    auth_command = next(
+        command for command in FakeImap.instances[0].commands if command[0] == "AUTHENTICATE"
+    )
+    assert refresh_calls == [("google", "client-id", "stored-refresh-token")]
+    assert credentials.get_secret("account", "refresh_token") == "rotated-refresh-token"
+    assert auth_command[1][1] == b"user=user@example.test\x01auth=Bearer fresh-access-token\x01\x01"
 
 
 def test_xoauth2_sends_initial_response_and_empty_continuation(fake_imap: None) -> None:

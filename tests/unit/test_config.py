@@ -173,6 +173,16 @@ def test_save_and_load_round_trip_phase_3_5_fields(config_path: Path) -> None:
     assert config_module.load() == config
 
 
+def test_config_does_not_serialize_oauth_credential_fields(config_path: Path) -> None:
+    config_module.save(config_module.AppConfig())
+
+    saved_config = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert not {"password", "client_secret", "refresh_token", "access_token"}.intersection(
+        saved_config
+    )
+
+
 def test_failed_replace_keeps_previous_file(
     config_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
