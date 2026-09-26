@@ -47,6 +47,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
+from typing import cast
 
 _AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 _TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
@@ -54,6 +55,13 @@ _IMAP_HOST = "imap.gmail.com"
 _IMAP_PORT = 993
 _SCOPE = "https://mail.google.com/"
 _CALLBACK_TIMEOUT_SECONDS = 120.0
+
+
+def _decode_json_object(response_body: bytes) -> dict[str, object]:
+    payload = json.loads(response_body.decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise SystemExit("Token endpoint returned a non-object JSON response.")
+    return cast(dict[str, object], payload)
 
 
 class _CallbackResult:
@@ -168,7 +176,7 @@ def _exchange_code_for_tokens(
     request = urllib.request.Request(_TOKEN_ENDPOINT, data=body, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=30.0) as response:  # noqa: S310 (fixed HTTPS endpoint)
-            return json.loads(response.read().decode("utf-8"))
+            return _decode_json_object(response.read())
     except urllib.error.HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace")
         raise SystemExit(f"[G-2] token exchange failed ({error.code}): {detail}") from error
@@ -189,7 +197,7 @@ def _refresh_access_token(*, client_id: str, client_secret: str, refresh_token: 
     request = urllib.request.Request(_TOKEN_ENDPOINT, data=body, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=30.0) as response:  # noqa: S310 (fixed HTTPS endpoint)
-            return json.loads(response.read().decode("utf-8"))
+            return _decode_json_object(response.read())
     except urllib.error.HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace")
         raise SystemExit(f"[G-4] refresh_token exchange failed ({error.code}): {detail}") from error
@@ -227,7 +235,8 @@ def _verify_imap_xoauth2(email: str, access_token: str) -> None:
             print(f"       {text}")
 
         imap.select("INBOX", readonly=True)
-        status, search_data = imap.uid("SEARCH", None, "ALL")
+        # imaplib omits None from the wire, but its types only allow str arguments.
+        status, search_data = imap.uid("SEARCH", None, "ALL")  # type: ignore[arg-type]
         uids = search_data[0].split() if search_data and search_data[0] else []
         if not uids:
             print("[G-3] INBOX has no messages to FETCH; X-GM-* could not be sampled.")
