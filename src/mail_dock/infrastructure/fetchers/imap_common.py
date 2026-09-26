@@ -23,6 +23,7 @@ from mail_dock.domain.errors import (
     AuthenticationError,
     MailDockError,
     PermanentError,
+    RateLimitedError,
     TransientError,
 )
 from mail_dock.domain.fetcher import RemoteFolder, RemoteMessageRef
@@ -33,6 +34,13 @@ _UID_PATTERN = re.compile(r"\bUID\s+(\d+)", re.IGNORECASE)
 _SIZE_PATTERN = re.compile(r"\bRFC822\.SIZE\s+(\d+)", re.IGNORECASE)
 _DATE_PATTERN = re.compile(r'\bINTERNALDATE\s+["\']([^"\']+)["\']', re.IGNORECASE)
 _FLAGS_PATTERN = re.compile(r"\bFLAGS\s*\(([^)]*)\)", re.IGNORECASE)
+_GMAIL_MSGID_PATTERN = re.compile(r"\bX-GM-MSGID\s+(\d+)", re.IGNORECASE)
+_GMAIL_THRID_PATTERN = re.compile(r"\bX-GM-THRID\s+(\d+)", re.IGNORECASE)
+_GMAIL_LABELS_PATTERN = re.compile(r"\bX-GM-LABELS\s*\(([^)]*)\)", re.IGNORECASE)
+_IMAP_STRING_PATTERN = re.compile(r'"((?:\\.|[^"\\])*)"|([^\s()]+)')
+_GMAIL_RATE_LIMIT_PATTERN = re.compile(
+    r"\[(?:THROTTLED|OVERQUOTA|LIMIT)\]|TOO MANY SIMULTANEOUS CONNECTIONS", re.IGNORECASE
+)
 
 type ImapResponse = bytes | str
 type FetchResponse = bytes | tuple[bytes, bytes] | list[object]
@@ -162,6 +170,22 @@ def parse_fetch_response(response: FetchResponse) -> RemoteMessageRef:
     size_match = _SIZE_PATTERN.search(metadata_text)
     flags_match = _FLAGS_PATTERN.search(metadata_text)
     flags = tuple(flags_match.group(1).split()) if flags_match else ()
+    gmail_msgid_match = _GMAIL_MSGID_PATTERN.search(metadata_text)
+    gmail_thrid_match = _GMAIL_THRID_PATTERN.search(metadata_text)
+    gmail_labels_match = _GMAIL_LABELS_PATTERN.search(metadata_text)
+    gmail_labels: tuple[str, ...] | None = None
+    if gmail_labels_match is not None:
+        try:
+            gmail_labels = tuple(
+                decode_modified_utf7(
+                    re.sub(r"\\(.)", r"\1", match.group(1))
+                    if match.group(1) is not None
+                    else match.group(2)
+                )
+                for match in _IMAP_STRING_PATTERN.finditer(gmail_labels_match.group(1))
+            )
+        except ValueError as error:
+            raise PermanentError("IMAP FETCH response has invalid Gmail label encoding") from error
     message_id = _message_id_from_headers(literal)
     return RemoteMessageRef(
         uid=int(uid_match.group(1)),
@@ -169,6 +193,9 @@ def parse_fetch_response(response: FetchResponse) -> RemoteMessageRef:
         internal_date=internal_date,
         size_bytes=int(size_match.group(1)) if size_match else None,
         flags=flags,
+        gmail_msgid=(str(int(gmail_msgid_match.group(1))) if gmail_msgid_match else None),
+        gmail_thrid=(str(int(gmail_thrid_match.group(1))) if gmail_thrid_match else None),
+        gmail_labels=gmail_labels,
     )
 
 
@@ -192,9 +219,10 @@ def wrap_imap_errors(operation: str = "IMAP operation") -> Iterator[None]:
     except imaplib.IMAP4.error as error:
         message = _exception_text(error)
         upper_message = message.upper()
+        if is_gmail_rate_limit_response(message):
+            raise RateLimitedError(f"{operation}: provider rate limit reached") from error
         if any(
-            marker in upper_message
-            for marker in ("AUTHENTICATIONFAILED", "AUTHENTICATION", "SASL")
+            marker in upper_message for marker in ("AUTHENTICATIONFAILED", "AUTHENTICATION", "SASL")
         ):
             raise AuthenticationError(f"{operation}: authentication failed") from error
         if "STARTTLS" in upper_message:
@@ -214,6 +242,12 @@ def wrap_imap_errors(operation: str = "IMAP operation") -> Iterator[None]:
         if isinstance(error, (PermissionError, FileNotFoundError)):
             raise PermanentError(f"{operation}: local I/O failure") from error
         raise TransientError(f"{operation}: operating-system I/O failure") from error
+
+
+def is_gmail_rate_limit_response(message: str) -> bool:
+    """Return whether an IMAP response signals a provider rate limit."""
+
+    return _GMAIL_RATE_LIMIT_PATTERN.search(message) is not None
 
 
 def _response_text(response: ImapResponse) -> str:

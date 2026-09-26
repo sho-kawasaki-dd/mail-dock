@@ -342,6 +342,15 @@ def execute(
 
     if len(items) > delete_batch_limit:
         raise ValueError(f"delete plan exceeds the batch limit ({delete_batch_limit})")
+    if mode == "expunge":
+        account_ids = {candidate.account_id for candidate in items}
+        google_account_ids = {
+            account.get("id")
+            for account in repo.list_accounts()
+            if account.get("oauth_provider") == "google"
+        }
+        if account_ids & google_account_ids:
+            raise PermanentError("Gmail accounts do not support remote expunge")
     if mode == "expunge" and not fetcher.supports_uid_expunge():
         raise PermanentError("UID EXPUNGE is not supported by this IMAP server")
     if mode == "trash" and items and fetcher.find_trash_folder() is None:

@@ -29,7 +29,14 @@ from mail_dock.domain.errors import (
     TransientError,
 )
 from mail_dock.domain.fetcher import CancelToken
-from mail_dock.domain.ports import BaseOAuthClient, OAuthAuthorizationRequest, OAuthTokenResponse
+from mail_dock.domain.ports import (
+    AccessToken,
+    BaseAccessTokenProvider,
+    BaseCredentialStore,
+    BaseOAuthClient,
+    OAuthAuthorizationRequest,
+    OAuthTokenResponse,
+)
 
 _CALLBACK_POLL_SECONDS = 0.2
 _TOKEN_REQUEST_TIMEOUT_SECONDS = 30
@@ -358,6 +365,58 @@ class OAuth2Client(BaseOAuthClient):
         )
 
 
+class OAuthAccessTokenProvider(BaseAccessTokenProvider):
+    """Refresh and cache one account's access token in process memory only."""
+
+    def __init__(
+        self,
+        oauth_client: BaseOAuthClient,
+        credential_store: BaseCredentialStore,
+        *,
+        account_id: str,
+        provider: str,
+        client_id: str,
+        tenant: str | None = None,
+    ) -> None:
+        if not account_id or not provider or not client_id:
+            raise ConfigError("OAuth account configuration is incomplete")
+        self._oauth_client = oauth_client
+        self._credential_store = credential_store
+        self._account_id = account_id
+        self._provider = provider
+        self._client_id = client_id
+        self._tenant = tenant
+        self._access_token: AccessToken | None = None
+
+    def get_access_token(self, account_id: str) -> AccessToken:
+        """Return a token valid beyond the 120-second connection margin."""
+
+        if account_id != self._account_id:
+            raise ConfigError("OAuth token provider was used for a different account")
+        now = datetime.now(UTC)
+        if self._access_token is not None and self._access_token.expires_at > now + timedelta(
+            seconds=120
+        ):
+            return self._access_token
+
+        refresh_token = self._credential_store.get_secret(account_id, "refresh_token")
+        if not refresh_token:
+            raise AuthenticationError("OAuth account requires reauthorization")
+        client_secret = self._credential_store.get_secret(account_id, "client_secret")
+        response = self._oauth_client.refresh_access_token(
+            self._provider,
+            self._client_id,
+            refresh_token,
+            client_secret,
+            tenant=self._tenant,
+            on_refresh_token_rotated=lambda value: self._credential_store.set_secret(
+                account_id, "refresh_token", value
+            ),
+        )
+        self._access_token = AccessToken(response.access_token, response.expires_at)
+        return self._access_token
+
+
 def _provider(provider: str, tenant: str | None) -> _Provider:
     if provider == "google":
         if tenant is not None:
@@ -413,4 +472,4 @@ def _validate_endpoint(url: str, allowed_hosts: frozenset[str]) -> None:
         raise ConfigError("OAuth endpoint is not an approved HTTPS endpoint")
 
 
-__all__ = ["OAuth2Client"]
+__all__ = ["OAuth2Client", "OAuthAccessTokenProvider"]

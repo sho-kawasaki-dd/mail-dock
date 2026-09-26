@@ -78,6 +78,46 @@ def test_register_account_keeps_password_out_of_repository() -> None:
     assert "password" not in repository.list_accounts()[0]
 
 
+def test_register_oauth_account_does_not_require_or_store_password() -> None:
+    repository = InMemoryMessageRepository()
+    credentials = FakeCredentialStore()
+
+    register_account(
+        repository,
+        credentials,
+        account_id="user@gmail.com",
+        host="imap.gmail.com",
+        port=993,
+        username="user@gmail.com",
+        display_name="Gmail",
+        auth_type="xoauth2",
+        oauth_provider="google",
+        oauth_client_id="desktop-client-id",
+    )
+
+    account = repository.list_accounts()[0]
+    assert account["auth_type"] == "xoauth2"
+    assert account["oauth_provider"] == "google"
+    assert account["oauth_client_id"] == "desktop-client-id"
+    assert credentials.secrets == {}
+
+
+def test_register_oauth_account_requires_supported_provider_and_client_id() -> None:
+    with pytest.raises(ValueError, match="supported provider and client ID"):
+        register_account(
+            InMemoryMessageRepository(),
+            FakeCredentialStore(),
+            account_id="user@gmail.com",
+            host="imap.gmail.com",
+            port=993,
+            username="user@gmail.com",
+            display_name=None,
+            auth_type="xoauth2",
+            oauth_provider="attacker",
+            oauth_client_id="client-id",
+        )
+
+
 @pytest.mark.parametrize("account_id", ["", ".", "../account", "CON", "user:"])
 def test_register_account_rejects_unsafe_account_id(account_id: str) -> None:
     repository = InMemoryMessageRepository()
@@ -169,6 +209,41 @@ def test_update_account_keeps_existing_password_when_blank() -> None:
     account = repository.list_accounts()[0]
     assert account["display_name"] == "\u4ed5\u4e8b"
     assert account["id"] == "user@example.com"
+
+
+def test_update_account_supports_oauth_without_password() -> None:
+    repository = InMemoryMessageRepository()
+    credentials = FakeCredentialStore()
+    register_account(
+        repository,
+        credentials,
+        account_id="account",
+        host="imap.example.com",
+        port=993,
+        username="user@example.com",
+        password="secret",
+        display_name=None,
+    )
+
+    update_account(
+        repository,
+        credentials,
+        account_id="account",
+        host="imap.gmail.com",
+        port=993,
+        username="user@gmail.com",
+        password=None,
+        display_name="Gmail",
+        is_enabled=True,
+        auth_type="xoauth2",
+        oauth_provider="google",
+        oauth_client_id="desktop-client-id",
+    )
+
+    account = repository.list_accounts()[0]
+    assert account["auth_type"] == "xoauth2"
+    assert account["oauth_provider"] == "google"
+    assert account["oauth_client_id"] == "desktop-client-id"
 
 
 def test_update_account_replaces_password_when_supplied() -> None:

@@ -21,8 +21,9 @@ from mail_dock.domain.errors import (
     TransientError,
 )
 from mail_dock.domain.fetcher import CancelToken
-from mail_dock.domain.ports import OAuthTokenResponse
-from mail_dock.infrastructure.security.oauth2 import OAuth2Client
+from mail_dock.domain.ports import AccessToken, OAuthTokenResponse
+from mail_dock.infrastructure.security.oauth2 import OAuth2Client, OAuthAccessTokenProvider
+from mail_dock.infrastructure.security.session_store import SessionCredentialStore
 
 
 def test_google_authorization_uses_pkce_and_fixed_provider_endpoints() -> None:
@@ -271,6 +272,73 @@ def test_refresh_token_rotation_storage_failure_is_not_suppressed(
         client.refresh_access_token(
             "google", "client-id", "old-secret", on_refresh_token_rotated=fail_to_save
         )
+
+
+def test_access_token_provider_refreshes_with_margin_and_caches_in_memory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = SessionCredentialStore()
+    store.set_secret("account", "refresh_token", "refresh-secret")
+    store.set_secret("account", "client_secret", "client-secret")
+    client = OAuth2Client()
+    calls: list[tuple[str, str, str, str | None]] = []
+
+    def refresh(
+        provider: str,
+        client_id: str,
+        refresh_token: str,
+        client_secret: str | None = None,
+        *,
+        tenant: str | None = None,
+        on_refresh_token_rotated: object = None,
+    ) -> OAuthTokenResponse:
+        del tenant
+        calls.append((provider, client_id, refresh_token, client_secret))
+        callback = on_refresh_token_rotated
+        if callable(callback):
+            callback("rotated-refresh-secret")
+        return OAuthTokenResponse(
+            f"access-{len(calls)}",
+            datetime.now(UTC) + timedelta(hours=1),
+        )
+
+    monkeypatch.setattr(client, "refresh_access_token", refresh)
+    provider = OAuthAccessTokenProvider(
+        client,
+        store,
+        account_id="account",
+        provider="google",
+        client_id="client-id",
+    )
+
+    first = provider.get_access_token("account")
+    second = provider.get_access_token("account")
+    provider._access_token = AccessToken("near-expiry", datetime.now(UTC) + timedelta(seconds=60))
+    third = provider.get_access_token("account")
+
+    assert first.value == "access-1"
+    assert second is first
+    assert third.value == "access-2"
+    assert len(calls) == 2
+    assert calls == [
+        ("google", "client-id", "refresh-secret", "client-secret"),
+        ("google", "client-id", "rotated-refresh-secret", "client-secret"),
+    ]
+    assert store.get_secret("account", "refresh_token") == "rotated-refresh-secret"
+    assert "access-1" not in repr(first)
+
+
+def test_access_token_provider_requires_a_refresh_token() -> None:
+    provider = OAuthAccessTokenProvider(
+        OAuth2Client(),
+        SessionCredentialStore(),
+        account_id="account",
+        provider="google",
+        client_id="client-id",
+    )
+
+    with pytest.raises(AuthenticationError, match="reauthorization"):
+        provider.get_access_token("account")
 
 
 def test_rotated_refresh_token_requires_a_persistence_callback(

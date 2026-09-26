@@ -7,6 +7,7 @@ from mail_dock.domain.errors import (
     OperationCancelledError,
     OversizeError,
     PermanentError,
+    RateLimitedError,
     TransientError,
     UidValidityChanged,
 )
@@ -37,6 +38,28 @@ def test_with_retry_uses_exponential_backoff_and_retries_transient_errors(
 
     assert calls == 4
     assert delays == [1.0, 2.0, 4.0]
+
+
+def test_rate_limit_uses_longer_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    delays: list[float] = []
+    calls = 0
+
+    def record_wait(_event: Event, timeout: float) -> bool:
+        delays.append(timeout)
+        return False
+
+    def operation() -> str:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RateLimitedError("rate limited")
+        return "ok"
+
+    monkeypatch.setattr("mail_dock.usecases.retry.random.uniform", lambda lower, upper: 0.0)
+    monkeypatch.setattr(Event, "wait", record_wait)
+
+    assert with_retry(operation, rate_limit_base_delay=30.0) == "ok"
+    assert delays == [30.0]
 
 
 @pytest.mark.parametrize(

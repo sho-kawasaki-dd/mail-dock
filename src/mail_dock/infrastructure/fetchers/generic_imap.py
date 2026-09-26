@@ -14,14 +14,22 @@ from collections.abc import Iterable, Iterator
 from contextlib import suppress
 from typing import Literal, cast
 
-from mail_dock.domain.errors import AuthenticationError, ConfigError, PermanentError, TransientError
+from mail_dock.domain.errors import (
+    AuthenticationError,
+    ConfigError,
+    PermanentError,
+    RateLimitedError,
+    TransientError,
+)
 from mail_dock.domain.fetcher import (
     BaseMailFetcher,
     CancelToken,
     RemoteFolder,
     RemoteMessageRef,
 )
+from mail_dock.domain.ports import BaseAccessTokenProvider
 from mail_dock.infrastructure.fetchers.imap_common import (
+    is_gmail_rate_limit_response,
     parse_fetch_response,
     parse_list_responses,
     wrap_imap_errors,
@@ -57,7 +65,7 @@ class GenericImapFetcher(BaseMailFetcher):
         self,
         host: str,
         username: str,
-        password: str,
+        password: str | None,
         *,
         port: int = 993,
         timeout: float = 30.0,
@@ -66,6 +74,12 @@ class GenericImapFetcher(BaseMailFetcher):
         ssl_context: ssl.SSLContext | None = None,
         tls_mode: Literal["implicit", "starttls"] = "implicit",
         ca_cert_path: str | None = None,
+        auth_type: Literal["password", "xoauth2"] = "password",
+        account_id: str | None = None,
+        oauth_provider: str | None = None,
+        oauth_client_id: str | None = None,
+        oauth_tenant: str | None = None,
+        access_token_provider: BaseAccessTokenProvider | None = None,
     ) -> None:
         if not host:
             raise ValueError("host must not be empty")
@@ -79,10 +93,27 @@ class GenericImapFetcher(BaseMailFetcher):
             raise ValueError("read_timeout must be positive")
         if tls_mode not in {"implicit", "starttls"}:
             raise ValueError("tls_mode must be 'implicit' or 'starttls'")
+        if auth_type not in {"password", "xoauth2"}:
+            raise ValueError("auth_type must be 'password' or 'xoauth2'")
+        if auth_type == "password" and password is None:
+            raise ValueError("password is required for password authentication")
+        if auth_type == "xoauth2" and (
+            not account_id
+            or not oauth_provider
+            or not oauth_client_id
+            or access_token_provider is None
+        ):
+            raise ValueError("XOAUTH2 requires account and provider configuration")
         self._host = host
         self._port = port
         self._username = username
         self._password = password
+        self._auth_type = auth_type
+        self._account_id = account_id
+        self._oauth_provider = oauth_provider
+        self._oauth_client_id = oauth_client_id
+        self._oauth_tenant = oauth_tenant
+        self._access_token_provider = access_token_provider
         self._timeout = timeout
         self._read_timeout = read_timeout if read_timeout is not None else timeout
         self._remote_trash_folder = remote_trash_folder
@@ -137,7 +168,9 @@ class GenericImapFetcher(BaseMailFetcher):
                 self._ensure_ok(capability_status, capability_data, "CAPABILITY")
                 pre_auth_capabilities = self._parse_capabilities(capability_data)
                 self._capabilities = pre_auth_capabilities
-                if "LOGINDISABLED" in pre_auth_capabilities:
+                if self._auth_type == "xoauth2":
+                    self._authenticate_xoauth2(connection)
+                elif "LOGINDISABLED" in pre_auth_capabilities:
                     credentials = f"\x00{self._username}\x00{self._password}".encode()
 
                     def plain_callback(_challenge: bytes) -> bytes:
@@ -146,7 +179,10 @@ class GenericImapFetcher(BaseMailFetcher):
                     auth_status, auth_data = connection.authenticate("PLAIN", plain_callback)
                     self._ensure_ok(auth_status, auth_data, "AUTHENTICATE PLAIN")
                 else:
-                    login_status, login_data = connection.login(self._username, self._password)
+                    password = self._password
+                    if password is None:
+                        raise ConfigError("password is required for password authentication")
+                    login_status, login_data = connection.login(self._username, password)
                     self._ensure_ok(login_status, login_data, "LOGIN")
                 # Some servers only advertise extensions such as MOVE,
                 # CONDSTORE, UIDPLUS, and SPECIAL-USE once authenticated, so
@@ -163,6 +199,25 @@ class GenericImapFetcher(BaseMailFetcher):
                 with suppress(Exception):
                     connection.logout()
             raise
+
+    def _authenticate_xoauth2(self, connection: imaplib.IMAP4) -> None:
+        if self._access_token_provider is None or self._account_id is None:
+            raise ConfigError("XOAUTH2 token provider is not configured")
+        access_token = self._access_token_provider.get_access_token(self._account_id)
+        initial_response = (
+            f"user={self._username}\x01auth=Bearer {access_token.value}\x01\x01".encode()
+        )
+        response_sent = False
+
+        def xoauth2_callback(_challenge: bytes) -> bytes:
+            nonlocal response_sent
+            if response_sent:
+                return b""
+            response_sent = True
+            return initial_response
+
+        auth_status, auth_data = connection.authenticate("XOAUTH2", xoauth2_callback)
+        self._ensure_ok(auth_status, auth_data, "AUTHENTICATE XOAUTH2")
 
     def disconnect(self) -> None:
         """Close the single live connection, if one is open."""
@@ -284,10 +339,16 @@ class GenericImapFetcher(BaseMailFetcher):
         for offset in range(0, len(uids), _FETCH_CHUNK_SIZE):
             token.raise_if_cancelled()
             chunk = uids[offset : offset + _FETCH_CHUNK_SIZE]
+            gmail_fields = (
+                " X-GM-MSGID X-GM-THRID X-GM-LABELS"
+                if self._auth_type == "xoauth2" and self._oauth_provider == "google"
+                else ""
+            )
             data = self._uid_command(
                 "FETCH",
                 ",".join(str(uid) for uid in chunk),
-                "(UID INTERNALDATE RFC822.SIZE FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])",
+                "(UID INTERNALDATE RFC822.SIZE FLAGS"
+                f"{gmail_fields} BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])",
             )
             for item in data:
                 if not isinstance(item, tuple) or len(item) != 2:
@@ -315,10 +376,15 @@ class GenericImapFetcher(BaseMailFetcher):
         for offset in range(0, len(requested_uids), _FETCH_CHUNK_SIZE):
             token.raise_if_cancelled()
             chunk = requested_uids[offset : offset + _FETCH_CHUNK_SIZE]
+            gmail_fields = (
+                " X-GM-LABELS"
+                if self._auth_type == "xoauth2" and self._oauth_provider == "google"
+                else ""
+            )
             data = self._uid_command(
                 "FETCH",
                 ",".join(str(uid) for uid in chunk),
-                "(UID FLAGS)",
+                f"(UID FLAGS{gmail_fields})",
             )
             for item in data:
                 if not isinstance(item, (bytes, tuple, list)):
@@ -446,9 +512,10 @@ class GenericImapFetcher(BaseMailFetcher):
         )
         message = f"{operation} failed: {response_text[:200]}"
         upper_message = message.upper()
+        if is_gmail_rate_limit_response(message):
+            raise RateLimitedError("IMAP provider rate limit reached")
         if any(
-            marker in upper_message
-            for marker in ("AUTHENTICATIONFAILED", "AUTHENTICATION", "SASL")
+            marker in upper_message for marker in ("AUTHENTICATIONFAILED", "AUTHENTICATION", "SASL")
         ):
             raise AuthenticationError(message)
         if operation == "STARTTLS":

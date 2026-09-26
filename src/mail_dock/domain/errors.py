@@ -87,6 +87,10 @@ class TransientError(FetchError):
     """Raised for a temporary remote failure that may succeed on retry."""
 
 
+class RateLimitedError(TransientError):
+    """Raised when the remote provider asks the client to slow down."""
+
+
 class PermanentError(FetchError):
     """Raised for a remote failure that cannot be fixed by retrying."""
 

@@ -357,6 +357,42 @@ def test_initial_sync_processes_newest_first_and_initializes_cursors() -> None:
     assert manifest.sync_count >= 1
 
 
+def test_sync_persists_gmail_metadata_in_manifest_and_repository() -> None:
+    repo, _folder_id = _repository()
+    ref = RemoteMessageRef(
+        uid=1,
+        internal_date=datetime(2026, 7, 30, tzinfo=UTC),
+        size_bytes=len(_eml(1)),
+        gmail_msgid="123456789",
+        gmail_thrid="987654321",
+        gmail_labels=(r"\Inbox", "重要"),
+    )
+    fetcher = FakeFetcher(
+        folders=[RemoteFolder("INBOX", "Inbox", uidvalidity=41)],
+        messages={"INBOX": [ref]},
+        eml_bytes={("INBOX", 1): _eml(1)},
+    )
+    manifest = MemoryManifest()
+
+    sync_account(
+        fetcher,
+        repo,
+        MemoryStorage(),
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+    )
+
+    event = next(event for event in manifest.events if event["event"] == "fetch")
+    record = next(iter(repo.messages.values()))
+    assert event["gmail_msgid"] == "123456789"
+    assert event["gmail_thrid"] == "987654321"
+    assert event["gmail_labels"] == [r"\Inbox", "重要"]
+    assert record["gmail_msgid"] == "123456789"
+    assert record["gmail_thrid"] == "987654321"
+    assert record["gmail_labels"] == '["\\\\Inbox","重要"]'
+
+
 def test_failure_review_lists_exhausted_failures_with_message_metadata() -> None:
     repo, folder_id = _repository()
     repo.add_message(

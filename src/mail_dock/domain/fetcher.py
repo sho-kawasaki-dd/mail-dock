@@ -31,6 +31,9 @@ class RemoteMessageRef:
     internal_date: datetime | None = None
     size_bytes: int | None = None
     flags: tuple[str, ...] = ()
+    gmail_msgid: str | None = None
+    gmail_thrid: str | None = None
+    gmail_labels: tuple[str, ...] | None = None
 
 
 class CancelToken:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -276,6 +277,13 @@ def _record_for_message(
         "references_ids": parsed.references_ids,
         "thread_key": parsed.thread_key,
         "last_seen_at": _now_iso(),
+        "gmail_msgid": ref.gmail_msgid,
+        "gmail_thrid": ref.gmail_thrid,
+        "gmail_labels": (
+            json.dumps(ref.gmail_labels, ensure_ascii=False, separators=(",", ":"))
+            if ref.gmail_labels is not None
+            else None
+        ),
     }
 
 
@@ -548,6 +556,9 @@ def sync_account(
                 ref=ref,
                 parsed=parsed,
                 stored=stored,
+                gmail_msgid=ref.gmail_msgid,
+                gmail_thrid=ref.gmail_thrid,
+                gmail_labels=(list(ref.gmail_labels) if ref.gmail_labels is not None else None),
             ),
             record=record,
             contents=_message_contents(parsed, empty=parse_failed),

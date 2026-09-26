@@ -299,15 +299,15 @@
 
 ### **Group J: 5.2a フェッチャー・usecases**
 
-- [ ] `GenericImapFetcher` に `auth_type="xoauth2"` 分岐を追加し、`authenticate("XOAUTH2", callback)` でSASL文字列を渡す
-- [ ] XOAUTH2コールバックを状態付きにし、サーバーからの継続チャレンジ（`+`）に対して空行（`b""`）を返すことで最終的な`NO`応答を経て`wrap_imap_errors`が`AuthenticationError`へ変換できるようにする
-- [ ] composition rootで `BaseAccessTokenProvider` 実装を注入し、`connect()` 直前の有効期限チェックとリフレッシュを実装する（フェッチャーはkeyring・HTTP実装を直接扱わない）
-- [ ] `UID FETCH` の応答パーサ（`imap_common.py`）へ `X-GM-MSGID` / `X-GM-THRID` / `X-GM-LABELS` の抽出を追加する
-- [ ] `wrap_imap_errors` にGmail固有応答コードの分類を追加する
-- [ ] `usecases/retry.py` にGmailスロットル向けの長期バックオフ経路を追加する
-- [ ] `usecases/oauth_authorize.py` を新設し、認可開始・トークン保存・再認可を提供する
-- [ ] `register_account` / `update_account` に `auth_type` / `oauth_provider` / `oauth_client_id` / `oauth_tenant` を追加する（任意エンドポイント引数は追加しない）
-- [ ] `delete_remote.py` の入口でGmailアカウントの `mode="expunge"` を拒否する
+- [x] `GenericImapFetcher` に `auth_type="xoauth2"` 分岐を追加し、`authenticate("XOAUTH2", callback)` でSASL文字列を渡す
+- [x] XOAUTH2コールバックを状態付きにし、サーバーからの継続チャレンジ（`+`）に対して空行（`b""`）を返すことで最終的な`NO`応答を経て`wrap_imap_errors`が`AuthenticationError`へ変換できるようにする
+- [x] composition rootで `BaseAccessTokenProvider` 実装を注入し、`connect()` 直前の有効期限チェックとリフレッシュを実装する（フェッチャーはkeyring・HTTP実装を直接扱わない）
+- [x] `UID FETCH` の応答パーサ（`imap_common.py`）へ `X-GM-MSGID` / `X-GM-THRID` / `X-GM-LABELS` の抽出を追加する
+- [x] `wrap_imap_errors` にGmail固有応答コードの分類を追加する
+- [x] `usecases/retry.py` にGmailスロットル向けの長期バックオフ経路を追加する
+- [x] `usecases/oauth_authorize.py` を新設し、認可開始・トークン保存・再認可を提供する
+- [x] `register_account` / `update_account` に `auth_type` / `oauth_provider` / `oauth_client_id` / `oauth_tenant` を追加する（任意エンドポイント引数は追加しない）
+- [x] `delete_remote.py` の入口でGmailアカウントの `mode="expunge"` を拒否する
 
 ### **Group K: 5.2a GUI**
 

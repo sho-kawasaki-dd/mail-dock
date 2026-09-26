@@ -8,6 +8,7 @@ import pytest
 from mail_dock.domain.errors import (
     AuthenticationError,
     PermanentError,
+    RateLimitedError,
     StorageDetachedError,
     TransientError,
 )
@@ -68,6 +69,20 @@ def test_fetch_response_parses_single_bytes_without_literal() -> None:
     assert result.message_id is None
 
 
+def test_fetch_response_parses_gmail_ids_and_modified_utf7_labels() -> None:
+    encoded_label = encode_modified_utf7("重要 ラベル")
+    response = (
+        f"* 7 FETCH (UID 42 X-GM-MSGID 00123 X-GM-THRID 00456 "
+        f'X-GM-LABELS (\\Inbox "{encoded_label}"))'.encode("ascii")
+    )
+
+    result = parse_fetch_response(response)
+
+    assert result.gmail_msgid == "123"
+    assert result.gmail_thrid == "456"
+    assert result.gmail_labels == (r"\Inbox", "重要 ラベル")
+
+
 def test_internaldate_is_utc() -> None:
     assert parse_internaldate("30-Jul-2026 12:34:56 +0900").tzinfo == UTC
 
@@ -78,6 +93,11 @@ def test_imap_errors_are_translated() -> None:
         raise imaplib.IMAP4.error("[AUTHENTICATIONFAILED] invalid credentials")
     with pytest.raises(AuthenticationError), wrap_imap_errors("AUTHENTICATE PLAIN"):
         raise imaplib.IMAP4.error("SASL authentication failed")
+    for code in ("THROTTLED", "OVERQUOTA", "LIMIT"):
+        with pytest.raises(RateLimitedError), wrap_imap_errors("UID FETCH"):
+            raise imaplib.IMAP4.error(f"NO [{code}] try again later")
+    with pytest.raises(RateLimitedError), wrap_imap_errors("UID FETCH"):
+        raise imaplib.IMAP4.error("Too many simultaneous connections")
     with pytest.raises(TransientError), wrap_imap_errors("STARTTLS"):
         raise imaplib.IMAP4.error("STARTTLS failed temporarily")
     with pytest.raises(PermanentError), wrap_imap_errors("STARTTLS"):

@@ -303,6 +303,32 @@ def test_execute_rejects_detached_and_unsafe_expunge_before_imap() -> None:
     assert manifest.events == []
 
 
+def test_execute_rejects_gmail_expunge_even_with_uidplus() -> None:
+    repository = InMemoryMessageRepository()
+    raw = b"message"
+    path = _record(repository, message_id=1, raw=raw)
+    repository.accounts["account"].update({"auth_type": "xoauth2", "oauth_provider": "google"})
+    storage = MemoryStorage({path: raw})
+    state = StorageStateMachine(StorageState.ATTACHED)
+    plan = dry_run(repository, storage, message_ids=(1,), storage_state=state)
+    manifest = MemoryManifest()
+    fetcher = DeleteFetcher(uidplus=True)
+
+    with pytest.raises(PermanentError, match="Gmail accounts"):
+        execute(
+            fetcher,
+            repository,
+            storage,
+            manifest,
+            plan=plan,
+            mode="expunge",
+            storage_state=state,
+        )
+
+    assert fetcher.calls == []
+    assert manifest.events == []
+
+
 def test_transient_delete_is_recorded_as_uncertain_without_marking_deleted() -> None:
     repository = InMemoryMessageRepository()
     raw = b"message"

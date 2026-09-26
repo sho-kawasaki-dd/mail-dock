@@ -3,6 +3,7 @@ from __future__ import annotations
 import builtins
 import imaplib
 from collections.abc import Callable, Iterator
+from datetime import UTC, datetime, timedelta
 from typing import ClassVar, cast
 
 import pytest
@@ -12,8 +13,10 @@ from mail_dock.domain.errors import (
     ConfigError,
     OperationCancelledError,
     PermanentError,
+    RateLimitedError,
 )
 from mail_dock.domain.fetcher import CancelToken, RemoteFolder
+from mail_dock.domain.ports import AccessToken, BaseAccessTokenProvider
 from mail_dock.infrastructure.fetchers.generic_imap import GenericImapFetcher
 
 
@@ -39,6 +42,7 @@ class FakeImap:
         "OK",
         [b"AUTHENTICATE completed"],
     )
+    auth_challenges: ClassVar[list[bytes]] = [b"+"]
 
     def __init__(
         self,
@@ -70,7 +74,8 @@ class FakeImap:
         mechanism: str,
         callback: Callable[[bytes], bytes],
     ) -> tuple[str, builtins.list[bytes]]:
-        self.commands.append(("AUTHENTICATE", (mechanism, callback(b"+"))))
+        responses = tuple(callback(challenge) for challenge in self.auth_challenges)
+        self.commands.append(("AUTHENTICATE", (mechanism, *responses)))
         return self.authenticate_result
 
     def capability(self) -> tuple[str, builtins.list[bytes]]:
@@ -119,7 +124,7 @@ class FakeImap:
                 else [int(value) for value in uid_set.split(",")]
             )
             for uid in requested_uids:
-                if request == "(UID FLAGS)":
+                if "UID FLAGS" in request:
                     flags = " ".join(self.flags.get(uid, ()))
                     items.append(f"* {uid} FETCH (UID {uid} FLAGS ({flags}))".encode("ascii"))
                     continue
@@ -156,6 +161,7 @@ def fake_imap(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     FakeImap.nomodseq = False
     FakeImap.login_result = ("OK", [b"LOGIN completed"])
     FakeImap.authenticate_result = ("OK", [b"AUTHENTICATE completed"])
+    FakeImap.auth_challenges = [b"+"]
     monkeypatch.setattr(imaplib, "IMAP4", FakeImap)
     monkeypatch.setattr(imaplib, "IMAP4_SSL", FakeImap)
     yield
@@ -405,6 +411,100 @@ def test_logindisabled_uses_sasl_plain(fake_imap: None) -> None:
     commands = FakeImap.instances[0].commands
     assert ("AUTHENTICATE", ("PLAIN", b"\x00user\x00password")) in commands
     assert not any(command[0] == "LOGIN" for command in commands)
+
+
+class StaticAccessTokenProvider(BaseAccessTokenProvider):
+    def get_access_token(self, account_id: str) -> AccessToken:
+        assert account_id == "account"
+        return AccessToken("access-token", datetime.now(UTC) + timedelta(hours=1))
+
+
+def test_google_fetch_requests_gmail_extensions(fake_imap: None) -> None:
+    fetcher = GenericImapFetcher(
+        "imap.example.test",
+        "user@example.test",
+        None,
+        auth_type="xoauth2",
+        account_id="account",
+        oauth_provider="google",
+        oauth_client_id="client-id",
+        access_token_provider=StaticAccessTokenProvider(),
+    )
+    fetcher.connect()
+
+    list(fetcher.iter_message_refs("INBOX"))
+
+    fetch_command = next(
+        command for command in FakeImap.instances[0].commands if command[0] == "FETCH"
+    )
+    assert "X-GM-MSGID X-GM-THRID X-GM-LABELS" in str(fetch_command[1][1])
+
+
+def test_xoauth2_sends_initial_response_and_empty_continuation(fake_imap: None) -> None:
+    FakeImap.auth_challenges = [b"+", b"base64-server-challenge"]
+    fetcher = GenericImapFetcher(
+        "imap.example.test",
+        "user@example.test",
+        None,
+        auth_type="xoauth2",
+        account_id="account",
+        oauth_provider="google",
+        oauth_client_id="client-id",
+        access_token_provider=StaticAccessTokenProvider(),
+    )
+
+    fetcher.connect()
+
+    auth_command = next(
+        command for command in FakeImap.instances[0].commands if command[0] == "AUTHENTICATE"
+    )
+    assert auth_command == (
+        "AUTHENTICATE",
+        (
+            "XOAUTH2",
+            b"user=user@example.test\x01auth=Bearer access-token\x01\x01",
+            b"",
+        ),
+    )
+
+
+def test_xoauth2_continuation_reaches_authentication_failure(fake_imap: None) -> None:
+    FakeImap.auth_challenges = [b"+", b"base64-server-challenge"]
+    FakeImap.authenticate_result = ("NO", [b"[AUTHENTICATIONFAILED] invalid token"])
+    fetcher = GenericImapFetcher(
+        "imap.example.test",
+        "user@example.test",
+        None,
+        auth_type="xoauth2",
+        account_id="account",
+        oauth_provider="google",
+        oauth_client_id="client-id",
+        access_token_provider=StaticAccessTokenProvider(),
+    )
+
+    with pytest.raises(AuthenticationError):
+        fetcher.connect()
+
+    auth_command = next(
+        command for command in FakeImap.instances[0].commands if command[0] == "AUTHENTICATE"
+    )
+    assert auth_command == (
+        "AUTHENTICATE",
+        (
+            "XOAUTH2",
+            b"user=user@example.test\x01auth=Bearer access-token\x01\x01",
+            b"",
+        ),
+    )
+
+
+def test_rate_limited_imap_status_is_transient(fake_imap: None) -> None:
+    FakeImap.authenticate_result = ("NO", [b"[LIMIT] Too many requests"])
+    FakeImap.capability_response = b"CAPABILITY IMAP4rev1 LOGINDISABLED"
+    fetcher = GenericImapFetcher("imap.example.test", "user", "password")
+
+    with pytest.raises(RateLimitedError):
+        fetcher.connect()
 
 
 def test_invalid_ca_certificate_is_a_config_error(fake_imap: None) -> None:

@@ -12,6 +12,23 @@ from mail_dock.domain.repository import BaseMessageRepository, MessageRecord
 from mail_dock.usecases.snapshots import record_account_snapshot
 
 
+def _validate_auth_configuration(
+    auth_type: Literal["password", "xoauth2"],
+    oauth_provider: str | None,
+    oauth_client_id: str | None,
+    oauth_tenant: str | None,
+) -> None:
+    if auth_type not in {"password", "xoauth2"}:
+        raise ValueError("auth_type must be 'password' or 'xoauth2'")
+    if auth_type == "xoauth2":
+        if oauth_provider not in {"google", "microsoft"} or not oauth_client_id:
+            raise ValueError("OAuth accounts require a supported provider and client ID")
+        if oauth_provider == "google" and oauth_tenant is not None:
+            raise ValueError("Google OAuth does not accept a tenant")
+    elif any(value is not None for value in (oauth_provider, oauth_client_id, oauth_tenant)):
+        raise ValueError("OAuth settings require auth_type='xoauth2'")
+
+
 def register_account(
     repo: BaseMessageRepository,
     credential_store: BaseCredentialStore,
@@ -20,17 +37,27 @@ def register_account(
     host: str,
     port: int,
     username: str,
-    password: str,
+    password: str | None = None,
     display_name: str | None,
     tls_mode: Literal["implicit", "starttls"] = "implicit",
     ca_cert_path: str | None = None,
+    auth_type: Literal["password", "xoauth2"] = "password",
+    oauth_provider: str | None = None,
+    oauth_client_id: str | None = None,
+    oauth_tenant: str | None = None,
     manifest: BaseManifestWriter | None = None,
     manifest_reader: BaseManifestReader | None = None,
 ) -> str:
     """Store credentials outside SQLite and register the connection details."""
 
     validate_account_id(account_id)
-    credential_store.set_password(account_id, password)
+    _validate_auth_configuration(auth_type, oauth_provider, oauth_client_id, oauth_tenant)
+    if auth_type == "password":
+        if not password:
+            raise ValueError("password is required for password authentication")
+        credential_store.set_password(account_id, password)
+    elif password:
+        raise ValueError("password must not be supplied for OAuth authentication")
     account = {
         "id": account_id,
         "provider_type": "imap",
@@ -41,6 +68,10 @@ def register_account(
         "is_enabled": 1,
         "tls_mode": tls_mode,
         "ca_cert_path": ca_cert_path,
+        "auth_type": auth_type,
+        "oauth_provider": oauth_provider,
+        "oauth_client_id": oauth_client_id,
+        "oauth_tenant": oauth_tenant,
     }
     if manifest is not None and manifest_reader is not None:
         record_account_snapshot(manifest, manifest_reader, account)
@@ -61,6 +92,10 @@ def update_account(
     is_enabled: bool,
     tls_mode: Literal["implicit", "starttls"] = "implicit",
     ca_cert_path: str | None = None,
+    auth_type: Literal["password", "xoauth2"] = "password",
+    oauth_provider: str | None = None,
+    oauth_client_id: str | None = None,
+    oauth_tenant: str | None = None,
     manifest: BaseManifestWriter | None = None,
     manifest_reader: BaseManifestReader | None = None,
 ) -> str:
@@ -73,7 +108,10 @@ def update_account(
     """
 
     validate_account_id(account_id)
-    if password:
+    _validate_auth_configuration(auth_type, oauth_provider, oauth_client_id, oauth_tenant)
+    if auth_type == "xoauth2" and password:
+        raise ValueError("password must not be supplied for OAuth authentication")
+    if auth_type == "password" and password:
         credential_store.set_password(account_id, password)
     account = {
         "id": account_id,
@@ -85,6 +123,10 @@ def update_account(
         "is_enabled": int(is_enabled),
         "tls_mode": tls_mode,
         "ca_cert_path": ca_cert_path,
+        "auth_type": auth_type,
+        "oauth_provider": oauth_provider,
+        "oauth_client_id": oauth_client_id,
+        "oauth_tenant": oauth_tenant,
     }
     if manifest is not None and manifest_reader is not None:
         record_account_snapshot(manifest, manifest_reader, account)

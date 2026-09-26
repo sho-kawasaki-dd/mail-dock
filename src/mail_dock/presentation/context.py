@@ -38,6 +38,7 @@ from mail_dock.infrastructure.security.keyring_store import (
     backend_name,
     detect_backend,
 )
+from mail_dock.infrastructure.security.oauth2 import OAuth2Client, OAuthAccessTokenProvider
 from mail_dock.infrastructure.storage.capabilities import (
     capability_level,
     probe_capabilities,
@@ -259,6 +260,37 @@ class AppContext:
         ca_cert_path = account.get("ca_cert_path")
         if ca_cert_path is not None and not isinstance(ca_cert_path, str):
             raise ConfigError(f"Account has no valid CA certificate path: {account_id}")
+        auth_type = account.get("auth_type", "password")
+        if auth_type == "xoauth2":
+            oauth_provider = account.get("oauth_provider")
+            oauth_client_id = account.get("oauth_client_id")
+            oauth_tenant = account.get("oauth_tenant")
+            if not isinstance(oauth_provider, str) or not isinstance(oauth_client_id, str):
+                raise ConfigError(f"Account has incomplete OAuth configuration: {account_id}")
+            return GenericImapFetcher(
+                host,
+                username,
+                None,
+                port=port,
+                remote_trash_folder=self.settings.remote_trash_folder,
+                tls_mode=cast(Literal["implicit", "starttls"], tls_mode),
+                ca_cert_path=ca_cert_path or None,
+                auth_type="xoauth2",
+                account_id=account_id,
+                oauth_provider=oauth_provider,
+                oauth_client_id=oauth_client_id,
+                oauth_tenant=(oauth_tenant if isinstance(oauth_tenant, str) else None),
+                access_token_provider=OAuthAccessTokenProvider(
+                    OAuth2Client(),
+                    self.credential_store,
+                    account_id=account_id,
+                    provider=oauth_provider,
+                    client_id=oauth_client_id,
+                    tenant=(oauth_tenant if isinstance(oauth_tenant, str) else None),
+                ),
+            )
+        if auth_type != "password":
+            raise ConfigError(f"Account has an unsupported authentication type: {account_id}")
         return GenericImapFetcher(
             host,
             username,
