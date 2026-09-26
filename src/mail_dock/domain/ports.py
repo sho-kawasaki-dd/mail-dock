@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 from abc import ABC, abstractmethod
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -15,18 +16,23 @@ from mail_dock.domain.messages import AttachmentSavePlan, RenderedMessage, Saved
 type JSONValue = bool | int | float | str | list[JSONValue] | dict[str, JSONValue] | None
 
 __all__ = [
+    "AccessToken",
     "AttachmentSavePlan",
+    "BaseAccessTokenProvider",
     "BaseCredentialStore",
     "BaseEmlStorage",
     "BaseIntegrityStorage",
     "BaseManifestReader",
     "BaseManifestWriter",
     "BaseMessageRenderer",
+    "BaseOAuthClient",
     "BasePstImportStorage",
     "BasePstManifestReader",
     "BasePstManifestWriter",
     "BasePurgeStorage",
     "JSONValue",
+    "OAuthAuthorizationRequest",
+    "OAuthTokenResponse",
     "SavedFile",
     "SourceFileSnapshot",
     "StagedMessage",
@@ -47,6 +53,85 @@ class BaseCredentialStore(ABC):
     @abstractmethod
     def delete_password(self, account_id: str) -> None:
         """Remove an account password from the credential backend."""
+
+
+@dataclass(frozen=True)
+class OAuthAuthorizationRequest:
+    """Browser-facing details for an already-listening OAuth callback."""
+
+    request_id: str
+    authorization_url: str
+    redirect_uri: str
+
+
+@dataclass(frozen=True, repr=False)
+class OAuthTokenResponse:
+    """OAuth tokens; token values are intentionally omitted from repr output."""
+
+    access_token: str = field(repr=False)
+    expires_at: datetime
+    refresh_token: str | None = field(default=None, repr=False)
+    token_type: str = "Bearer"
+
+    def __repr__(self) -> str:
+        return f"OAuthTokenResponse(expires_at={self.expires_at!r}, token_type={self.token_type!r})"
+
+
+@dataclass(frozen=True, repr=False)
+class AccessToken:
+    """Short-lived access token returned to protocol clients."""
+
+    value: str = field(repr=False)
+    expires_at: datetime
+
+    def __repr__(self) -> str:
+        return f"AccessToken(expires_at={self.expires_at!r})"
+
+
+class BaseOAuthClient(ABC):
+    """OAuth authorization-code and refresh operations without transport details."""
+
+    @abstractmethod
+    def begin_authorization(
+        self,
+        provider: str,
+        client_id: str,
+        client_secret: str | None = None,
+        *,
+        tenant: str | None = None,
+    ) -> OAuthAuthorizationRequest:
+        """Start loopback listening and return the URL to open in a browser."""
+
+    @abstractmethod
+    def complete_authorization(
+        self,
+        request_id: str,
+        *,
+        timeout: float = 120.0,
+        cancel: CancelToken | None = None,
+    ) -> OAuthTokenResponse:
+        """Wait for a validated callback and exchange its code for tokens."""
+
+    @abstractmethod
+    def refresh_access_token(
+        self,
+        provider: str,
+        client_id: str,
+        refresh_token: str,
+        client_secret: str | None = None,
+        *,
+        tenant: str | None = None,
+        on_refresh_token_rotated: Callable[[str], None] | None = None,
+    ) -> OAuthTokenResponse:
+        """Refresh access and persist a rotated refresh token through the callback."""
+
+
+class BaseAccessTokenProvider(ABC):
+    """Provide an unexpired access token for an account to its mail fetcher."""
+
+    @abstractmethod
+    def get_access_token(self, account_id: str) -> AccessToken:
+        """Return a valid token, refreshing it when it is near expiry."""
 
 
 class BaseEmlStorage(ABC):

@@ -269,19 +269,19 @@
 
 ### **Group H: 5.2a OAuth2基盤**
 
-- [ ] `domain/ports.py` に `BaseOAuthClient` / `BaseAccessTokenProvider` の最小契約を追加し、usecaseとfetcherが `infrastructure.security.oauth2` を直接importしない構成にする
-- [ ] `infrastructure/security/oauth2.py` を新設し、認可URL生成（`response_type=code&code_challenge=...&code_challenge_method=S256&access_type=offline&prompt=consent`）を実装する
-- [ ] PKCE の `code_verifier` / `code_challenge` を `secrets` + `hashlib.sha256` で生成する
-- [ ] `state` パラメータを生成・検証する
-- [ ] `http.server.HTTPServer` を `127.0.0.1:0`（一時ポート）でバインドし、1リクエスト受信後に停止するループバックコールバックサーバーを実装する。タイムアウト（既定120秒）を設ける
-- [ ] 認可コード→トークン交換（`urllib.request` によるPOST）を実装する
-- [ ] リフレッシュトークンによるアクセストークン再取得を実装し、有効期限を戻り値で管理する
-- [ ] refresh応答に新しい `refresh_token` がある場合はkeyringを置換し、無い場合は既存値を維持する。保存失敗を成功扱いせず、例外・ログへトークン本文を含めない
-- [ ] `invalid_grant` 等の失効レスポンスを `AuthenticationError` へラップする
-- [ ] Google/MicrosoftのHTTPSエンドポイントと既定スコープを許可リスト付きプロバイダ定義へ集約し、任意URLを引数・DB・マニフェストから受け取らない
-- [ ] 許可リスト付きプロバイダ定義に `loopback_redirect_host`（Google: `127.0.0.1`、Microsoft: 登録済み `http://localhost` 系 URI）を持たせ、認可要求とコード交換で同一のリダイレクトURI文字列を使い回す
-- [ ] Microsoft経路では `localhost` のIPv4/IPv6名前解決差を結合テストで確認する
-- [ ] 認可処理を「ループバック待受開始+認可URL生成」と「コールバック待機+コード交換」に分け、presentationがシステムブラウザを開ける契約にする
+- [x] `domain/ports.py` に `BaseOAuthClient` / `BaseAccessTokenProvider` の最小契約を追加し、usecaseとfetcherが `infrastructure.security.oauth2` を直接importしない構成にする
+- [x] `infrastructure/security/oauth2.py` を新設し、認可URL生成（`response_type=code&code_challenge=...&code_challenge_method=S256&access_type=offline&prompt=consent`）を実装する
+- [x] PKCE の `code_verifier` / `code_challenge` を `secrets` + `hashlib.sha256` で生成する
+- [x] `state` パラメータを生成・検証する
+- [x] `http.server.HTTPServer` をloopbackの一時ポートでbindし、1リクエスト受信後に停止するコールバックサーバーを実装する。Googleは`127.0.0.1`、Microsoftは公式仕様に合わせ`localhost`を使用し、既定120秒のタイムアウトとキャンセルを設ける
+- [x] 認可コード→トークン交換（`urllib.request` によるPOST）を実装する
+- [x] リフレッシュトークンによるアクセストークン再取得を実装し、有効期限を戻り値で管理する
+- [x] refresh応答に新しい `refresh_token` がある場合は永続化callbackを必須とし、無い場合は既存値を置換しない。保存失敗を成功扱いせず、例外へトークン本文を含めない
+- [x] `invalid_grant` 等の失効レスポンスを `AuthenticationError` へラップする
+- [x] Google/MicrosoftのHTTPSエンドポイントと既定スコープを許可リスト付きプロバイダ定義へ集約し、任意URLを引数・DB・マニフェストから受け取らない
+- [x] 許可リスト付きプロバイダ定義に `loopback_redirect_host`（Google: `127.0.0.1`、Microsoft: 登録済み `http://localhost` 系URI）を持たせ、認可要求とコード交換で同一のリダイレクトURI文字列を使い回す
+- [x] Microsoft経路の`localhost` loopbackを実HTTP callbackでテストし、この環境の名前解決と接続が成功することを確認する。Microsoft公式仕様では`localhost`の動的ポートは照合時に無視され、`[::1]` literalは未対応
+- [x] 認可処理を「ループバック待受開始+認可URL生成」と「コールバック待機+コード交換」に分け、presentationがシステムブラウザを開ける契約にする
 
 ### **Group I: 5.2a 資格情報・DBスキーマ**
 
