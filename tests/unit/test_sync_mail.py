@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -13,6 +14,12 @@ from mail_dock.domain.errors import (
     StorageError,
 )
 from mail_dock.domain.fetcher import CancelToken, RemoteFolder, RemoteMessageRef
+from mail_dock.domain.message_identity import (
+    gmail_source_item_key,
+    imap_folder_key,
+    imap_source_item_key,
+    remote_source_item_key,
+)
 from mail_dock.domain.messages import ParsedMessage, StoredEml
 from mail_dock.domain.ports import BaseEmlStorage, BaseManifestWriter, JSONValue
 from mail_dock.usecases.sync_mail import (
@@ -24,6 +31,14 @@ from mail_dock.usecases.sync_mail import (
 )
 from tests.support.fake_fetcher import FakeFetcher, FakeMessage
 from tests.support.in_memory_repository import InMemoryMessageRepository
+
+
+def test_message_identity_keys_are_folder_scoped_and_gmail_canonical() -> None:
+    assert imap_folder_key("INBOX") == "SU5CT1g"
+    assert imap_source_item_key("INBOX", 42, 7) == "imap:SU5CT1g:42:7"
+    assert imap_source_item_key("Archive", 42, 7) != imap_source_item_key("INBOX", 42, 7)
+    assert gmail_source_item_key("123456789") == "gmail:123456789"
+    assert remote_source_item_key("INBOX", 42, 7, "123456789") == "gmail:123456789"
 
 
 @pytest.mark.parametrize(("labels", "expected"), [(None, None), ([], [])])
@@ -391,6 +406,13 @@ def test_sync_persists_gmail_metadata_in_manifest_and_repository() -> None:
     assert record["gmail_msgid"] == "123456789"
     assert record["gmail_thrid"] == "987654321"
     assert record["gmail_labels"] == '["\\\\Inbox","重要"]'
+    alias_key = imap_source_item_key("INBOX", 41, 1)
+    assert repo.message_identity_aliases[("account", alias_key)]["message_id"] == record["id"]
+    event_names = [event["event"] for event in manifest.events]
+    assert event_names.index("fetch") < event_names.index("message_identity_linked")
+    assert event_names.index("message_identity_linked") < event_names.index(
+        "message_membership_snapshot"
+    )
 
 
 def test_failure_review_lists_exhausted_failures_with_message_metadata() -> None:
@@ -806,7 +828,7 @@ def test_permanent_message_failure_does_not_stop_other_messages() -> None:
     ("candidate_count", "expected_state", "expected_event"),
     (
         (0, "deleted", "delete_detected"),
-        (1, "moved", "moved"),
+        (1, "unknown", "remote_state_unknown"),
         (2, "unknown", "remote_state_unknown"),
     ),
 )
@@ -866,10 +888,102 @@ def test_missing_uid_is_classified_without_deleting_eml(
     assert source_message["remote_state"] == expected_state
     assert len(storage.raw_by_path) == 1
     assert [event["event"] for event in manifest.events] == [expected_event]
-    if expected_state == "moved":
-        assert source_message["moved_to_folder_id"] == folder_ids["Destination 0"]
-    else:
-        assert source_message["moved_to_folder_id"] is None
+    assert source_message["moved_to_folder_id"] is None
+
+
+def test_missing_gmail_uid_removes_membership_after_snapshot_is_recorded() -> None:
+    repo, _folder_id = _repository()
+    repo.upsert_account({"id": "account", "provider_type": "imap", "oauth_provider": "google"})
+    raw = _eml(1)
+    fetcher = FakeFetcher(
+        folders=[RemoteFolder("INBOX", "Inbox", uidvalidity=41)],
+        messages={"INBOX": [RemoteMessageRef(uid=1, size_bytes=len(raw), gmail_msgid="123456789")]},
+        eml_bytes={("INBOX", 1): raw},
+    )
+    manifest = MemoryManifest()
+    storage = MemoryStorage()
+
+    sync_account(
+        fetcher,
+        repo,
+        storage,
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+    )
+    source_key = gmail_source_item_key("123456789")
+    assert len(repo.list_message_memberships("account", source_key)) == 1
+
+    fetcher.delete_remote_message("INBOX", 1)
+    manifest.events.clear()
+    sync_account(
+        fetcher,
+        repo,
+        storage,
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+    )
+
+    snapshots = [
+        event for event in manifest.events if event["event"] == "message_membership_snapshot"
+    ]
+    assert len(snapshots) == 1
+    assert snapshots[0]["source_item_key"] == source_key
+    assert snapshots[0]["memberships"] == []
+    assert repo.list_message_memberships("account", source_key) == []
+    assert len(repo.messages) == 1
+    assert repo.messages[1]["source_item_key"] == source_key
+
+
+def test_same_batch_gmail_fetches_snapshot_all_folder_memberships() -> None:
+    repo, inbox_id = _repository()
+    important_id = repo.upsert_folder(
+        {
+            "account_id": "account",
+            "raw_name": "[Gmail]/Important",
+            "display_name": "Important",
+            "is_sync_target": 1,
+        }
+    )
+    refs = {
+        "INBOX": RemoteMessageRef(uid=7, size_bytes=len(_eml(1)), gmail_msgid="123456789"),
+        "[Gmail]/Important": RemoteMessageRef(
+            uid=3, size_bytes=len(_eml(1)), gmail_msgid="123456789"
+        ),
+    }
+    fetcher = FakeFetcher(
+        folders=[
+            RemoteFolder("INBOX", "Inbox", uidvalidity=42),
+            RemoteFolder("[Gmail]/Important", "Important", uidvalidity=81),
+        ],
+        messages={name: [ref] for name, ref in refs.items()},
+        eml_bytes={(name, ref.uid): _eml(1) for name, ref in refs.items()},
+    )
+    manifest = MemoryManifest()
+
+    sync_account(
+        fetcher,
+        repo,
+        MemoryStorage(),
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+    )
+
+    snapshots = [
+        event
+        for event in manifest.events
+        if event["event"] == "message_membership_snapshot"
+        and event["source_item_key"] == "gmail:123456789"
+    ]
+    assert len(snapshots) == 2
+    final_memberships = cast(list[dict[str, JSONValue]], snapshots[-1]["memberships"])
+    assert {
+        (membership["folder_raw_name"], membership["uid"], membership["uidvalidity"])
+        for membership in final_memberships
+    } == {("INBOX", 7, 42), ("[Gmail]/Important", 3, 81)}
+    assert inbox_id != important_id
 
 
 def test_authentication_error_aborts_sync() -> None:
@@ -964,6 +1078,78 @@ def test_flag_refresh_uses_ttl_uid_fetch_and_updates_changed_flags() -> None:
     assert message is not None
     assert message["imap_flags"] == r"\Seen \Flagged"
     assert fetcher.flag_calls == [("INBOX", (1,))]
+
+
+def test_flag_refresh_persists_changed_gmail_labels_after_snapshot() -> None:
+    repo, folder_id = _repository()
+    repo.upsert_account({"id": "account", "provider_type": "imap", "oauth_provider": "google"})
+    raw = _eml(1)
+    fetcher = FlagTrackingFetcher(
+        folders=[RemoteFolder("INBOX", "Inbox", uidvalidity=41)],
+        messages={
+            "INBOX": [
+                RemoteMessageRef(
+                    uid=1,
+                    internal_date=datetime.now(UTC) - timedelta(days=1),
+                    size_bytes=len(raw),
+                    flags=(r"\Seen",),
+                    gmail_msgid="123456789",
+                    gmail_labels=(r"\Inbox",),
+                )
+            ]
+        },
+        eml_bytes={("INBOX", 1): raw},
+    )
+    storage = MemoryStorage()
+    manifest = MemoryManifest()
+    sync_account(
+        fetcher,
+        repo,
+        storage,
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+    )
+    message = repo.get_message_by_uid("account", folder_id, 41, 1)
+    assert message is not None
+    repo.messages[int(message["id"])]["gmail_labels"] = json.dumps([r"\Inbox"])
+    _seed_flag_refresh_message(repo, folder_id, flags_seen_at="2000-01-01T00:00:00Z")
+    fetcher.add_message(
+        "INBOX",
+        1,
+        raw,
+        ref=RemoteMessageRef(
+            uid=1,
+            internal_date=datetime.now(UTC) - timedelta(days=1),
+            size_bytes=len(raw),
+            flags=(r"\Seen",),
+            gmail_msgid="123456789",
+            gmail_labels=(r"\Important",),
+        ),
+    )
+    manifest.events.clear()
+    sync_count_before = manifest.sync_count
+
+    sync_account(
+        fetcher,
+        repo,
+        storage,
+        manifest,
+        account_id="account",
+        options=SyncOptions(),
+    )
+
+    updated = repo.get_message_by_uid("account", folder_id, 41, 1)
+    assert updated is not None
+    assert updated["gmail_labels"] == json.dumps([r"\Important"], separators=(",", ":"))
+    snapshots = [
+        event for event in manifest.events if event["event"] == "message_membership_snapshot"
+    ]
+    assert len(snapshots) == 1
+    assert snapshots[0]["source_item_key"] == "gmail:123456789"
+    snapshot_memberships = cast(list[dict[str, JSONValue]], snapshots[0]["memberships"])
+    assert snapshot_memberships[0]["folder_raw_name"] == "INBOX"
+    assert manifest.sync_count > sync_count_before
 
 
 def test_flag_refresh_does_not_touch_missing_non_condstore_response() -> None:

@@ -11,6 +11,7 @@ import pytest
 import mail_dock.infrastructure.database.migrator as migrator
 from mail_dock.domain.errors import MigrationError, SchemaVersionTooNewError
 from mail_dock.infrastructure.database.connection import connect
+from mail_dock.infrastructure.database.message_folder_migration import finalize_message_folders
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
 from mail_dock.infrastructure.database.migrator import current_version, migrate
 from mail_dock.infrastructure.storage.manifest import ManifestReader, ManifestWriter
@@ -25,8 +26,8 @@ def test_empty_database_migrates_to_latest_version(
 ) -> None:
     db_path = tmp_path / "metadata.db"
 
-    assert migrate(db_conn, db_path) == 8
-    assert current_version(db_conn) == 8
+    assert migrate(db_conn, db_path) == 9
+    assert current_version(db_conn) == 9
     assert db_conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
     account_columns = {row[1] for row in db_conn.execute("PRAGMA table_info(accounts)")}
     assert {"tls_mode", "ca_cert_path"}.issubset(account_columns)
@@ -38,6 +39,18 @@ def test_empty_database_migrates_to_latest_version(
     }.issubset(account_columns)
     message_columns = {row[1] for row in db_conn.execute("PRAGMA table_info(messages)")}
     assert {"gmail_msgid", "gmail_thrid", "gmail_labels"}.issubset(message_columns)
+    membership_columns = {row[1] for row in db_conn.execute("PRAGMA table_info(message_folders)")}
+    assert membership_columns == {
+        "message_id",
+        "folder_id",
+        "uid",
+        "uidvalidity",
+        "remote_state",
+        "moved_to_folder_id",
+        "imap_flags",
+        "flags_seen_at",
+        "last_seen_at",
+    }
     db_conn.execute("INSERT INTO accounts (id, provider_type) VALUES (?, ?)", ("account", "imap"))
     assert db_conn.execute(
         "SELECT tls_mode, ca_cert_path, auth_type, oauth_provider, oauth_client_id, oauth_tenant "
@@ -76,7 +89,7 @@ def test_pst_import_migration_creates_import_tables_and_indexes(
     db_conn: sqlite3.Connection,
     tmp_path: Path,
 ) -> None:
-    assert migrate(db_conn, tmp_path / "metadata.db") == 8
+    assert migrate(db_conn, tmp_path / "metadata.db") == 9
 
     import_columns = {row[1] for row in db_conn.execute("PRAGMA table_info(pst_imports)")}
     assert import_columns == {
@@ -169,7 +182,7 @@ def test_phase4_migration_backs_up_existing_v4_database(
     )
     db_conn.commit()
 
-    assert migrate(db_conn, tmp_path / "metadata.db") == 8
+    assert migrate(db_conn, tmp_path / "metadata.db") == 9
 
     backup_path = tmp_path / "metadata.db.bak.4"
     assert backup_path.is_file()
@@ -188,7 +201,7 @@ def test_nonempty_v0_database_is_backed_up_before_migration(tmp_path: Path) -> N
         connection.execute("CREATE TABLE legacy (value TEXT)")
         connection.execute("INSERT INTO legacy VALUES ('old')")
         connection.commit()
-        assert migrate(connection, db_path) == 8
+        assert migrate(connection, db_path) == 9
     finally:
         connection.close()
 
@@ -203,7 +216,7 @@ def test_nonempty_v0_database_is_backed_up_before_migration(tmp_path: Path) -> N
 
     rerun = connect(db_path)
     try:
-        assert migrate(rerun, db_path) == 8
+        assert migrate(rerun, db_path) == 9
     finally:
         rerun.close()
     assert not (tmp_path / "metadata.db.bak.0.1").exists()
@@ -261,7 +274,7 @@ def test_timestamp_migration_normalizes_legacy_values_and_defaults(
     )
     db_conn.commit()
 
-    assert migrate(db_conn, tmp_path / "metadata.db") == 8
+    assert migrate(db_conn, tmp_path / "metadata.db") == 9
 
     values = db_conn.execute(
         """
@@ -340,7 +353,7 @@ def test_provider_type_normalization_records_manifest_before_db_update(
     """
 
     db_path = tmp_path / "metadata.db"
-    assert migrate(db_conn, db_path) == 8
+    assert migrate(db_conn, db_path) == 9
     db_conn.execute(
         "INSERT INTO accounts (id, provider_type, host, port, username) VALUES (?, ?, ?, ?, ?)",
         ("legacy-account", "onamae_imap", "imap.example.test", 993, "user"),
@@ -375,3 +388,196 @@ def test_provider_type_normalization_records_manifest_before_db_update(
     # Retrying after the DB is already normalized must not error and must not
     # normalize a second time (idempotent post-migration step, D-4/D-34).
     assert reconcile_account_snapshots(repository, writer_factory, reader_factory) == 0
+
+
+def test_message_folder_finalizer_journals_then_rebuilds_canonical_schema(
+    db_conn: sqlite3.Connection,
+    tmp_path: Path,
+) -> None:
+    assert migrate(db_conn, tmp_path / "metadata.db") == 9
+    db_conn.execute("INSERT INTO accounts (id, provider_type) VALUES (?, ?)", ("account", "imap"))
+    db_conn.execute(
+        "INSERT INTO folders (account_id, raw_name, display_name) VALUES (?, ?, ?)",
+        ("account", "INBOX", "Inbox"),
+    )
+    folder_id = int(db_conn.execute("SELECT id FROM folders").fetchone()[0])
+    db_conn.execute(
+        """INSERT INTO messages (
+            account_id, folder_id, message_id, content_key, source_item_key, uid,
+            uidvalidity, remote_state, local_state, relative_path, file_hash,
+            subject, imap_flags, flags_seen_at, last_seen_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            "account",
+            folder_id,
+            "<message@example.test>",
+            "message-key",
+            "42:7",
+            7,
+            42,
+            "present",
+            "active",
+            "eml/account/message.eml",
+            "a" * 64,
+            "Subject",
+            "\\Seen",
+            "2026-09-26T00:00:00Z",
+            "2026-09-26T00:00:00Z",
+        ),
+    )
+    message_id = int(db_conn.execute("SELECT id FROM messages").fetchone()[0])
+    db_conn.execute(
+        "INSERT INTO message_folders "
+        "(message_id, folder_id, uid, uidvalidity, remote_state, imap_flags, "
+        "flags_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            message_id,
+            folder_id,
+            7,
+            42,
+            "present",
+            "\\Seen",
+            "2026-09-26T00:00:00Z",
+            "2026-09-26T00:00:00Z",
+        ),
+    )
+    db_conn.execute(
+        "INSERT INTO message_contents (message_id, subject_norm) VALUES (?, ?)",
+        (message_id, "subject"),
+    )
+    db_conn.commit()
+
+    dependent_objects = {
+        (row[0], row[1], row[2])
+        for row in db_conn.execute(
+            "SELECT type, name, tbl_name FROM sqlite_schema "
+            "WHERE name IN ('mc_ai', 'mc_ad', 'mc_au')"
+        )
+    }
+    assert dependent_objects == {
+        ("trigger", "mc_ai", "message_contents"),
+        ("trigger", "mc_ad", "message_contents"),
+        ("trigger", "mc_au", "message_contents"),
+    }
+    assert {row[2] for row in db_conn.execute("PRAGMA foreign_key_list(message_contents)")} == {
+        "messages"
+    }
+    assert {row[2] for row in db_conn.execute("PRAGMA foreign_key_list(pst_import_items)")} == {
+        "pst_imports",
+        "messages",
+    }
+    assert {row[2] for row in db_conn.execute("PRAGMA foreign_key_list(audit_log)")} == set()
+
+    def writer_factory(account_id: str) -> ManifestWriter:
+        return ManifestWriter(tmp_path, account_id)
+
+    def reader_factory(account_id: str) -> ManifestReader:
+        return ManifestReader(tmp_path, account_id)
+
+    assert finalize_message_folders(db_conn, writer_factory, reader_factory)
+    columns = {row[1] for row in db_conn.execute("PRAGMA table_info(messages)")}
+    assert "folder_id" not in columns
+    assert "uid" not in columns
+    assert db_conn.execute(
+        "SELECT source_item_key, subject FROM messages WHERE id = ?", (message_id,)
+    ).fetchone() == ("imap:SU5CT1g:42:7", "Subject")
+    assert db_conn.execute(
+        "SELECT folder_id, uid, uidvalidity, imap_flags FROM message_folders WHERE message_id = ?",
+        (message_id,),
+    ).fetchone() == (folder_id, 7, 42, "\\Seen")
+    assert db_conn.execute(
+        "SELECT subject_norm FROM message_contents WHERE message_id = ?", (message_id,)
+    ).fetchone() == ("subject",)
+    assert db_conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    assert db_conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+    assert {
+        (row[0], row[1], row[2])
+        for row in db_conn.execute(
+            "SELECT type, name, tbl_name FROM sqlite_schema "
+            "WHERE name IN ('mc_ai', 'mc_ad', 'mc_au')"
+        )
+    } == dependent_objects
+    events = reader_factory("account").read_all_events()
+    snapshot = next(
+        event for event in events if event.get("event") == "message_membership_snapshot"
+    )
+    assert snapshot["source_item_key"] == "imap:SU5CT1g:42:7"
+    assert finalize_message_folders(db_conn, writer_factory, reader_factory) is False
+
+
+def test_message_folder_finalizer_merges_gmail_duplicates_and_preserves_memberships(
+    db_conn: sqlite3.Connection,
+    tmp_path: Path,
+) -> None:
+    assert migrate(db_conn, tmp_path / "metadata.db") == 9
+    db_conn.execute(
+        "INSERT INTO accounts (id, provider_type, oauth_provider) VALUES (?, ?, ?)",
+        ("gmail", "imap", "google"),
+    )
+    folder_ids: list[int] = []
+    for raw_name in ("INBOX", "[Gmail]/Important"):
+        db_conn.execute(
+            "INSERT INTO folders (account_id, raw_name, display_name) VALUES (?, ?, ?)",
+            ("gmail", raw_name, raw_name),
+        )
+        folder_ids.append(int(db_conn.execute("SELECT last_insert_rowid()").fetchone()[0]))
+    message_ids: list[int] = []
+    for folder_id, uid, uidvalidity, local_state in (
+        (folder_ids[0], 7, 42, "trashed"),
+        (folder_ids[1], 3, 81, "active"),
+    ):
+        db_conn.execute(
+            """INSERT INTO messages (
+                account_id, folder_id, content_key, source_item_key, uid, uidvalidity,
+                local_state, relative_path, file_hash, gmail_msgid
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "gmail",
+                folder_id,
+                "gmail-content",
+                f"{uidvalidity}:{uid}",
+                uid,
+                uidvalidity,
+                local_state,
+                "eml/gmail/message.eml",
+                "b" * 64,
+                "123456789",
+            ),
+        )
+        message_id = int(db_conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+        message_ids.append(message_id)
+        db_conn.execute(
+            "INSERT INTO message_folders "
+            "(message_id, folder_id, uid, uidvalidity, remote_state) "
+            "VALUES (?, ?, ?, ?, 'present')",
+            (message_id, folder_id, uid, uidvalidity),
+        )
+        db_conn.execute(
+            "INSERT INTO message_contents (message_id, subject_norm) VALUES (?, ?)",
+            (message_id, f"subject-{uid}"),
+        )
+    db_conn.commit()
+
+    def writer_factory(account_id: str) -> ManifestWriter:
+        return ManifestWriter(tmp_path, account_id)
+
+    def reader_factory(account_id: str) -> ManifestReader:
+        return ManifestReader(tmp_path, account_id)
+
+    assert finalize_message_folders(db_conn, writer_factory, reader_factory)
+    canonical_id = min(message_ids)
+    assert db_conn.execute(
+        "SELECT id, source_item_key, local_state FROM messages WHERE account_id = ?",
+        ("gmail",),
+    ).fetchall() == [(canonical_id, "gmail:123456789", "active")]
+    assert db_conn.execute(
+        "SELECT folder_id, uid FROM message_folders WHERE message_id = ? ORDER BY folder_id",
+        (canonical_id,),
+    ).fetchall() == [(folder_ids[0], 7), (folder_ids[1], 3)]
+    assert db_conn.execute(
+        "SELECT COUNT(*) FROM message_identity_aliases WHERE message_id = ?", (canonical_id,)
+    ).fetchone() == (2,)
+    assert any(
+        event.get("event") == "message_identity_linked"
+        for event in reader_factory("gmail").read_all_events()
+    )

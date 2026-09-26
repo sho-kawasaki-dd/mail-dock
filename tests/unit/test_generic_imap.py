@@ -301,6 +301,17 @@ def test_delete_uses_move_when_server_supports_it(fake_imap: None) -> None:
     assert not any(command[0] == "STORE" for command in commands)
 
 
+def test_gmail_membership_removal_removes_only_the_selected_label(fake_imap: None) -> None:
+    fetcher = GenericImapFetcher("imap.example.test", "user", "password", oauth_provider="google")
+    fetcher.connect()
+
+    fetcher.remove_remote_membership("INBOX", 7)
+
+    commands = FakeImap.instances[0].commands
+    assert ("STORE", ("7", "-X-GM-LABELS.SILENT", '("INBOX")')) in commands
+    assert not any(command[0] in {"COPY", "MOVE", "EXPUNGE"} for command in commands)
+
+
 def test_trash_detection_prefers_special_use_over_candidates_and_configuration(
     fake_imap: None,
 ) -> None:
@@ -440,6 +451,27 @@ def test_google_fetch_requests_gmail_extensions(fake_imap: None) -> None:
         command for command in FakeImap.instances[0].commands if command[0] == "FETCH"
     )
     assert "X-GM-MSGID X-GM-THRID X-GM-LABELS" in str(fetch_command[1][1])
+
+
+def test_google_condstore_flag_refresh_requests_gmail_labels(fake_imap: None) -> None:
+    fetcher = GenericImapFetcher(
+        "imap.example.test",
+        "user@example.test",
+        None,
+        auth_type="xoauth2",
+        account_id="account",
+        oauth_provider="google",
+        oauth_client_id="client-id",
+        access_token_provider=StaticAccessTokenProvider(),
+    )
+    fetcher.connect()
+
+    list(fetcher.iter_flags_since("INBOX", 41))
+
+    fetch_command = next(
+        command for command in FakeImap.instances[0].commands if command[0] == "FETCH"
+    )
+    assert fetch_command[1] == ("1:*", "(UID FLAGS X-GM-LABELS)", "(CHANGEDSINCE 41)")
 
 
 def test_xoauth2_connect_refreshes_and_uses_the_access_token(

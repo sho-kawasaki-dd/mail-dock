@@ -242,8 +242,11 @@ def test_db_commit_fault_has_no_checkpoint_and_is_next_range_target(tmp_path: Pa
     repository, connection, _ = _open_repository(db_path)
     reader = ManifestReader(root, ACCOUNT_ID)
     pending_events = list(reader.read_events_since_checkpoint())
-    assert [event["event"] for event in pending_events] == ["fetch"]
-    assert list(reader.read_all_events())[-1]["event"] == "fetch"
+    assert [event["event"] for event in pending_events] == [
+        "fetch",
+        "message_membership_snapshot",
+    ]
+    assert list(reader.read_all_events())[-1]["event"] == "message_membership_snapshot"
     _assert_no_dangling_database_files(connection, root)
 
     recovery_manifest = ManifestWriter(root, ACCOUNT_ID)

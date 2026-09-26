@@ -15,10 +15,12 @@ from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.ports import BaseEmlStorage, BaseManifestReader
 from mail_dock.infrastructure.database.connection import checkpoint_truncate, connect
 from mail_dock.infrastructure.database.fts_maintenance import integrity_check
+from mail_dock.infrastructure.database.message_folder_migration import finalize_message_folders
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
 from mail_dock.infrastructure.database.migrator import migrate
 from mail_dock.infrastructure.database.pst_import_repository import SqlitePstImportRepository
 from mail_dock.infrastructure.storage.detach import storage_io
+from mail_dock.infrastructure.storage.manifest import ManifestReader, ManifestWriter
 from mail_dock.infrastructure.storage.pst_manifest import PstManifestReader
 from mail_dock.usecases.reindex import ReindexProgress, ReindexResult, reindex, reindex_pst
 
@@ -75,6 +77,11 @@ def rebuild_database(
     try:
         connection = connect(temporary_path, journal_mode=journal_mode)
         migrate(connection, temporary_path)
+        finalize_message_folders(
+            connection,
+            lambda account_id: ManifestWriter(database_path.parent, account_id),
+            lambda account_id: ManifestReader(database_path.parent, account_id),
+        )
         repository = SqliteMessageRepository(connection)
         for manifest_reader in manifest_readers:
             result = reindex(
@@ -94,6 +101,11 @@ def rebuild_database(
                 database_path.parent,
                 cancel=cancel,
             )
+        )
+        finalize_message_folders(
+            connection,
+            lambda account_id: ManifestWriter(database_path.parent, account_id),
+            lambda account_id: ManifestReader(database_path.parent, account_id),
         )
         checkpoint_truncate(connection)
         _verify_database(connection)

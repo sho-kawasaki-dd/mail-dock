@@ -38,6 +38,8 @@ _MANIFEST_EVENTS = frozenset(
         "remote_delete_intent",
         "remote_delete_completed",
         "remote_delete_uncertain",
+        "message_membership_snapshot",
+        "message_identity_linked",
     }
 )
 _FETCH_FIELDS = frozenset(
@@ -105,6 +107,20 @@ _MOVED_FIELDS = frozenset(
         "uid",
         "uidvalidity",
         "source_item_key",
+        "timestamp",
+    }
+)
+_MEMBERSHIP_SNAPSHOT_FIELDS = frozenset(
+    {"event", "account_id", "source_item_key", "memberships", "timestamp"}
+)
+_IDENTITY_LINK_FIELDS = frozenset(
+    {
+        "event",
+        "account_id",
+        "canonical_source_item_key",
+        "alias_source_item_key",
+        "evidence_kind",
+        "file_hash",
         "timestamp",
     }
 )
@@ -274,6 +290,50 @@ def _validate_event(event: Mapping[str, JSONValue]) -> dict[str, JSONValue]:
             raise TypeError("moved event uid must be an integer")
         if not isinstance(payload["uidvalidity"], int) or isinstance(payload["uidvalidity"], bool):
             raise TypeError("moved event uidvalidity must be an integer")
+    elif event_name == "message_membership_snapshot":
+        _require_fields(payload, _MEMBERSHIP_SNAPSHOT_FIELDS, event_name)
+        _require_text(payload, "account_id", event_name)
+        _require_text(payload, "source_item_key", event_name)
+        memberships = payload["memberships"]
+        if not isinstance(memberships, list):
+            raise TypeError("message_membership_snapshot memberships must be a list")
+        for membership in memberships:
+            if not isinstance(membership, dict):
+                raise TypeError("membership snapshot entries must be objects")
+            for field in ("folder_raw_name", "remote_state"):
+                if not isinstance(membership.get(field), str) or not membership[field]:
+                    raise TypeError(f"membership snapshot {field} must be a non-empty string")
+            for field in ("uid", "uidvalidity"):
+                value = membership.get(field)
+                if value is not None and (not isinstance(value, int) or isinstance(value, bool)):
+                    raise TypeError(f"membership snapshot {field} must be an integer or null")
+            for field in (
+                "moved_to_folder_raw_name",
+                "imap_flags",
+                "flags_seen_at",
+                "last_seen_at",
+            ):
+                value = membership.get(field)
+                if value is not None and not isinstance(value, str):
+                    raise TypeError(f"membership snapshot {field} must be a string or null")
+        gmail_labels = payload.get("gmail_labels")
+        if gmail_labels is not None and (
+            not isinstance(gmail_labels, list)
+            or any(not isinstance(label, str) for label in gmail_labels)
+        ):
+            raise TypeError("message_membership_snapshot gmail_labels must be a string list")
+    elif event_name == "message_identity_linked":
+        _require_fields(payload, _IDENTITY_LINK_FIELDS, event_name)
+        for field in (
+            "account_id",
+            "canonical_source_item_key",
+            "alias_source_item_key",
+            "evidence_kind",
+            "file_hash",
+        ):
+            _require_text(payload, field, event_name)
+        if payload["canonical_source_item_key"] == payload["alias_source_item_key"]:
+            raise ValueError("identity link canonical and alias keys must differ")
     return payload
 
 

@@ -76,7 +76,13 @@ class MinimalFetcher(BaseMailFetcher):
     def download_eml_headers(self, raw_name: str, uid: int) -> bytes:
         return b""
 
-    def delete_remote_message(self, raw_name: str, uid: int, *, mode: str = "trash") -> None:
+    def remove_remote_membership(self, raw_name: str, uid: int) -> None:
+        pass
+
+    def move_remote_message_to_trash(self, raw_name: str, uid: int) -> None:
+        pass
+
+    def expunge_remote_message(self, raw_name: str, uid: int) -> None:
         pass
 
 

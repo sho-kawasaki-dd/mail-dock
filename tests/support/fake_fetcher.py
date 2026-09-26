@@ -150,7 +150,13 @@ class FakeFetcher(BaseMailFetcher):
             token.raise_if_cancelled()
             message = self._messages.get((raw_name, uid))
             if message is not None:
-                yield RemoteMessageRef(uid=uid, flags=message.ref.flags)
+                yield RemoteMessageRef(
+                    uid=uid,
+                    flags=message.ref.flags,
+                    gmail_msgid=message.ref.gmail_msgid,
+                    gmail_thrid=message.ref.gmail_thrid,
+                    gmail_labels=message.ref.gmail_labels,
+                )
 
     def iter_flags_since(
         self,
@@ -200,9 +206,19 @@ class FakeFetcher(BaseMailFetcher):
         head, _, _ = raw.partition(separator)
         return head + separator
 
-    def delete_remote_message(self, raw_name: str, uid: int, *, mode: str = "trash") -> None:
-        if mode not in {"trash", "expunge"}:
-            raise PermanentError(f"unsupported delete mode: {mode}")
+    def remove_remote_membership(self, raw_name: str, uid: int) -> None:
+        try:
+            del self._messages[(raw_name, uid)]
+        except KeyError as exc:
+            raise PermanentError(f"unknown message: {raw_name}:{uid}") from exc
+
+    def move_remote_message_to_trash(self, raw_name: str, uid: int) -> None:
+        self._remove_message(raw_name, uid)
+
+    def expunge_remote_message(self, raw_name: str, uid: int) -> None:
+        self._remove_message(raw_name, uid)
+
+    def _remove_message(self, raw_name: str, uid: int) -> None:
         try:
             del self._messages[(raw_name, uid)]
         except KeyError as exc:

@@ -738,6 +738,9 @@ class SettingsDialog(QDialog):
         self._remote_delete_mode.setObjectName("remoteDeleteModeComboBox")
         self._remote_delete_mode.addItem(strings.SETTINGS_REMOTE_DELETE_MODE_TRASH, "trash")
         self._remote_delete_mode.addItem(strings.SETTINGS_REMOTE_DELETE_MODE_EXPUNGE, "expunge")
+        self._remote_delete_mode.addItem(
+            strings.SETTINGS_REMOTE_DELETE_MODE_REMOVE_MEMBERSHIP, "remove_membership"
+        )
         remote_delete_index = self._remote_delete_mode.findData(self._settings.remote_delete_mode)
         if remote_delete_index < 0 and self._settings.remote_delete_mode == "permanent":
             remote_delete_index = self._remote_delete_mode.findData("expunge")

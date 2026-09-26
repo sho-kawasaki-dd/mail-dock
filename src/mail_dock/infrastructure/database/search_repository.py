@@ -66,6 +66,10 @@ class SqliteSearchRepository(BaseSearchRepository):
         if cancel is not None:
             self._conn().set_progress_handler(None, 0)
 
+    def _uses_memberships(self) -> bool:
+        columns = self._conn().execute("PRAGMA table_info(messages)").fetchall()
+        return "folder_id" not in {str(row[1]) for row in columns}
+
     @staticmethod
     def _term_query(term: str, *, like: bool) -> tuple[str, tuple[str, ...]]:
         if like:
@@ -108,7 +112,7 @@ class SqliteSearchRepository(BaseSearchRepository):
         return positive, parameters
 
     @staticmethod
-    def _filter_clause(filters: MessageFilter) -> tuple[list[str], list[Any]]:
+    def _filter_clause(filters: MessageFilter, *, memberships: bool) -> tuple[list[str], list[Any]]:
         clauses: list[str] = []
         parameters: list[Any] = []
         if filters.account_ids is not None:
@@ -119,7 +123,17 @@ class SqliteSearchRepository(BaseSearchRepository):
         if filters.folder_ids is not None:
             if not filters.folder_ids:
                 return ["0"], []
-            clauses.append("m.folder_id IN (" + ", ".join("?" for _ in filters.folder_ids) + ")")
+            if memberships:
+                clauses.append(
+                    "EXISTS (SELECT 1 FROM message_folders AS mff "
+                    "WHERE mff.message_id = m.id AND mff.folder_id IN ("
+                    + ", ".join("?" for _ in filters.folder_ids)
+                    + "))"
+                )
+            else:
+                clauses.append(
+                    "m.folder_id IN (" + ", ".join("?" for _ in filters.folder_ids) + ")"
+                )
             parameters.extend(filters.folder_ids)
         if filters.date_from is not None:
             clauses.append("COALESCE(m.date_sent, m.internal_date, '') >= ?")
@@ -137,9 +151,17 @@ class SqliteSearchRepository(BaseSearchRepository):
         if filters.remote_states is not None:
             if not filters.remote_states:
                 return ["0"], []
-            clauses.append(
-                "m.remote_state IN (" + ", ".join("?" for _ in filters.remote_states) + ")"
-            )
+            if memberships:
+                clauses.append(
+                    "EXISTS (SELECT 1 FROM message_folders AS mfr "
+                    "WHERE mfr.message_id = m.id AND mfr.remote_state IN ("
+                    + ", ".join("?" for _ in filters.remote_states)
+                    + "))"
+                )
+            else:
+                clauses.append(
+                    "m.remote_state IN (" + ", ".join("?" for _ in filters.remote_states) + ")"
+                )
             parameters.extend(sorted(filters.remote_states))
         if filters.thread_key is not None:
             clauses.append("m.thread_key = ?")
@@ -193,7 +215,8 @@ class SqliteSearchRepository(BaseSearchRepository):
         if limit <= 0:
             raise ValueError("limit must be positive")
         match_expression, match_parameters = self._matching_expression(plan) if plan else ("", [])
-        clauses, filter_parameters = self._filter_clause(filters)
+        use_memberships = self._uses_memberships()
+        clauses, filter_parameters = self._filter_clause(filters, memberships=use_memberships)
         parameters: list[Any] = []
         if match_expression:
             clauses.insert(0, f"m.id IN ({match_expression})")
@@ -204,20 +227,49 @@ class SqliteSearchRepository(BaseSearchRepository):
             clauses.append("(COALESCE(m.date_sent, m.internal_date, ''), m.id) < (?, ?)")
             parameters.extend((cursor.sort_key, cursor.message_id))
         where = " AND ".join(clauses) if clauses else "1"
-        sql = (
-            "SELECT m.id, m.account_id, m.folder_id, f.raw_name, f.display_name, "
-            "m.subject, m.sender, m.date_sent, m.internal_date, m.size_bytes, "
-            "m.has_attachment, m.remote_state, m.local_state, m.thread_key, "
-            "m.imap_flags, moved_to_f.display_name, sf.error_class, m.flags_seen_at, "
-            "m.trashed_at "
-            "FROM messages AS m JOIN folders AS f ON f.id = m.folder_id "
-            "LEFT JOIN folders AS moved_to_f ON moved_to_f.id = m.moved_to_folder_id "
-            "LEFT JOIN sync_failures AS sf ON sf.account_id = m.account_id "
-            "AND sf.folder_id = m.folder_id AND sf.uidvalidity = m.uidvalidity "
-            "AND sf.uid = m.uid "
-            f"WHERE {where} "
-            "ORDER BY COALESCE(m.date_sent, m.internal_date, '') DESC, m.id DESC LIMIT ?"
-        )
+        if use_memberships:
+            membership_filter = ""
+            join_parameters: list[Any] = []
+            if filters.folder_ids is not None:
+                membership_filter = (
+                    " AND mf2.folder_id IN (" + ", ".join("?" for _ in filters.folder_ids) + ")"
+                )
+                join_parameters.extend(filters.folder_ids)
+            membership_join = (
+                "JOIN message_folders AS mf ON mf.message_id = m.id "
+                "AND mf.folder_id = (SELECT MIN(mf2.folder_id) FROM message_folders AS mf2 "
+                "WHERE mf2.message_id = m.id"
+                f"{membership_filter}) "
+                "JOIN folders AS f ON f.id = mf.folder_id "
+                "LEFT JOIN folders AS moved_to_f ON moved_to_f.id = mf.moved_to_folder_id "
+                "LEFT JOIN sync_failures AS sf ON sf.account_id = m.account_id "
+                "AND sf.folder_id = mf.folder_id AND sf.uidvalidity = mf.uidvalidity "
+                "AND sf.uid = mf.uid"
+            )
+            sql = (
+                "SELECT m.id, m.account_id, mf.folder_id, f.raw_name, f.display_name, "
+                "m.subject, m.sender, m.date_sent, m.internal_date, m.size_bytes, "
+                "m.has_attachment, mf.remote_state, m.local_state, m.thread_key, "
+                "mf.imap_flags, moved_to_f.display_name, sf.error_class, mf.flags_seen_at, "
+                "m.trashed_at FROM messages AS m " + membership_join + f" WHERE {where} "
+                "ORDER BY COALESCE(m.date_sent, m.internal_date, '') DESC, m.id DESC LIMIT ?"
+            )
+            parameters = [*join_parameters, *parameters]
+        else:
+            sql = (
+                "SELECT m.id, m.account_id, m.folder_id, f.raw_name, f.display_name, "
+                "m.subject, m.sender, m.date_sent, m.internal_date, m.size_bytes, "
+                "m.has_attachment, m.remote_state, m.local_state, m.thread_key, "
+                "m.imap_flags, moved_to_f.display_name, sf.error_class, m.flags_seen_at, "
+                "m.trashed_at "
+                "FROM messages AS m JOIN folders AS f ON f.id = m.folder_id "
+                "LEFT JOIN folders AS moved_to_f ON moved_to_f.id = m.moved_to_folder_id "
+                "LEFT JOIN sync_failures AS sf ON sf.account_id = m.account_id "
+                "AND sf.folder_id = m.folder_id AND sf.uidvalidity = m.uidvalidity "
+                "AND sf.uid = m.uid "
+                f"WHERE {where} "
+                "ORDER BY COALESCE(m.date_sent, m.internal_date, '') DESC, m.id DESC LIMIT ?"
+            )
         parameters.append(limit + 1)
         connection = self._conn()
         self._install_progress_handler(cancel)
@@ -267,7 +319,9 @@ class SqliteSearchRepository(BaseSearchRepository):
             match_expression, match_parameters = (
                 self._matching_expression(plan) if plan else ("", [])
             )
-            clauses, filter_parameters = self._filter_clause(filters)
+            clauses, filter_parameters = self._filter_clause(
+                filters, memberships=self._uses_memberships()
+            )
             parameters: list[Any] = []
             if match_expression:
                 clauses.insert(0, f"m.id IN ({match_expression})")
@@ -279,7 +333,7 @@ class SqliteSearchRepository(BaseSearchRepository):
                 row = (
                     self._conn()
                     .execute(
-                        "SELECT COUNT(*) FROM messages AS m WHERE " + where,
+                        "SELECT COUNT(DISTINCT m.id) FROM messages AS m WHERE " + where,
                         parameters,
                     )
                     .fetchone()
@@ -316,6 +370,41 @@ class SqliteSearchRepository(BaseSearchRepository):
 
     def get_message(self, message_id: int) -> MessageDetail | None:
         with self._db_io("get message"):
+            if self._uses_memberships():
+                row = (
+                    self._conn()
+                    .execute(
+                        "SELECT m.id, m.account_id, mf.folder_id, f.raw_name, f.display_name, "
+                        "m.subject, m.sender, m.date_sent, m.internal_date, m.size_bytes, "
+                        "m.has_attachment, mf.remote_state, m.local_state, m.thread_key, "
+                        "mf.imap_flags, moved_to_f.display_name, sf.error_class, "
+                        "mf.flags_seen_at, m.trashed_at, m.recipient, m.cc, m.message_id, "
+                        "m.in_reply_to, m.references_ids, m.relative_path, m.file_hash "
+                        "FROM messages AS m JOIN message_folders AS mf ON mf.message_id = m.id "
+                        "AND mf.folder_id = (SELECT MIN(mf2.folder_id) FROM message_folders AS mf2 "
+                        "WHERE mf2.message_id = m.id) "
+                        "JOIN folders AS f ON f.id = mf.folder_id "
+                        "LEFT JOIN folders AS moved_to_f ON moved_to_f.id = mf.moved_to_folder_id "
+                        "LEFT JOIN sync_failures AS sf ON sf.account_id = m.account_id "
+                        "AND sf.folder_id = mf.folder_id AND sf.uidvalidity = mf.uidvalidity "
+                        "AND sf.uid = mf.uid WHERE m.id = ?",
+                        (message_id,),
+                    )
+                    .fetchone()
+                )
+                if row is None:
+                    return None
+                summary = self._summary(row)
+                return MessageDetail(
+                    **summary.__dict__,
+                    recipient=str(row[19] or ""),
+                    cc=str(row[20] or ""),
+                    message_id=str(row[21]) if row[21] is not None else None,
+                    in_reply_to=str(row[22]) if row[22] is not None else None,
+                    references_ids=str(row[23]) if row[23] is not None else None,
+                    relative_path=str(row[24]) if row[24] is not None else None,
+                    file_hash=str(row[25]) if row[25] is not None else None,
+                )
             row = (
                 self._conn()
                 .execute(

@@ -852,7 +852,33 @@ class MainWindow(QMainWindow):
 
     def _remote_delete_mode(self) -> str:
         configured = getattr(getattr(self.context, "settings", None), "remote_delete_mode", "trash")
-        return "expunge" if configured in {"expunge", "permanent"} else "trash"
+        if configured in {"expunge", "permanent"}:
+            return "expunge"
+        if configured == "remove_membership":
+            return "remove_membership"
+        return "trash"
+
+    def _gmail_label_removal_is_available(self) -> bool:
+        selected_node = self._selected_tree_node()
+        if selected_node is None or getattr(selected_node, "kind", None) != "folder":
+            return False
+        selected_ids = set(self._selected_message_ids())
+        selected_accounts = {
+            item.account_id for item in self.message_table_model.items if item.id in selected_ids
+        }
+        if len(selected_accounts) != 1:
+            return False
+        create_repository = getattr(self.context, "create_message_repository", None)
+        if not callable(create_repository):
+            return False
+        try:
+            accounts = create_repository().list_accounts()
+        except Exception:
+            return False
+        return any(
+            account.get("id") in selected_accounts and account.get("oauth_provider") == "google"
+            for account in accounts
+        )
 
     def _remote_trash_folder_is_known(self) -> bool:
         settings = getattr(self.context, "settings", None)
@@ -876,6 +902,12 @@ class MainWindow(QMainWindow):
         elif not selected:
             enabled = False
             reason = strings.REMOTE_DELETE_DISABLED_NO_SELECTION
+        elif (
+            self._remote_delete_mode() == "remove_membership"
+            and not self._gmail_label_removal_is_available()
+        ):
+            enabled = False
+            reason = strings.REMOTE_DELETE_DISABLED_GMAIL_LABEL
         elif self._remote_delete_mode() == "trash" and not self._remote_trash_folder_is_known():
             enabled = False
             reason = strings.REMOTE_DELETE_DISABLED_NO_TRASH
@@ -908,9 +940,16 @@ class MainWindow(QMainWindow):
         message_ids = self._selected_message_ids()
         if not message_ids or not self.delete_remote_action.isEnabled():
             return
+        selected_node = self._selected_tree_node()
+        folder_id = (
+            selected_node.folder_id
+            if selected_node is not None and getattr(selected_node, "kind", None) == "folder"
+            else None
+        )
         self._file_token = self.sync_worker.dry_run_remote_delete(
             message_ids,
             self._storage_write_gate,
+            folder_id=folder_id,
         )
         self._status_label.setText(strings.STATUS_REMOTE_DELETE_DRY_RUN)
         self._update_remote_delete_action()

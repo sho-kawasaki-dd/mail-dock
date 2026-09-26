@@ -21,6 +21,7 @@ from mail_dock.domain.errors import (
     TransientError,
 )
 from mail_dock.domain.fetcher import BaseMailFetcher, CancelToken, RemoteMessageRef
+from mail_dock.domain.message_identity import imap_source_item_key, remote_source_item_key
 from mail_dock.domain.messages import ParsedMessage, StoredEml
 from mail_dock.domain.ports import BaseEmlStorage, BaseManifestWriter, JSONValue
 from mail_dock.domain.repository import BaseMessageRepository, MessageContents, MessageRecord
@@ -176,8 +177,13 @@ def _message_contents(parsed: ParsedMessage, *, empty: bool = False) -> MessageC
     }
 
 
-def _source_item_key(uidvalidity: int, uid: int) -> str:
-    return f"{uidvalidity}:{uid}"
+def _source_item_key(
+    folder_raw_name: str,
+    uidvalidity: int,
+    uid: int,
+    gmail_msgid: str | None = None,
+) -> str:
+    return remote_source_item_key(folder_raw_name, uidvalidity, uid, gmail_msgid)
 
 
 def _fetch_event(
@@ -200,7 +206,7 @@ def _fetch_event(
         "folder_raw_name": folder_raw_name,
         "uid": ref.uid,
         "uidvalidity": uidvalidity,
-        "source_item_key": _source_item_key(uidvalidity, ref.uid),
+        "source_item_key": _source_item_key(folder_raw_name, uidvalidity, ref.uid, gmail_msgid),
         "message_id": parsed.message_id or ref.message_id,
         "relative_path": stored.relative_path,
         "file_hash": stored.file_hash,
@@ -236,10 +242,78 @@ def _skipped_event(
     }
 
 
+def _membership_snapshot_event(
+    repo: BaseMessageRepository,
+    account_id: str,
+    record: Mapping[str, Any],
+    *,
+    remove_folder_id: Any | None = None,
+    additional_records: Sequence[Mapping[str, Any]] = (),
+) -> dict[str, JSONValue]:
+    source_item_key = str(record["source_item_key"])
+    folders = {
+        folder.get("id"): str(folder.get("raw_name", ""))
+        for folder in repo.list_folders(account_id)
+    }
+    moved_names = {folder_id: name for folder_id, name in folders.items()}
+    memberships = {
+        membership.get("folder_id"): dict(membership)
+        for membership in repo.list_message_memberships(account_id, source_item_key)
+    }
+    if remove_folder_id is not None:
+        memberships.pop(remove_folder_id, None)
+    else:
+        for incoming_record in (record, *additional_records):
+            incoming_folder_id = incoming_record.get("folder_id")
+            incoming = {
+                "folder_id": incoming_folder_id,
+                "uid": incoming_record.get("uid"),
+                "uidvalidity": incoming_record.get("uidvalidity"),
+                "remote_state": incoming_record.get("remote_state", "present"),
+                "moved_to_folder_id": incoming_record.get("moved_to_folder_id"),
+                "imap_flags": incoming_record.get("imap_flags"),
+                "flags_seen_at": incoming_record.get("flags_seen_at"),
+                "last_seen_at": incoming_record.get("last_seen_at"),
+            }
+            memberships[incoming_folder_id] = incoming
+    serialized = [
+        {
+            "folder_raw_name": folders.get(folder_id, membership.get("folder_raw_name", "")),
+            "uid": membership.get("uid"),
+            "uidvalidity": membership.get("uidvalidity"),
+            "remote_state": membership.get("remote_state", "present"),
+            "moved_to_folder_raw_name": moved_names.get(membership.get("moved_to_folder_id")),
+            "imap_flags": membership.get("imap_flags"),
+            "flags_seen_at": membership.get("flags_seen_at"),
+            "last_seen_at": membership.get("last_seen_at"),
+        }
+        for folder_id, membership in sorted(
+            memberships.items(), key=lambda item: str(folders.get(item[0], ""))
+        )
+    ]
+    snapshot: dict[str, Any] = {
+        "event": "message_membership_snapshot",
+        "account_id": account_id,
+        "source_item_key": source_item_key,
+        "memberships": serialized,
+        "timestamp": _now_iso(),
+    }
+    labels = record.get("gmail_labels")
+    if isinstance(labels, str):
+        try:
+            labels = json.loads(labels)
+        except ValueError:
+            labels = None
+    if isinstance(labels, (list, tuple)) and all(isinstance(label, str) for label in labels):
+        snapshot["gmail_labels"] = list(labels)
+    return cast(dict[str, JSONValue], snapshot)
+
+
 def _record_for_message(
     *,
     account_id: str,
     folder_id: Any,
+    folder_raw_name: str,
     uidvalidity: int,
     ref: RemoteMessageRef,
     parsed: ParsedMessage,
@@ -255,7 +329,7 @@ def _record_for_message(
         "folder_id": folder_id,
         "message_id": parsed.message_id or ref.message_id,
         "content_key": content_key,
-        "source_item_key": _source_item_key(uidvalidity, ref.uid),
+        "source_item_key": _source_item_key(folder_raw_name, uidvalidity, ref.uid, ref.gmail_msgid),
         "uid": ref.uid,
         "uidvalidity": uidvalidity,
         "remote_state": "present",
@@ -317,35 +391,10 @@ def _get_local_message(
     uidvalidity: int,
     uid: int,
 ) -> _LocalMessage | None:
-    """Read historical message data when a concrete repository offers it.
-
-    The Phase 1 repository port intentionally exposes only UID sets. Concrete
-    repositories may provide one of these read helpers without changing that
-    small port; synchronization still works when no helper is available.
-    """
-
-    for method_name in ("get_message_by_uid", "find_message_by_uid"):
-        method = getattr(repo, method_name, None)
-        if method is None:
-            continue
-        result = method(account_id, folder_id, uidvalidity, uid)
-        if result is None:
-            return None
-        if isinstance(result, tuple) and len(result) == 2:
-            return _LocalMessage(result[0], cast(MessageRecord, result[1]))
-        if isinstance(result, Mapping):
-            message_id = result.get("id")
-            if message_id is not None:
-                return _LocalMessage(message_id, cast(MessageRecord, result))
-    for record in repo.list_reparse_targets(account_id, False):
-        if (
-            record.get("folder_id") == folder_id
-            and record.get("uidvalidity") == uidvalidity
-            and record.get("uid") == uid
-            and record.get("id") is not None
-        ):
-            return _LocalMessage(record["id"], record)
-    return None
+    record = repo.get_message_by_uid(account_id, folder_id, uidvalidity, uid)
+    if record is None or record.get("id") is None:
+        return None
+    return _LocalMessage(record["id"], record)
 
 
 def sync_account(
@@ -370,8 +419,11 @@ def sync_account(
     ensure_imap_account(repo, account_id)
     token = cancel or CancelToken()
     stats = _MutableStats(started_at=time.monotonic())
+    google_account = any(
+        account.get("id") == account_id and account.get("oauth_provider") == "google"
+        for account in repo.list_accounts()
+    )
     targets = [dict(folder) for folder in repo.list_sync_targets(account_id)]
-    folder_raw_names = {folder["id"]: str(folder["raw_name"]) for folder in targets}
     known_messages: dict[tuple[Any, int, int], _LocalMessage] = {}
     checkpoint_sequence = manifest.last_checkpoint_sequence or 0
 
@@ -403,9 +455,55 @@ def sync_account(
         nonlocal checkpoint_sequence
         if not pending and cursor_folder_id is None:
             return
+        snapshot_records: dict[str, list[Mapping[str, Any]]] = {}
+        identity_aliases: list[tuple[str, str, str, str]] = []
         for item in pending:
             if item.event is not None:
                 manifest.append(item.event)
+                if (
+                    item.event.get("event") == "fetch"
+                    and item.record is not None
+                    and item.record.get("source_item_key") is not None
+                ):
+                    source_item_key = str(item.record["source_item_key"])
+                    snapshot_records.setdefault(source_item_key, []).append(item.record)
+                    gmail_msgid = item.record.get("gmail_msgid")
+                    folder_raw_name = item.event.get("folder_raw_name")
+                    uidvalidity = item.record.get("uidvalidity")
+                    uid = item.record.get("uid")
+                    file_hash = item.record.get("file_hash")
+                    if (
+                        isinstance(gmail_msgid, str)
+                        and isinstance(folder_raw_name, str)
+                        and isinstance(uidvalidity, int)
+                        and isinstance(uid, int)
+                        and isinstance(file_hash, str)
+                    ):
+                        alias_key = imap_source_item_key(folder_raw_name, uidvalidity, uid)
+                        if alias_key != source_item_key:
+                            identity_aliases.append(
+                                (source_item_key, alias_key, "gmail_msgid", file_hash)
+                            )
+                            manifest.append(
+                                {
+                                    "event": "message_identity_linked",
+                                    "account_id": account_id,
+                                    "canonical_source_item_key": source_item_key,
+                                    "alias_source_item_key": alias_key,
+                                    "evidence_kind": "gmail_msgid",
+                                    "file_hash": file_hash,
+                                    "timestamp": _now_iso(),
+                                }
+                            )
+        for records in snapshot_records.values():
+            manifest.append(
+                _membership_snapshot_event(
+                    repo,
+                    account_id,
+                    records[0],
+                    additional_records=records[1:],
+                )
+            )
         manifest.flush_and_sync()
         repo.begin_batch()
         for item in pending:
@@ -419,6 +517,11 @@ def sync_account(
                     _get_int(stored_record, "uid"),
                 )
                 known_messages[key] = _LocalMessage(message_id, stored_record)
+                for canonical_key, alias_key, evidence_kind, _file_hash in identity_aliases:
+                    if canonical_key == stored_record.get("source_item_key"):
+                        repo.add_message_identity_alias(
+                            account_id, alias_key, message_id, evidence_kind
+                        )
             if item.failure is not None:
                 failure_uidvalidity, error_class, message = item.failure
                 repo.record_failure(
@@ -469,6 +572,7 @@ def sync_account(
             record = _record_for_message(
                 account_id=account_id,
                 folder_id=folder_id,
+                folder_raw_name=folder_raw_name,
                 uidvalidity=uidvalidity,
                 ref=ref,
                 parsed=parsed,
@@ -503,6 +607,7 @@ def sync_account(
             record = _record_for_message(
                 account_id=account_id,
                 folder_id=folder_id,
+                folder_raw_name=folder_raw_name,
                 uidvalidity=uidvalidity,
                 ref=ref,
                 parsed=parsed,
@@ -536,6 +641,7 @@ def sync_account(
         record = _record_for_message(
             account_id=account_id,
             folder_id=folder_id,
+            folder_raw_name=folder_raw_name,
             uidvalidity=uidvalidity,
             ref=ref,
             parsed=parsed,
@@ -691,6 +797,8 @@ def sync_account(
         since = to_utc_iso8601(now - timedelta(days=options.flag_refresh_window_days))
         items = repo.list_flag_refresh_items(account_id, folder_id, uidvalidity, since)
         local_flags: dict[int, str | None] = {}
+        local_labels: dict[int, tuple[str, ...]] = {}
+        refresh_items: dict[int, Mapping[str, Any]] = {}
         expired_uids: set[int] = set()
         minimum_interval = timedelta(seconds=options.flag_refresh_min_interval_seconds)
         for item in items:
@@ -698,6 +806,17 @@ def sync_account(
             if not isinstance(uid, int) or isinstance(uid, bool):
                 continue
             local_flags[uid] = cast(str | None, item.get("imap_flags"))
+            refresh_items[uid] = item
+            try:
+                saved_labels = json.loads(str(item.get("gmail_labels") or "[]"))
+            except (TypeError, ValueError):
+                saved_labels = []
+            if isinstance(saved_labels, list) and all(
+                isinstance(label, str) for label in saved_labels
+            ):
+                local_labels[uid] = tuple(saved_labels)
+            else:
+                local_labels[uid] = ()
             if _flag_seen_at_is_expired(
                 item.get("flags_seen_at"),
                 now=now,
@@ -728,10 +847,54 @@ def sync_account(
 
         pending_changes: list[tuple[int, str | None]] = []
         pending_touches: list[int] = []
+        pending_label_updates: dict[int, tuple[str, ...]] = {}
 
         def flush_flag_updates() -> None:
-            if not pending_changes and not pending_touches:
+            if not pending_changes and not pending_touches and not pending_label_updates:
                 return
+            if google_account:
+                folders_by_id = {item.get("id"): item for item in repo.list_folders(account_id)}
+                snapshots_by_source_key: dict[str, list[Mapping[str, Any]]] = {}
+                for uid in pending_label_updates:
+                    labels = pending_label_updates[uid]
+                    item = refresh_items[uid]
+                    folder_record = folders_by_id.get(folder_id, {})
+                    source_item_key = item.get("source_item_key")
+                    folder_name = folder_record.get("raw_name")
+                    if not isinstance(source_item_key, str) or not isinstance(folder_name, str):
+                        raise StorageError("Gmail flag refresh lacks membership identity")
+                    membership_record = dict(item)
+                    membership_record.update(
+                        {
+                            "account_id": account_id,
+                            "folder_id": folder_id,
+                            "folder_raw_name": folder_name,
+                            "imap_flags": next(
+                                (
+                                    flags
+                                    for changed_uid, flags in pending_changes
+                                    if changed_uid == uid
+                                ),
+                                item.get("imap_flags"),
+                            ),
+                            "last_seen_at": seen_at,
+                            "gmail_labels": list(labels),
+                        }
+                    )
+                    snapshots_by_source_key.setdefault(source_item_key, []).append(
+                        membership_record
+                    )
+                for records in snapshots_by_source_key.values():
+                    manifest.append(
+                        _membership_snapshot_event(
+                            repo,
+                            account_id,
+                            records[0],
+                            additional_records=records[1:],
+                        )
+                    )
+                if pending_label_updates:
+                    manifest.flush_and_sync()
             repo.begin_batch()
             try:
                 for uid, flags in pending_changes:
@@ -751,19 +914,35 @@ def sync_account(
                         tuple(pending_touches),
                         seen_at,
                     )
+                for uid, labels in pending_label_updates.items():
+                    message_id = refresh_items[uid].get("message_id")
+                    if message_id is not None:
+                        repo.update_gmail_labels(
+                            message_id,
+                            json.dumps(list(labels), ensure_ascii=False, separators=(",", ":")),
+                        )
                 repo.commit_batch()
             finally:
                 pending_changes.clear()
                 pending_touches.clear()
+                pending_label_updates.clear()
 
-        def queue_update(uid: int, flags: str | None) -> None:
+        def queue_update(
+            uid: int, flags: str | None, gmail_labels: tuple[str, ...] | None = None
+        ) -> None:
             pending_changes.append((uid, flags))
-            if len(pending_changes) + len(pending_touches) >= 500:
+            if (
+                google_account
+                and gmail_labels is not None
+                and tuple(sorted(gmail_labels)) != tuple(sorted(local_labels.get(uid, ())))
+            ):
+                pending_label_updates[uid] = gmail_labels
+            if len(pending_changes) + len(pending_touches) + len(pending_label_updates) >= 500:
                 flush_flag_updates()
 
         def queue_touch(uid: int) -> None:
             pending_touches.append(uid)
-            if len(pending_changes) + len(pending_touches) >= 500:
+            if len(pending_changes) + len(pending_touches) + len(pending_label_updates) >= 500:
                 flush_flag_updates()
 
         response_uids: set[int] = set()
@@ -778,7 +957,7 @@ def sync_account(
                 if ref.uid not in local_flags:
                     continue
                 response_uids.add(ref.uid)
-                queue_update(ref.uid, " ".join(ref.flags))
+                queue_update(ref.uid, " ".join(ref.flags), ref.gmail_labels)
             token.raise_if_cancelled()
             flush_flag_updates()
             if current_modseq is not None:
@@ -802,7 +981,7 @@ def sync_account(
                 if ref.uid not in local_flags:
                     continue
                 response_uids.add(ref.uid)
-                queue_update(ref.uid, " ".join(ref.flags))
+                queue_update(ref.uid, " ".join(ref.flags), ref.gmail_labels)
             token.raise_if_cancelled()
             for uid in sorted(expired_uids - response_uids):
                 queue_touch(uid)
@@ -828,10 +1007,15 @@ def sync_account(
                 continue
             response_uids.add(ref.uid)
             remote_flags = " ".join(ref.flags)
-            if local_flags[ref.uid] == remote_flags:
+            labels_changed = (
+                google_account
+                and ref.gmail_labels is not None
+                and tuple(sorted(ref.gmail_labels)) != tuple(sorted(local_labels.get(ref.uid, ())))
+            )
+            if local_flags[ref.uid] == remote_flags and not labels_changed:
                 queue_touch(ref.uid)
             else:
-                queue_update(ref.uid, remote_flags)
+                queue_update(ref.uid, remote_flags, ref.gmail_labels)
         token.raise_if_cancelled()
         flush_flag_updates()
         if not use_condstore and saved_modseq is not None:
@@ -991,7 +1175,9 @@ def sync_account(
             )
             continue
         missing_uids = repo.local_uids(account_id, folder_id, uidvalidity) - remote_uids
-        state_events: list[tuple[Any, Any, Mapping[str, JSONValue]]] = []
+        state_events: list[
+            tuple[Any, Any, Any, Mapping[str, JSONValue], Mapping[str, Any], bool]
+        ] = []
         for uid in sorted(missing_uids):
             local = known_messages.get((folder_id, uidvalidity, uid)) or _get_local_message(
                 repo, account_id, folder_id, uidvalidity, uid
@@ -1011,14 +1197,7 @@ def sync_account(
                     if candidate.get("content_key") == content_key
                     and candidate.get("file_hash") == file_hash
                 )
-            if len(candidates) == 1:
-                state = "moved"
-                moved_to = candidates[0].get("folder_id")
-                moved_to_raw_name = folder_raw_names.get(moved_to)
-                if moved_to_raw_name is None:
-                    continue
-                event_name = "moved"
-            elif len(candidates) == 0 and isinstance(file_hash, str):
+            if google_account or (len(candidates) == 0 and isinstance(file_hash, str)):
                 state = "deleted"
                 moved_to = None
                 moved_to_raw_name = None
@@ -1028,6 +1207,11 @@ def sync_account(
                 moved_to = None
                 moved_to_raw_name = None
                 event_name = "remote_state_unknown"
+            source_item_key = str(
+                local.record.get("source_item_key")
+                or _source_item_key(folder_raw_name, uidvalidity, uid)
+            )
+            remove_membership = google_account
             del state
             event: dict[str, JSONValue] = {
                 "event": event_name,
@@ -1035,7 +1219,7 @@ def sync_account(
                 "folder_raw_name": folder_raw_name,
                 "uid": uid,
                 "uidvalidity": uidvalidity,
-                "source_item_key": _source_item_key(uidvalidity, uid),
+                "source_item_key": source_item_key,
                 "message_id": cast(JSONValue, local.record.get("message_id")),
                 "content_key": cast(JSONValue, content_key),
                 "file_hash": cast(JSONValue, file_hash),
@@ -1043,20 +1227,52 @@ def sync_account(
             }
             if moved_to_raw_name is not None:
                 event["moved_to_folder_raw_name"] = moved_to_raw_name
-            state_events.append((local.message_id, moved_to, event))
+            state_events.append(
+                (local.message_id, folder_id, moved_to, event, local.record, remove_membership)
+            )
         if state_events:
-            for _, _, state_event in state_events:
+            for _, _, _, state_event, _, _ in state_events:
                 manifest.append(state_event)
+            for _, folder_id, _, _state_event, record, remove_membership in state_events:
+                if remove_membership:
+                    manifest.append(
+                        _membership_snapshot_event(
+                            repo,
+                            account_id,
+                            record,
+                            remove_folder_id=folder_id,
+                        )
+                    )
             manifest.flush_and_sync()
             repo.begin_batch()
-            for message_id, moved_to, state_event in state_events:
+            for (
+                message_id,
+                source_folder_id,
+                moved_to,
+                state_event,
+                _record,
+                remove_membership,
+            ) in state_events:
+                if remove_membership:
+                    state_source_key = state_event.get("source_item_key")
+                    if not isinstance(state_source_key, str) or not state_source_key:
+                        raise StorageError("Gmail membership removal has no canonical source key")
+                    remaining = [
+                        membership
+                        for membership in repo.list_message_memberships(
+                            account_id, state_source_key
+                        )
+                        if membership.get("folder_id") != source_folder_id
+                    ]
+                    repo.replace_message_memberships(message_id, remaining)
+                    continue
                 event_name = str(state_event["event"])
                 state = {
                     "delete_detected": "deleted",
                     "remote_state_unknown": "unknown",
                     "moved": "moved",
                 }[event_name]
-                repo.update_remote_state(message_id, state, moved_to)
+                repo.update_remote_state(message_id, state, moved_to, source_folder_id)
             repo.commit_batch()
 
     return SyncResult(
@@ -1118,6 +1334,7 @@ def force_fetch_message(
     record = _record_for_message(
         account_id=account_id,
         folder_id=folder_id,
+        folder_raw_name=folder_raw_name,
         uidvalidity=uidvalidity,
         ref=ref,
         parsed=parsed,

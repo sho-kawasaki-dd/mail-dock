@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -46,6 +47,7 @@ class DeleteCandidate:
     relative_path: str
     file_hash: str
     message_id_header: str | None = None
+    folder_id: Any | None = None
 
     @property
     def date(self) -> str | None:
@@ -144,7 +146,24 @@ def _candidate_from_record(
     repo: BaseMessageRepository,
     storage: BaseEmlStorage,
     record: MessageRecord,
+    *,
+    folder_id: Any | None = None,
 ) -> tuple[DeleteCandidate | None, str | None]:
+    source_item_key = record.get("source_item_key")
+    account_id_value = record.get("account_id")
+    if isinstance(source_item_key, str) and isinstance(account_id_value, str):
+        memberships = repo.list_message_memberships(account_id_value, source_item_key)
+        if folder_id is not None:
+            memberships = tuple(
+                membership for membership in memberships if membership.get("folder_id") == folder_id
+            )
+            if len(memberships) != 1:
+                return None, "membership_not_found"
+        elif len(memberships) > 1:
+            return None, "folder_selection_required"
+        if memberships:
+            record = {**record, **memberships[0]}
+
     message_id = record.get("id")
     subject = record.get("subject")
     subject_text = subject if isinstance(subject, str) else ""
@@ -216,6 +235,7 @@ def _candidate_from_record(
             message_id_header=(
                 record.get("message_id") if isinstance(record.get("message_id"), str) else None
             ),
+            folder_id=record.get("folder_id"),
         ),
         None,
     )
@@ -227,6 +247,7 @@ def dry_run(
     *,
     message_ids: Iterable[Any],
     storage_state: RemoteDeleteGate,
+    folder_id: Any | None = None,
 ) -> DeleteDryRunResult:
     """Build a deletion plan after verifying every local prerequisite."""
 
@@ -244,7 +265,7 @@ def dry_run(
         if record is None:
             exclusions.append(DeleteExclusion(message_id, "message_not_found"))
             continue
-        candidate, reason = _candidate_from_record(repo, storage, record)
+        candidate, reason = _candidate_from_record(repo, storage, record, folder_id=folder_id)
         if candidate is None:
             exclusions.append(
                 DeleteExclusion(
@@ -302,11 +323,77 @@ def _commit_completed_state(
     candidate: DeleteCandidate,
     mode: str,
     timestamp: str,
+    record: MessageRecord,
 ) -> None:
     repo.begin_batch()
-    repo.update_remote_state(candidate.message_id, "deleted")
+    if mode == "remove_membership":
+        source_item_key = record.get("source_item_key")
+        if not isinstance(source_item_key, str) or not source_item_key:
+            raise StorageError("Gmail membership removal has no canonical source key")
+        remaining = [
+            membership
+            for membership in repo.list_message_memberships(candidate.account_id, source_item_key)
+            if membership.get("folder_id") != candidate.folder_id
+        ]
+        repo.replace_message_memberships(candidate.message_id, remaining)
+    else:
+        repo.update_remote_state(candidate.message_id, "deleted", folder_id=candidate.folder_id)
     repo.record_audit(_audit_entry(candidate, mode, timestamp))
     repo.commit_batch()
+
+
+def _membership_snapshot_event(
+    repo: BaseMessageRepository,
+    candidate: DeleteCandidate,
+    record: MessageRecord,
+) -> dict[str, JSONValue]:
+    source_item_key = record.get("source_item_key")
+    if not isinstance(source_item_key, str) or not source_item_key:
+        raise StorageError("Gmail membership removal has no canonical source key")
+    folder_names = {
+        folder.get("id"): folder.get("raw_name")
+        for folder in repo.list_folders(candidate.account_id)
+    }
+    memberships = []
+    for membership in repo.list_message_memberships(candidate.account_id, source_item_key):
+        if membership.get("folder_id") == candidate.folder_id:
+            continue
+        folder_raw_name = membership.get("folder_raw_name") or folder_names.get(
+            membership.get("folder_id")
+        )
+        if not isinstance(folder_raw_name, str) or not folder_raw_name:
+            raise StorageError("Gmail membership snapshot has an unknown folder")
+        memberships.append(
+            cast(
+                JSONValue,
+                {
+                    "folder_raw_name": folder_raw_name,
+                    "uid": membership.get("uid"),
+                    "uidvalidity": membership.get("uidvalidity"),
+                    "remote_state": membership.get("remote_state", "present"),
+                    "moved_to_folder_raw_name": membership.get("moved_to_folder_raw_name"),
+                    "imap_flags": membership.get("imap_flags"),
+                    "flags_seen_at": membership.get("flags_seen_at"),
+                    "last_seen_at": membership.get("last_seen_at"),
+                },
+            )
+        )
+    snapshot: dict[str, JSONValue] = {
+        "event": "message_membership_snapshot",
+        "account_id": candidate.account_id,
+        "source_item_key": source_item_key,
+        "memberships": memberships,
+        "timestamp": _timestamp(),
+    }
+    labels = record.get("gmail_labels")
+    if isinstance(labels, str):
+        try:
+            labels = json.loads(labels)
+        except ValueError as error:
+            raise StorageError("Gmail labels are invalid in the local message record") from error
+    if isinstance(labels, (list, tuple)) and all(isinstance(label, str) for label in labels):
+        snapshot["gmail_labels"] = [label for label in labels if label != candidate.folder_raw_name]
+    return snapshot
 
 
 def _plan_items(
@@ -335,8 +422,8 @@ def execute(
         ensure_imap_account(repo, item.account_id)
     if not storage_state.is_remote_delete_allowed():
         raise StorageDetachedError("Remote deletion requires attached storage")
-    if mode not in {"trash", "expunge"}:
-        raise ValueError("mode must be 'trash' or 'expunge'")
+    if mode not in {"trash", "expunge", "remove_membership"}:
+        raise ValueError("mode must be 'trash', 'expunge', or 'remove_membership'")
     if delete_batch_limit <= 0:
         raise ValueError("delete_batch_limit must be positive")
 
@@ -351,6 +438,15 @@ def execute(
         }
         if account_ids & google_account_ids:
             raise PermanentError("Gmail accounts do not support remote expunge")
+    if mode == "remove_membership":
+        account_ids = {candidate.account_id for candidate in items}
+        google_account_ids = {
+            account.get("id")
+            for account in repo.list_accounts()
+            if account.get("oauth_provider") == "google"
+        }
+        if not account_ids <= google_account_ids:
+            raise PermanentError("remote membership removal is only supported for Gmail labels")
     if mode == "expunge" and not fetcher.supports_uid_expunge():
         raise PermanentError("UID EXPUNGE is not supported by this IMAP server")
     if mode == "trash" and items and fetcher.find_trash_folder() is None:
@@ -368,7 +464,9 @@ def execute(
             skipped_ids.append(planned.message_id)
             errors.append((planned.message_id, "message_not_found"))
             continue
-        candidate, reason = _candidate_from_record(repo, storage, record)
+        candidate, reason = _candidate_from_record(
+            repo, storage, record, folder_id=planned.folder_id
+        )
         if candidate is None:
             skipped_ids.append(planned.message_id)
             errors.append((planned.message_id, reason or "not_deletable"))
@@ -388,7 +486,12 @@ def execute(
         manifest.append(_event("remote_delete_intent", candidate, mode, timestamp))
         manifest.flush_and_sync()
         try:
-            fetcher.delete_remote_message(candidate.folder_raw_name, candidate.uid, mode=mode)
+            if mode == "trash":
+                fetcher.move_remote_message_to_trash(candidate.folder_raw_name, candidate.uid)
+            elif mode == "expunge":
+                fetcher.expunge_remote_message(candidate.folder_raw_name, candidate.uid)
+            else:
+                fetcher.remove_remote_membership(candidate.folder_raw_name, candidate.uid)
         except (TransientError, StorageDetachedError) as error:
             manifest.append(_event("remote_delete_uncertain", candidate, mode, _timestamp()))
             manifest.flush_and_sync()
@@ -402,8 +505,10 @@ def execute(
 
         completed_timestamp = _timestamp()
         manifest.append(_event("remote_delete_completed", candidate, mode, completed_timestamp))
+        if mode == "remove_membership":
+            manifest.append(_membership_snapshot_event(repo, candidate, record))
         manifest.flush_and_sync()
-        _commit_completed_state(repo, candidate, mode, completed_timestamp)
+        _commit_completed_state(repo, candidate, mode, completed_timestamp, record)
         completed_ids.append(candidate.message_id)
         total_size_bytes += candidate.size_bytes
 
@@ -459,7 +564,7 @@ def reconcile_uncertain_deletes(
             or isinstance(uid, bool)
             or not isinstance(uidvalidity, int)
             or isinstance(uidvalidity, bool)
-            or mode not in {"trash", "expunge"}
+            or mode not in {"trash", "expunge", "remove_membership"}
         ):
             _LOGGER.warning("Ignoring malformed remote-delete intent during reconciliation")
             continue
@@ -483,8 +588,10 @@ def reconcile_uncertain_deletes(
             continue
         timestamp = _timestamp()
         writer.append(_event("remote_delete_completed", candidate, str(mode), timestamp))
+        if mode == "remove_membership":
+            writer.append(_membership_snapshot_event(repo, candidate, record))
         writer.flush_and_sync()
-        _commit_completed_state(repo, candidate, str(mode), timestamp)
+        _commit_completed_state(repo, candidate, str(mode), timestamp, record)
 
 
 def _folder_id(repo: BaseMessageRepository, account_id: str, raw_name: str) -> Any:

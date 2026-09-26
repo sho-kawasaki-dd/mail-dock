@@ -22,7 +22,7 @@ from mail_dock.domain.errors import ConfigError, ConfigVersionTooNewError
 CURRENT_SCHEMA_VERSION = 2
 CONFIG_FILENAME = "config.json"
 
-REMOTE_DELETE_MODES = frozenset({"trash", "expunge"})
+REMOTE_DELETE_MODES = frozenset({"trash", "expunge", "remove_membership"})
 PURGE_MODES = frozenset({"manual", "grace", "immediate"})
 STARTUP_VERIFICATION_MODES = frozenset({"quick", "full"})
 ENCRYPTION_DECLARATIONS = frozenset({"encrypted", "unencrypted", "unknown"})

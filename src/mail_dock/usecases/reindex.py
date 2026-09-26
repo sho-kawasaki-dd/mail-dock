@@ -11,6 +11,10 @@ from typing import Any, cast
 
 from mail_dock.domain.errors import OperationCancelledError, StorageError
 from mail_dock.domain.fetcher import CancelToken
+from mail_dock.domain.message_identity import (
+    gmail_source_item_key,
+    imap_source_item_key,
+)
 from mail_dock.domain.messages import ParsedMessage
 from mail_dock.domain.ports import (
     BaseEmlStorage,
@@ -112,7 +116,12 @@ def _event_key(event: Mapping[str, JSONValue]) -> tuple[str, str, int, int] | No
 
 def _source_item_key(event: Mapping[str, JSONValue], key: tuple[str, str, int, int]) -> str:
     source_item_key = _text(event, "source_item_key")
-    return source_item_key if source_item_key is not None else f"{key[2]}:{key[3]}"
+    gmail_msgid = _text(event, "gmail_msgid")
+    if gmail_msgid is not None:
+        return gmail_source_item_key(gmail_msgid)
+    if source_item_key is not None and source_item_key.startswith(("imap:", "gmail:")):
+        return source_item_key
+    return imap_source_item_key(key[1], key[2], key[3])
 
 
 def _account_record(event: Mapping[str, JSONValue]) -> MessageRecord | None:
@@ -236,6 +245,49 @@ def _purge_key(event: Mapping[str, JSONValue]) -> tuple[str, str, str, str] | No
     return cast(tuple[str, str, str, str], (account_id, source_item_key, relative_path, file_hash))
 
 
+def _resolve_identity_key(
+    account_id: str,
+    source_item_key: str,
+    links: Mapping[tuple[str, str], tuple[str, str, str]],
+) -> str:
+    resolved = source_item_key
+    seen: set[str] = set()
+    while (account_id, resolved) in links:
+        if resolved in seen:
+            raise StorageError("Manifest identity links contain a cycle")
+        seen.add(resolved)
+        resolved = links[(account_id, resolved)][0]
+    return resolved
+
+
+def _normalize_purge_key(
+    purge_key: tuple[str, str, str, str],
+    fetches: Mapping[tuple[str, str, int, int], _FetchRecord],
+    links: Mapping[tuple[str, str], tuple[str, str, str]],
+) -> tuple[str, str, str, str]:
+    account_id, source_item_key, relative_path, file_hash = purge_key
+    if source_item_key.startswith(("imap:", "gmail:")):
+        return purge_key
+    matches = [
+        fetch
+        for fetch in fetches.values()
+        if fetch.event.get("account_id") == account_id
+        and fetch.event.get("source_item_key") == source_item_key
+        and fetch.event.get("relative_path") == relative_path
+        and fetch.event.get("file_hash") == file_hash
+    ]
+    if len(matches) != 1:
+        return purge_key
+    fetch = matches[0]
+    normalized_key = _source_item_key(fetch.event, fetch.key)
+    return (
+        account_id,
+        _resolve_identity_key(account_id, normalized_key, links),
+        relative_path,
+        file_hash,
+    )
+
+
 def reindex(
     repo: BaseMessageRepository,
     storage: BaseEmlStorage,
@@ -255,6 +307,8 @@ def reindex(
     account_events: dict[str, Mapping[str, JSONValue]] = {}
     folder_events: dict[tuple[str, str], Mapping[str, JSONValue]] = {}
     fetches: dict[tuple[str, str, int, int], _FetchRecord] = {}
+    identity_links: dict[tuple[str, str], tuple[str, str, str]] = {}
+    membership_snapshots: list[tuple[str, str, Mapping[str, JSONValue]]] = []
     states: dict[tuple[str, str, int, int], _MessageState] = {}
     purge_events: dict[tuple[str, str, str, str], Mapping[str, JSONValue]] = {}
     completed_purges: set[tuple[str, str, str, str]] = set()
@@ -274,6 +328,31 @@ def reindex(
                 raw_name = _text(event, "folder_raw_name")
                 if account_id is not None and raw_name is not None:
                     folder_events[(account_id, raw_name)] = event
+            elif event_name == "message_membership_snapshot":
+                account_id = _text(event, "account_id")
+                source_item_key = _text(event, "source_item_key")
+                if account_id is not None and source_item_key is not None:
+                    membership_snapshots.append((account_id, source_item_key, event))
+            elif event_name == "message_identity_linked":
+                account_id = _text(event, "account_id")
+                canonical = _text(event, "canonical_source_item_key")
+                alias = _text(event, "alias_source_item_key")
+                evidence = _text(event, "evidence_kind")
+                file_hash = _text(event, "file_hash")
+                if (
+                    account_id is None
+                    or canonical is None
+                    or alias is None
+                    or evidence is None
+                    or file_hash is None
+                ):
+                    raise StorageError("Manifest identity link is missing required fields")
+                link_key = (account_id, alias)
+                existing_link = identity_links.get(link_key)
+                link_value = (canonical, evidence, file_hash)
+                if existing_link is not None and existing_link != link_value:
+                    raise StorageError("Manifest alias maps to multiple canonical messages")
+                identity_links[link_key] = link_value
             elif event_name == "fetch":
                 key = _event_key(event)
                 if key is not None:
@@ -302,23 +381,81 @@ def reindex(
             elif event_name == "purge_intent":
                 purge_key = _purge_key(event)
                 if purge_key is not None:
-                    purge_events[purge_key] = event
+                    purge_events[_normalize_purge_key(purge_key, fetches, identity_links)] = event
             elif event_name == "purged":
                 purge_key = _purge_key(event)
                 if purge_key is not None:
-                    completed_purges.add(purge_key)
+                    normalized_purge_key = _normalize_purge_key(purge_key, fetches, identity_links)
+                    completed_purges.add(normalized_purge_key)
                     related_fetch = next(
                         (
                             fetch.event
                             for fetch in fetches.values()
                             if fetch.event.get("account_id") == event.get("account_id")
-                            and _source_item_key(event, fetch.key) == event.get("source_item_key")
+                            and _resolve_identity_key(
+                                str(fetch.event.get("account_id")),
+                                _source_item_key(fetch.event, fetch.key),
+                                identity_links,
+                            )
+                            == normalized_purge_key[1]
+                            and fetch.event.get("relative_path") == normalized_purge_key[2]
+                            and fetch.event.get("file_hash") == normalized_purge_key[3]
                         ),
                         None,
                     )
                     audit_events.append((event, "local_purge", related_fetch))
     except OperationCancelledError:
         return ReindexResult(0, 0, 0, 0, 0, 0, (), True)
+
+    for account_id, alias in identity_links:
+        _resolve_identity_key(account_id, alias, identity_links)
+    canonical_by_fetch: dict[tuple[str, str, int, int], str] = {}
+    canonical_hashes: dict[tuple[str, str], str] = {}
+    for fetch in fetches.values():
+        account_id = fetch.key[0]
+        source_item_key = _source_item_key(fetch.event, fetch.key)
+        canonical_key = _resolve_identity_key(account_id, source_item_key, identity_links)
+        link = identity_links.get((account_id, source_item_key))
+        fetch_hash = _text(fetch.event, "file_hash")
+        if link is not None and fetch_hash != link[2]:
+            raise StorageError("Manifest identity link EML hash does not match its fetch")
+        if fetch_hash is not None:
+            previous_hash = canonical_hashes.setdefault((account_id, canonical_key), fetch_hash)
+            if previous_hash != fetch_hash:
+                raise StorageError("Canonical message has inconsistent EML hashes")
+        canonical_by_fetch[fetch.key] = canonical_key
+    for (account_id, _alias), (canonical, _, file_hash) in identity_links.items():
+        canonical_key = _resolve_identity_key(account_id, canonical, identity_links)
+        expected_hash = canonical_hashes.get((account_id, canonical_key))
+        if expected_hash is not None and expected_hash != file_hash:
+            raise StorageError("Manifest identity link EML hash does not match its canonical fetch")
+
+    normalized_purge_events: dict[tuple[str, str, str, str], Mapping[str, JSONValue]] = {}
+    for purge_key, event in purge_events.items():
+        account_id, source_item_key, relative_path, file_hash = purge_key
+        normalized_purge_events[
+            (
+                account_id,
+                _resolve_identity_key(account_id, source_item_key, identity_links),
+                relative_path,
+                file_hash,
+            )
+        ] = event
+    purge_events = normalized_purge_events
+    completed_purges = {
+        (
+            account_id,
+            _resolve_identity_key(account_id, source_item_key, identity_links),
+            relative_path,
+            file_hash,
+        )
+        for account_id, source_item_key, relative_path, file_hash in completed_purges
+    }
+
+    snapshots_by_canonical: dict[tuple[str, str], Mapping[str, JSONValue]] = {}
+    for account_id, source_item_key, event in membership_snapshots:
+        canonical_key = _resolve_identity_key(account_id, source_item_key, identity_links)
+        snapshots_by_canonical[(account_id, canonical_key)] = event
 
     warnings: list[str] = []
     for account_id, event in account_events.items():
@@ -359,24 +496,31 @@ def reindex(
         for processed_count, fetch in enumerate(valid_fetches, start=1):
             token.raise_if_cancelled()
             event = fetch.event
-            relative_path = _text(event, "relative_path")
+            fetch_relative_path = _text(event, "relative_path")
             expected_hash = _text(event, "file_hash")
             account_id, folder_raw_name, uidvalidity, uid = fetch.key
-            if relative_path is None or expected_hash is None:
+            if fetch_relative_path is None or expected_hash is None:
                 skipped_count += 1
                 warnings.append(f"fetch has no stored EML: {account_id}:{uid}")
                 continue
-            source_item_key = _source_item_key(event, fetch.key)
-            completed_purge_key = (account_id, source_item_key, relative_path, expected_hash)
+            source_item_key = canonical_by_fetch[fetch.key]
+            completed_purge_key = (
+                account_id,
+                source_item_key,
+                fetch_relative_path,
+                expected_hash,
+            )
             is_purged = completed_purge_key in completed_purges
             try:
-                raw = storage.read_verified(relative_path, expected_hash)
+                raw = storage.read_verified(fetch_relative_path, expected_hash)
             except (FileNotFoundError, StorageError) as error:
                 if not is_purged:
                     skipped_count += 1
-                    warnings.append(f"could not verify EML: {relative_path}")
+                    warnings.append(f"could not verify EML: {fetch_relative_path}")
                     _LOGGER.warning(
-                        "Skipping EML during reindex: path=%s error=%s", relative_path, error
+                        "Skipping EML during reindex: path=%s error=%s",
+                        fetch_relative_path,
+                        error,
                     )
                     continue
                 # A completed purge intentionally has no EML left to parse.
@@ -401,7 +545,7 @@ def reindex(
                 "remote_state": state.remote_state,
                 "moved_to_folder_id": None,
                 "local_state": "active",
-                "relative_path": relative_path,
+                "relative_path": fetch_relative_path,
                 "file_hash": expected_hash,
                 "subject": parsed.subject,
                 "sender": parsed.sender,
@@ -422,10 +566,20 @@ def reindex(
                     else None
                 ),
             }
+            latest_snapshot = snapshots_by_canonical.get((account_id, source_item_key))
+            snapshot_labels = (
+                _string_list(latest_snapshot, "gmail_labels")
+                if latest_snapshot is not None
+                else None
+            )
+            if snapshot_labels is not None:
+                message["gmail_labels"] = json.dumps(
+                    snapshot_labels, ensure_ascii=False, separators=(",", ":")
+                )
             destination = state.moved_to_folder_raw_name
             contents: MessageContents | None = None
             if parsed.parse_error is not None:
-                warnings.append(f"EML parse failed: {relative_path}")
+                warnings.append(f"EML parse failed: {fetch_relative_path}")
 
             if is_purged:
                 message["local_state"] = "purged"
@@ -439,10 +593,11 @@ def reindex(
                 (message, contents, (account_id, folder_raw_name), destination)
             )
             if on_progress is not None:
-                on_progress(ReindexProgress(processed_count, total_count, relative_path))
+                on_progress(ReindexProgress(processed_count, total_count, fetch_relative_path))
 
         token.raise_if_cancelled()
         folder_ids: dict[tuple[str, str], Any] = {}
+        message_ids: dict[tuple[str, str], Any] = {}
         repo.begin_batch()
         for account in accounts.values():
             repo.upsert_account(account)
@@ -462,7 +617,65 @@ def reindex(
                         }
                     )
                 message["moved_to_folder_id"] = folder_ids[destination_key]
-            repo.add_message(message, contents)
+            message_id = repo.add_message(message, contents)
+            message_ids[(str(message["account_id"]), str(message["source_item_key"]))] = message_id
+        for (account_id, alias), (canonical, evidence, _) in identity_links.items():
+            canonical_key = _resolve_identity_key(account_id, canonical, identity_links)
+            message_id = message_ids.get((account_id, canonical_key))
+            if message_id is None:
+                raise StorageError("Manifest identity link has no canonical fetch")
+            repo.add_message_identity_alias(account_id, alias, message_id, evidence)
+        for (account_id, canonical_key), snapshot in snapshots_by_canonical.items():
+            message_id = message_ids.get((account_id, canonical_key))
+            if message_id is None:
+                raise StorageError("Membership snapshot has no canonical fetch")
+            raw_memberships = snapshot.get("memberships")
+            if not isinstance(raw_memberships, list):
+                raise StorageError("Manifest membership snapshot is invalid")
+            memberships: list[dict[str, Any]] = []
+            for raw_membership in raw_memberships:
+                if not isinstance(raw_membership, dict):
+                    raise StorageError("Manifest membership snapshot contains an invalid entry")
+                snapshot_folder_raw_name = raw_membership.get("folder_raw_name")
+                if not isinstance(snapshot_folder_raw_name, str) or not snapshot_folder_raw_name:
+                    raise StorageError("Manifest membership snapshot has no folder name")
+                folder_key = (account_id, snapshot_folder_raw_name)
+                if folder_key not in folder_ids:
+                    folder_ids[folder_key] = repo.upsert_folder(
+                        {
+                            "account_id": account_id,
+                            "raw_name": snapshot_folder_raw_name,
+                            "display_name": snapshot_folder_raw_name,
+                            "is_sync_target": 0,
+                        }
+                    )
+                moved_raw_name = raw_membership.get("moved_to_folder_raw_name")
+                moved_to_folder_id = None
+                if isinstance(moved_raw_name, str):
+                    moved_key = (account_id, moved_raw_name)
+                    if moved_key not in folder_ids:
+                        folder_ids[moved_key] = repo.upsert_folder(
+                            {
+                                "account_id": account_id,
+                                "raw_name": moved_raw_name,
+                                "display_name": moved_raw_name,
+                                "is_sync_target": 0,
+                            }
+                        )
+                    moved_to_folder_id = folder_ids[moved_key]
+                memberships.append(
+                    {
+                        "folder_id": folder_ids[folder_key],
+                        "uid": raw_membership.get("uid"),
+                        "uidvalidity": raw_membership.get("uidvalidity"),
+                        "remote_state": raw_membership.get("remote_state", "present"),
+                        "moved_to_folder_id": moved_to_folder_id,
+                        "imap_flags": raw_membership.get("imap_flags"),
+                        "flags_seen_at": raw_membership.get("flags_seen_at"),
+                        "last_seen_at": raw_membership.get("last_seen_at"),
+                    }
+                )
+            repo.replace_message_memberships(message_id, memberships)
         repo.commit_batch()
     except OperationCancelledError:
         return ReindexResult(0, 0, 0, 0, 0, 0, tuple(warnings), True)
@@ -470,10 +683,21 @@ def reindex(
     for event, operation, related_event in audit_events:
         audit_related = dict(related_event or {})
         account_id = _text(event, "account_id")
-        audit_source_item_key = _text(event, "source_item_key")
+        related_key = _event_key(related_event) if related_event is not None else None
+        audit_source_item_key = (
+            _source_item_key(related_event, related_key)
+            if related_event is not None and related_key is not None
+            else _text(event, "source_item_key")
+        )
         event_key = _event_key(event)
         if audit_source_item_key is None and event_key is not None:
-            audit_source_item_key = f"{event_key[2]}:{event_key[3]}"
+            audit_source_item_key = _resolve_identity_key(
+                event_key[0], f"{event_key[2]}:{event_key[3]}", identity_links
+            )
+        elif account_id is not None and audit_source_item_key is not None:
+            audit_source_item_key = _resolve_identity_key(
+                account_id, audit_source_item_key, identity_links
+            )
         if account_id is not None and audit_source_item_key is not None:
             for field, value in parsed_metadata.get(
                 (account_id, audit_source_item_key), {}

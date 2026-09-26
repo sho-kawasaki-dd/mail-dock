@@ -50,6 +50,7 @@ from mail_dock.infrastructure.database.connection import (
     connect,
 )
 from mail_dock.infrastructure.database.fts_maintenance import integrity_check
+from mail_dock.infrastructure.database.message_folder_migration import finalize_message_folders
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
 from mail_dock.infrastructure.database.migrator import migrate
 from mail_dock.infrastructure.database.search_repository import SqliteSearchRepository
@@ -1449,6 +1450,11 @@ def _run_command(
             repository = SqliteMessageRepository(session.connection_manager)
             reconcile_account_snapshots(
                 repository,
+                lambda account_id: ManifestWriter(session.root, account_id),
+                lambda account_id: ManifestReader(session.root, account_id),
+            )
+            finalize_message_folders(
+                session.connection_manager.get_connection(),
                 lambda account_id: ManifestWriter(session.root, account_id),
                 lambda account_id: ManifestReader(session.root, account_id),
             )

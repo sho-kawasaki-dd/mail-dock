@@ -846,6 +846,8 @@ class SyncWorker(Worker):
         self,
         message_ids: tuple[int, ...],
         storage_state: object,
+        *,
+        folder_id: int | None = None,
     ) -> CancelToken:
         """Build a remote-delete plan without contacting the IMAP server."""
 
@@ -857,6 +859,7 @@ class SyncWorker(Worker):
                     self._storage_factory(),
                     message_ids=message_ids,
                     storage_state=cast(Any, storage_state),
+                    folder_id=folder_id,
                 ),
             )
 

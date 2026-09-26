@@ -332,26 +332,26 @@
 
 ### **Group M: 5.2b Gmailラベル対応（`message_folders`）**
 
-- [ ] `migrations/009_message_folders.sql` でフォルダ依存状態を持つ `message_folders` を互換スキーマとして新設し、既存データをバックフィルする（このSQL段階では `messages` の旧列を残す）
-- [ ] 009適用後の冪等なfinalizerでmembership snapshot記録・Gmail重複統合・source key更新を終えてから `messages` を再構築し、`folder_id` / `uid` / `uidvalidity` / `remote_state` / `moved_to_folder_id` / `imap_flags` / `flags_seen_at` / `last_seen_at` を削除する
-- [ ] domainの共通ヘルパーで通常IMAP=`imap:{folder_key}:{uidvalidity}:{uid}`、Gmail=`gmail:{X-GM-MSGID}`、PST=既存キーを生成する
-- [ ] 旧IMAPマニフェストの `uidvalidity:uid` と、それを参照するpurge・監査・移動イベントを、reindex時に対応するfetchイベントと `folder_raw_name` から新形式へ正規化する
-- [ ] `UNIQUE messages(account_id, source_item_key)` と、UID非NULL時の `UNIQUE message_folders(folder_id, uidvalidity, uid)`、`message_identity_aliases(account_id, observed_source_item_key)` を作成する
-- [ ] finalizer開始前に `sqlite_schema` から `messages` / `message_contents` に依存するインデックス・トリガー・ビュー（`message_contents.message_id`・`pst_import_items.message_row_id` の外部キー、FTS5トリガー `mc_ai`/`mc_ad`/`mc_au` が `message_contents` 側にあること、`audit_log.message_id` はTEXTでFKではないこと）を棚卸しし、期待する定義をテストで固定する
-- [ ] `messages` 再構築はSQLite公式の一般化手順に従う: `PRAGMA foreign_keys=OFF` を `BEGIN IMMEDIATE` より前に設定→新テーブル作成→データ移行→旧テーブル削除→リネーム→インデックス/トリガー/ビュー再作成を1トランザクションで実施し、COMMIT前に `PRAGMA foreign_key_check` / `PRAGMA integrity_check` を実行、失敗時はロールバックしてから `PRAGMA foreign_keys=ON` へ戻す
-- [ ] `message_identity_aliases(account_id, observed_source_item_key, message_id, evidence_kind)` を新設し、`UNIQUE(account_id, observed_source_item_key)` を作成する
-- [ ] `domain/search.py::MessageFilter` と検索・一覧クエリを `message_folders` 経由のJOINへ更新する
-- [ ] `presentation/models/folder_tree_model.py` を `message_folders` を前提に更新する
-- [ ] 同期・削除検知・フラグ更新・UID一覧・移動検知・失敗再試行・reparse・verify・trash・フォルダ件数をmembership単位へ更新する
-- [ ] 検索・一覧・件数集計に `EXISTS` / `COUNT(DISTINCT message_id)` を用い、複数ラベル所属を二重計上しない
-- [ ] `BaseMailFetcher` のリモート操作を「membership除去」「ゴミ箱移動」「expunge」へ分離し、`delete_remote.py` でGmailのラベル除去と完全なゴミ箱移動を区別する
-- [ ] `count_path_references` 等の共有EML判定を `message_folders` 考慮へ更新する
-- [ ] ラベル所属変更ごとに完全な `message_membership_snapshot` を追記・fsyncしてからDBを更新し、reindexが最後のsnapshotから `message_folders` を復元できるようにする
-- [ ] 定期フラグ更新時に `X-GM-LABELS` も取得し、所属変更があればmembership snapshotを記録する
-- [ ] 5.2aの重複を `gmail_msgid` 単位で統合し、membershipの和集合・active優先・子テーブル/監査参照の付け替えを行う。EMLハッシュ不一致は自動統合せず移行エラーにする
+- [x] `migrations/009_message_folders.sql` でフォルダ依存状態を持つ `message_folders` を互換スキーマとして新設し、既存データをバックフィルする（このSQL段階では `messages` の旧列を残す）
+- [x] 009適用後の冪等なfinalizerでmembership snapshot記録・Gmail重複統合・source key更新を終えてから `messages` を再構築し、`folder_id` / `uid` / `uidvalidity` / `remote_state` / `moved_to_folder_id` / `imap_flags` / `flags_seen_at` / `last_seen_at` を削除する
+- [x] domainの共通ヘルパーで通常IMAP=`imap:{folder_key}:{uidvalidity}:{uid}`、Gmail=`gmail:{X-GM-MSGID}`、PST=既存キーを生成する
+- [x] 旧IMAPマニフェストの `uidvalidity:uid` と、それを参照するpurge・監査・移動イベントを、reindex時に対応するfetchイベントと `folder_raw_name` から新形式へ正規化する
+- [x] `UNIQUE messages(account_id, source_item_key)` と、UID非NULL時の `UNIQUE message_folders(folder_id, uidvalidity, uid)`、`message_identity_aliases(account_id, observed_source_item_key)` を作成する
+- [x] finalizer開始前に `sqlite_schema` から `messages` / `message_contents` に依存するインデックス・トリガー・ビュー（`message_contents.message_id`・`pst_import_items.message_row_id` の外部キー、FTS5トリガー `mc_ai`/`mc_ad`/`mc_au` が `message_contents` 側にあること、`audit_log.message_id` はTEXTでFKではないこと）を棚卸しし、期待する定義をテストで固定する
+- [x] `messages` 再構築はSQLite公式の一般化手順に従う: `PRAGMA foreign_keys=OFF` を `BEGIN IMMEDIATE` より前に設定→新テーブル作成→データ移行→旧テーブル削除→リネーム→インデックス/トリガー/ビュー再作成を1トランザクションで実施し、COMMIT前に `PRAGMA foreign_key_check` / `PRAGMA integrity_check` を実行、失敗時はロールバックしてから `PRAGMA foreign_keys=ON` へ戻す
+- [x] `message_identity_aliases(account_id, observed_source_item_key, message_id, evidence_kind)` を新設し、`UNIQUE(account_id, observed_source_item_key)` を作成する
+- [x] `domain/search.py::MessageFilter` と検索・一覧クエリを `message_folders` 経由のJOINへ更新する
+- [x] `presentation/models/folder_tree_model.py` を `message_folders` を前提に更新する
+- [x] 同期・削除検知・フラグ更新・UID一覧・移動検知・失敗再試行・reparse・verify・trash・フォルダ件数をmembership単位へ更新する
+- [x] 検索・一覧・件数集計に `EXISTS` / `COUNT(DISTINCT message_id)` を用い、複数ラベル所属を二重計上しない
+- [x] `BaseMailFetcher` のリモート操作を「membership除去」「ゴミ箱移動」「expunge」へ分離し、`delete_remote.py` でGmailのラベル除去と完全なゴミ箱移動を区別する
+- [x] `count_path_references` 等の共有EML判定を `message_folders` 考慮へ更新する
+- [x] ラベル所属変更ごとに完全な `message_membership_snapshot` を追記・fsyncしてからDBを更新し、reindexが最後のsnapshotから `message_folders` を復元できるようにする
+- [x] 定期フラグ更新時に `X-GM-LABELS` も取得し、所属変更があればmembership snapshotを記録する
+- [x] 5.2aの重複を `gmail_msgid` 単位で統合し、membershipの和集合・active優先・子テーブル/監査参照の付け替えを行う。EMLハッシュ不一致は自動統合せず移行エラーにする
 - [ ] 通常IMAPのMOVE統合は、アプリ自身が実行したMOVEでサーバーの `COPYUID` 等から新旧UIDの対応が確定した場合、または外部MOVE推定として移動元UID消失・移動先UID新規観測・両フォルダの同一同期サイクルでの完全走査成功・`file_hash`完全一致・候補1対1のすべてを満たす場合のみ行う。候補複数・走査失敗・ハッシュ不一致・COPYの可能性がある場合は統合せず別行として保持する
 - [ ] 移動先の書き込み順序を「EML保存→fetchイベント追記+fsync→`message_identity_linked`（`canonical_source_item_key`/`alias_source_item_key`/`evidence_kind`/`file_hash`）+完全な`message_membership_snapshot`を追記・fsync→`BEGIN IMMEDIATE`後にmembership付け替え・alias登録・重複行の子参照付け替えと削除」の順で実装する。canonical行は最古のfetchイベントを持つ行とし、`local_state`は1件でもactiveなら優先し、ハッシュ不一致は自動統合せずエラーにする
-- [ ] reindexで `message_identity_linked` イベントを読み、aliasをcanonical keyへ正規化してから同一canonical keyのfetchを1つの `messages` 行へ畳み込み、最後の完全なmembership snapshotから `message_folders` とalias表を復元する。alias循環・1つのaliasに対する複数canonical指定・ハッシュ不一致は復元エラーとして拒否する
+- [x] reindexで `message_identity_linked` イベントを読み、aliasをcanonical keyへ正規化してから同一canonical keyのfetchを1つの `messages` 行へ畳み込み、最後の完全なmembership snapshotから `message_folders` とalias表を復元する。alias循環・1つのaliasに対する複数canonical指定・ハッシュ不一致は復元エラーとして拒否する
 - [ ] 009の各段階を冪等にし、途中停止後の再実行と移行前バックアップからの復旧をテストする。加えて、`COPYUID`で対応が確定したMOVEの統合、外部MOVE推定の1対1候補のみの統合（COPY・候補複数・片側走査失敗・ハッシュ不一致は非統合）、マニフェストfsync後・DBコミット前の中断からの再実行と同一linkイベントの重複適用、`metadata.db`削除後にEML＋fetch＋identity link＋最後のmembership snapshotから同じcanonical構造を復元できることをテストする
 
 ### **Group N: 5.3 Microsoft 365 / Outlook.com**

@@ -9,9 +9,11 @@ import pytest
 from mail_dock.domain.errors import OperationCancelledError
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.search import MessageFilter, PageCursor
+from mail_dock.infrastructure.database.message_folder_migration import finalize_message_folders
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
 from mail_dock.infrastructure.database.migrator import migrate
 from mail_dock.infrastructure.database.search_repository import SqliteSearchRepository
+from mail_dock.infrastructure.storage.manifest import ManifestReader, ManifestWriter
 from mail_dock.usecases.search_messages import (
     count_messages,
     get_message,
@@ -44,6 +46,11 @@ def _repositories(
     )
     folder_b = messages.upsert_folder(
         {"account_id": "account-b", "raw_name": "Archive", "display_name": "保存"}
+    )
+    finalize_message_folders(
+        connection,
+        lambda account_id: ManifestWriter(db_path.parent, account_id),
+        lambda account_id: ManifestReader(db_path.parent, account_id),
     )
     return messages, SqliteSearchRepository(connection), folder_a, folder_b
 
@@ -122,6 +129,39 @@ def test_match_like_and_attachment_name_search(db_conn: sqlite3.Connection, tmp_
     assert [item.id for item in search_messages(search, query="invoice").items] == [match_id]
     assert [item.id for item in search_messages(search, query="tw").items] == [like_id]
     assert [item.id for item in search_messages(search, query="xlsx").items] == [like_id]
+
+
+def test_multiple_folder_memberships_return_one_canonical_search_result(
+    db_conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    messages, search, folder_a, _ = _repositories(db_conn, tmp_path / "metadata.db")
+    folder_b = messages.upsert_folder(
+        {"account_id": "account-a", "raw_name": "[Gmail]/Important", "display_name": "重要"}
+    )
+    source_key = "gmail:123456789"
+    record = {
+        "account_id": "account-a",
+        "folder_id": folder_a,
+        "uid": 1,
+        "uidvalidity": 42,
+        "content_key": "same-message",
+        "source_item_key": source_key,
+        "subject": "Important message",
+        "sender": "sender@example.com",
+        "relative_path": "eml/message.eml",
+        "file_hash": "a" * 64,
+        "gmail_msgid": "123456789",
+    }
+    message_id = int(messages.add_message(record, {"subject": "Important message"}))
+    second_membership = dict(record)
+    second_membership.update(folder_id=folder_b, uid=2)
+    assert int(messages.add_message(second_membership)) == message_id
+
+    page = search.list_messages(MessageFilter(folder_ids=(folder_a, folder_b)))
+    assert [item.id for item in page.items] == [message_id]
+    assert search.count_messages(MessageFilter(folder_ids=(folder_a, folder_b))) == 1
+    assert messages.exists_source_item_key("account-a", folder_a, source_key)
+    assert messages.exists_source_item_key("account-a", folder_b, source_key)
 
 
 def test_search_query_values_are_parameters_not_sql(

@@ -70,6 +70,9 @@ class BaseMessageRepository(ABC):
     ) -> None: ...
 
     @abstractmethod
+    def update_gmail_labels(self, message_id: Any, gmail_labels: str) -> None: ...
+
+    @abstractmethod
     def touch_flags_seen_at(
         self,
         account_id: str,
@@ -86,6 +89,26 @@ class BaseMessageRepository(ABC):
     def add_message(
         self, record: MessageRecord, contents: MessageContents | None = None
     ) -> Any: ...
+
+    @abstractmethod
+    def list_message_memberships(
+        self, account_id: str, source_item_key: str
+    ) -> Sequence[MessageRecord]: ...
+
+    @abstractmethod
+    def replace_message_memberships(
+        self, message_id: Any, memberships: Sequence[MessageRecord]
+    ) -> None: ...
+
+    @abstractmethod
+    def add_message_identity_alias(
+        self, account_id: str, observed_source_item_key: str, message_id: Any, evidence_kind: str
+    ) -> None: ...
+
+    @abstractmethod
+    def get_message_by_uid(
+        self, account_id: str, folder_id: Any, uidvalidity: int, uid: int
+    ) -> MessageRecord | None: ...
 
     @abstractmethod
     def exists_source_item_key(
@@ -109,7 +132,11 @@ class BaseMessageRepository(ABC):
 
     @abstractmethod
     def update_remote_state(
-        self, message_id: Any, state: str, moved_to_folder_id: Any = None
+        self,
+        message_id: Any,
+        state: str,
+        moved_to_folder_id: Any = None,
+        folder_id: Any | None = None,
     ) -> None: ...
 
     @abstractmethod

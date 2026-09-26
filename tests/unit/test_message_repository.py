@@ -75,6 +75,11 @@ def test_oauth_account_and_gmail_metadata_round_trip(
     assert db_conn.execute(
         "SELECT gmail_msgid, gmail_thrid, gmail_labels FROM messages"
     ).fetchone() == ("123456789", "987654321", "[]")
+    message_id = int(db_conn.execute("SELECT id FROM messages").fetchone()[0])
+    repository.update_gmail_labels(message_id, '["\\\\Important"]')
+    assert db_conn.execute(
+        "SELECT gmail_labels FROM messages WHERE id = ?", (message_id,)
+    ).fetchone() == ('["\\\\Important"]',)
     account_columns = {
         str(row[1]) for row in db_conn.execute("PRAGMA table_info(accounts)").fetchall()
     }
@@ -196,7 +201,12 @@ def test_flag_refresh_repository_operations_and_modseq_reset(
     repository.commit_batch()
 
     items = repository.list_flag_refresh_items("account", folder_id, 11, "2026-07-15T00:00:00Z")
-    assert items == [{"uid": 2, "imap_flags": "\\Flagged", "flags_seen_at": None}]
+    assert len(items) == 1
+    assert items[0]["uid"] == 2
+    assert items[0]["imap_flags"] == "\\Flagged"
+    assert items[0]["flags_seen_at"] is None
+    assert items[0]["message_id"] is not None
+    assert items[0]["source_item_key"] == "11:2"
 
     repository.begin_batch()
     repository.update_flags("account", folder_id, 11, 2, "\\Seen \\Flagged", "2026-08-18T00:00:00Z")

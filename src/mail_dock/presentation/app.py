@@ -30,6 +30,7 @@ from mail_dock.domain.errors import (
 )
 from mail_dock.domain.ports import BaseIntegrityStorage
 from mail_dock.domain.storage_state import StorageState, StorageStateMachine
+from mail_dock.infrastructure.database.message_folder_migration import finalize_message_folders
 from mail_dock.infrastructure.database.migrator import current_version
 from mail_dock.infrastructure.storage.capabilities import (
     capability_level,
@@ -455,6 +456,11 @@ def _start_session(
         )
         reconcile_account_snapshots(
             context.create_message_repository(),
+            context.create_manifest_writer,
+            context.create_manifest_reader,
+        )
+        finalize_message_folders(
+            session.connection_manager.get_connection(),
             context.create_manifest_writer,
             context.create_manifest_reader,
         )

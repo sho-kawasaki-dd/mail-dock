@@ -406,10 +406,15 @@ class GenericImapFetcher(BaseMailFetcher):
         token = cancel if cancel is not None else CancelToken()
         self.select_folder(raw_name)
         token.raise_if_cancelled()
+        gmail_fields = (
+            " X-GM-LABELS"
+            if self._auth_type == "xoauth2" and self._oauth_provider == "google"
+            else ""
+        )
         data = self._uid_command(
             "FETCH",
             "1:*",
-            "(UID FLAGS)",
+            f"(UID FLAGS{gmail_fields})",
             f"(CHANGEDSINCE {modseq})",
         )
         for item in data:
@@ -444,34 +449,47 @@ class GenericImapFetcher(BaseMailFetcher):
         data = self._uid_command("FETCH", str(uid), "(BODY.PEEK[HEADER])")
         return self._literal_from_fetch(data, "message headers")
 
-    def delete_remote_message(self, raw_name: str, uid: int, *, mode: str = "trash") -> None:
-        """Move or expunge one message.
-
-        Phase 4 callers must perform their safety checks before invoking this
-        low-level provider operation. In particular, ``expunge`` is rejected
-        unless UIDPLUS is advertised; a folder-wide EXPUNGE is never used as a
-        fallback.
-        """
-
-        if mode not in {"trash", "expunge"}:
-            raise ValueError("mode must be 'trash' or 'expunge'")
+    def _select_folder_for_delete(self, raw_name: str) -> None:
         connection = self._require_connection()
         with wrap_imap_errors(f"SELECT {raw_name} for deletion"):
             status, data = connection.select(raw_name)
             self._ensure_ok(status, data, "SELECT")
-        if mode == "trash":
-            trash_folder = self.find_trash_folder()
-            if trash_folder is None:
-                raise PermanentError("could not identify the remote trash folder")
-            if "MOVE" in self._capabilities:
-                self._uid_command("MOVE", str(uid), trash_folder.raw_name)
-                return
-            if not self.supports_uid_expunge():
-                raise PermanentError(
-                    "UID EXPUNGE is required when MOVE is not supported by this IMAP server"
-                )
-            self._uid_command("COPY", str(uid), trash_folder.raw_name)
-        elif not self.supports_uid_expunge():
+
+    def remove_remote_membership(self, raw_name: str, uid: int) -> None:
+        """Remove only the selected folder membership, preserving other labels."""
+
+        if self._oauth_provider != "google":
+            raise PermanentError("remote membership removal is only supported for Gmail labels")
+        self._select_folder_for_delete(raw_name)
+        self._uid_command("STORE", str(uid), "-X-GM-LABELS.SILENT", f'("{raw_name}")')
+
+    def move_remote_message_to_trash(self, raw_name: str, uid: int) -> None:
+        """Move one message to trash without using a folder-wide EXPUNGE."""
+
+        self._select_folder_for_delete(raw_name)
+        trash_folder = self.find_trash_folder()
+        if trash_folder is None:
+            raise PermanentError("could not identify the remote trash folder")
+        if "MOVE" in self._capabilities:
+            self._uid_command("MOVE", str(uid), trash_folder.raw_name)
+            return
+        if not self.supports_uid_expunge():
+            raise PermanentError(
+                "UID EXPUNGE is required when MOVE is not supported by this IMAP server"
+            )
+        self._uid_command("COPY", str(uid), trash_folder.raw_name)
+        self._expunge_selected_uid(uid)
+
+    def expunge_remote_message(self, raw_name: str, uid: int) -> None:
+        """Permanently remove one message through UID EXPUNGE."""
+
+        if self._oauth_provider == "google":
+            raise PermanentError("Gmail accounts do not support remote expunge")
+        self._select_folder_for_delete(raw_name)
+        self._expunge_selected_uid(uid)
+
+    def _expunge_selected_uid(self, uid: int) -> None:
+        if not self.supports_uid_expunge():
             raise PermanentError("UID EXPUNGE is not supported by this IMAP server")
         self._uid_command("STORE", str(uid), "+FLAGS.SILENT", r"(\Deleted)")
         self._uid_command("EXPUNGE", str(uid))

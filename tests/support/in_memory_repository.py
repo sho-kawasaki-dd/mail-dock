@@ -23,6 +23,8 @@ class InMemoryMessageRepository(BaseMessageRepository):
         self.accounts: dict[str, dict[str, Any]] = {}
         self.folders: dict[int, dict[str, Any]] = {}
         self.messages: dict[int, dict[str, Any]] = {}
+        self.message_memberships: dict[int, list[dict[str, Any]]] = {}
+        self.message_identity_aliases: dict[tuple[str, str], dict[str, Any]] = {}
         self.contents: dict[int, dict[str, str | None]] = {}
         self.failures: dict[tuple[str, int, int, int], dict[str, Any]] = {}
         self.audit_log: list[dict[str, Any]] = []
@@ -148,6 +150,14 @@ class InMemoryMessageRepository(BaseMessageRepository):
                 "uid": item["uid"],
                 "imap_flags": item.get("imap_flags"),
                 "flags_seen_at": item.get("flags_seen_at"),
+                "folder_id": item.get("folder_id"),
+                "uidvalidity": item.get("uidvalidity"),
+                "remote_state": item.get("remote_state", "present"),
+                "moved_to_folder_id": item.get("moved_to_folder_id"),
+                "last_seen_at": item.get("last_seen_at"),
+                "source_item_key": item.get("source_item_key"),
+                "gmail_labels": item.get("gmail_labels"),
+                "message_id": item.get("id"),
             }
             for item in self.messages.values()
             if item.get("account_id") == account_id
@@ -177,6 +187,9 @@ class InMemoryMessageRepository(BaseMessageRepository):
                 message["imap_flags"] = imap_flags
                 message["flags_seen_at"] = flags_seen_at
                 return
+
+    def update_gmail_labels(self, message_id: Any, gmail_labels: str) -> None:
+        self.messages[int(message_id)]["gmail_labels"] = gmail_labels
 
     def touch_flags_seen_at(
         self,
@@ -247,6 +260,55 @@ class InMemoryMessageRepository(BaseMessageRepository):
             for item in self.messages.values()
         )
 
+    def list_message_memberships(
+        self, account_id: str, source_item_key: str
+    ) -> Sequence[MessageRecord]:
+        return [
+            self._copy(membership)
+            for message_id, message in self.messages.items()
+            if message.get("account_id") == account_id
+            and message.get("source_item_key") == source_item_key
+            for membership in self.message_memberships.get(
+                message_id,
+                [
+                    {
+                        key: message.get(key)
+                        for key in (
+                            "folder_id",
+                            "folder_raw_name",
+                            "uid",
+                            "uidvalidity",
+                            "remote_state",
+                            "moved_to_folder_id",
+                            "imap_flags",
+                            "flags_seen_at",
+                            "last_seen_at",
+                        )
+                    }
+                ],
+            )
+        ]
+
+    def replace_message_memberships(
+        self, message_id: Any, memberships: Sequence[MessageRecord]
+    ) -> None:
+        self.message_memberships[int(message_id)] = [self._copy(item) for item in memberships]
+        message = self.messages[int(message_id)]
+        if memberships:
+            message.update(self._copy(memberships[0]))
+
+    def add_message_identity_alias(
+        self, account_id: str, observed_source_item_key: str, message_id: Any, evidence_kind: str
+    ) -> None:
+        key = (account_id, observed_source_item_key)
+        existing = self.message_identity_aliases.get(key)
+        if existing is not None and existing["message_id"] != message_id:
+            raise DatabaseError("Message identity alias maps to multiple canonical messages")
+        self.message_identity_aliases[key] = {
+            "message_id": message_id,
+            "evidence_kind": evidence_kind,
+        }
+
     def find_stored_eml(self, account_id: str, file_hash: str) -> StoredEml | None:
         return self.stored_eml.get((account_id, file_hash))
 
@@ -291,9 +353,15 @@ class InMemoryMessageRepository(BaseMessageRepository):
         ]
 
     def update_remote_state(
-        self, message_id: Any, state: str, moved_to_folder_id: Any = None
+        self,
+        message_id: Any,
+        state: str,
+        moved_to_folder_id: Any = None,
+        folder_id: Any | None = None,
     ) -> None:
         item = self.messages[int(message_id)]
+        if folder_id is not None and item.get("folder_id") != folder_id:
+            return
         item["remote_state"] = state
         item["moved_to_folder_id"] = moved_to_folder_id
 

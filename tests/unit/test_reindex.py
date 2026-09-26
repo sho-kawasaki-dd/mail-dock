@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from mail_dock.domain.errors import StorageError
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.messages import StoredEml
 from mail_dock.domain.ports import BaseEmlStorage, BaseManifestReader, JSONValue
@@ -142,7 +143,7 @@ def test_reindex_restores_snapshots_and_reparses_eml() -> None:
     assert result.contents_count == 1
     assert result.skipped_count == 0
     assert repository.folders[1]["is_sync_target"] == 0
-    assert repository.messages[1]["source_item_key"] == "42:7"
+    assert repository.messages[1]["source_item_key"] == "gmail:123456"
     assert repository.messages[1]["gmail_msgid"] == "123456"
     assert repository.messages[1]["gmail_thrid"] == "654321"
     assert repository.messages[1]["gmail_labels"] == "[]"
@@ -152,6 +153,58 @@ def test_reindex_restores_snapshots_and_reparses_eml() -> None:
     assert repository.contents[1]["subject_norm"] == "Reindexed"
     assert repository.contents[1]["body_text"] == "Rebuilt body\n"
     assert progress == [ReindexProgress(1, 1, relative_path)]
+
+
+@pytest.mark.parametrize(
+    ("links", "expected_error"),
+    [
+        (
+            [
+                ("gmail:123456", "imap:SU5CT1g:42:7", "a" * 64),
+                ("imap:SU5CT1g:42:7", "gmail:123456", "a" * 64),
+            ],
+            "cycle",
+        ),
+        (
+            [
+                ("gmail:123456", "imap:SU5CT1g:42:7", "a" * 64),
+                ("gmail:654321", "imap:SU5CT1g:42:7", "a" * 64),
+            ],
+            "multiple canonical",
+        ),
+        (
+            [("gmail:123456", "imap:SU5CT1g:42:7", "b" * 64)],
+            "hash does not match",
+        ),
+    ],
+)
+def test_reindex_rejects_invalid_identity_links(
+    links: list[tuple[str, str, str]], expected_error: str
+) -> None:
+    raw = _raw()
+    relative_path = "eml/account/2026/01/message.eml"
+    file_hash = hashlib.sha256(raw).hexdigest()
+    events = _base_events(relative_path, file_hash)
+    events[2]["gmail_msgid"] = "123456"
+    for canonical, alias, link_hash in links:
+        events.append(
+            {
+                "event": "message_identity_linked",
+                "account_id": "account",
+                "canonical_source_item_key": canonical,
+                "alias_source_item_key": alias,
+                "evidence_kind": "gmail_msgid",
+                "file_hash": link_hash,
+                "timestamp": "2026-01-03T00:00:00+00:00",
+            }
+        )
+
+    with pytest.raises(StorageError, match=expected_error):
+        reindex(
+            InMemoryMessageRepository(),
+            MemoryEmlStorage({relative_path: raw}),
+            MemoryManifestReader(events),
+        )
 
 
 def test_reindex_restores_remote_state_and_purged_tombstone_without_eml() -> None:
@@ -335,6 +388,6 @@ def test_rebuild_database_replaces_existing_database_only_after_verification(
         accounts = connection.execute("SELECT id FROM accounts ORDER BY id").fetchall()
         messages = connection.execute("SELECT source_item_key FROM messages").fetchall()
         assert accounts == [("account",)]
-        assert messages == [("42:7",)]
+        assert messages == [("imap:SU5CT1g:42:7",)]
     finally:
         connection.close()

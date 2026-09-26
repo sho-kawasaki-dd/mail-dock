@@ -138,11 +138,23 @@ class DeleteFetcher(FakeFetcher):
     def supports_uid_expunge(self) -> bool:
         return self.uidplus
 
-    def delete_remote_message(self, raw_name: str, uid: int, *, mode: str = "trash") -> None:
-        self.calls.append((raw_name, uid, mode))
+    def move_remote_message_to_trash(self, raw_name: str, uid: int) -> None:
+        self.calls.append((raw_name, uid, "trash"))
         if self.transient:
             raise TransientError("connection dropped after command was sent")
-        super().delete_remote_message(raw_name, uid, mode=mode)
+        super().move_remote_message_to_trash(raw_name, uid)
+
+    def expunge_remote_message(self, raw_name: str, uid: int) -> None:
+        self.calls.append((raw_name, uid, "expunge"))
+        if self.transient:
+            raise TransientError("connection dropped after command was sent")
+        super().expunge_remote_message(raw_name, uid)
+
+    def remove_remote_membership(self, raw_name: str, uid: int) -> None:
+        self.calls.append((raw_name, uid, "remove_membership"))
+        if self.transient:
+            raise TransientError("connection dropped after command was sent")
+        super().remove_remote_membership(raw_name, uid)
 
 
 def _record(repository: InMemoryMessageRepository, *, message_id: int, raw: bytes) -> str:
@@ -329,6 +341,83 @@ def test_execute_rejects_gmail_expunge_even_with_uidplus() -> None:
     assert manifest.events == []
 
 
+def test_gmail_membership_removal_is_folder_specific_and_snapshot_first() -> None:
+    repository = InMemoryMessageRepository()
+    raw = b"message"
+    path = _record(repository, message_id=1, raw=raw)
+    repository.accounts["account"].update({"auth_type": "xoauth2", "oauth_provider": "google"})
+    second_folder_id = repository.upsert_folder(
+        {
+            "account_id": "account",
+            "raw_name": "Important",
+            "display_name": "Important",
+            "uidvalidity": 7,
+        }
+    )
+    first_membership = dict(repository.list_message_memberships("account", "42:1")[0])
+    second_membership = {
+        **first_membership,
+        "folder_id": second_folder_id,
+        "folder_raw_name": "Important",
+        "uid": 9,
+        "uidvalidity": 7,
+    }
+    repository.replace_message_memberships(1, [first_membership, second_membership])
+    repository.messages[1]["source_item_key"] = "gmail:123456789"
+    storage = MemoryStorage({path: raw})
+    state = StorageStateMachine(StorageState.ATTACHED)
+    ambiguous_plan = dry_run(repository, storage, message_ids=(1,), storage_state=state)
+
+    assert ambiguous_plan.candidates == ()
+    assert ambiguous_plan.exclusions[0].reason == "folder_selection_required"
+
+    plan = dry_run(
+        repository,
+        storage,
+        message_ids=(1,),
+        storage_state=state,
+        folder_id=second_folder_id,
+    )
+    fetcher = DeleteFetcher()
+    fetcher.add_folder(RemoteFolder("Important", "Important", 7))
+    fetcher.add_message("Important", 9, raw)
+    manifest = MemoryManifest()
+
+    result = execute(
+        fetcher,
+        repository,
+        storage,
+        manifest,
+        plan=plan,
+        mode="remove_membership",
+        storage_state=state,
+    )
+
+    assert result.completed_ids == (1,)
+    assert fetcher.calls == [("Important", 9, "remove_membership")]
+    assert [event["event"] for event in manifest.events] == [
+        "remote_delete_intent",
+        "remote_delete_completed",
+        "message_membership_snapshot",
+    ]
+    assert manifest.events[-1]["memberships"] == [
+        {
+            "folder_raw_name": "INBOX",
+            "uid": 1,
+            "uidvalidity": 42,
+            "remote_state": "present",
+            "moved_to_folder_raw_name": None,
+            "imap_flags": None,
+            "flags_seen_at": None,
+            "last_seen_at": None,
+        }
+    ]
+    assert [
+        item["folder_id"]
+        for item in repository.list_message_memberships("account", "gmail:123456789")
+    ] == [first_membership["folder_id"]]
+
+
 def test_transient_delete_is_recorded_as_uncertain_without_marking_deleted() -> None:
     repository = InMemoryMessageRepository()
     raw = b"message"
@@ -473,10 +562,14 @@ def test_execute_writes_the_manifest_before_updating_the_database() -> None:
             super().record_audit(entry)
 
         def update_remote_state(
-            self, message_id: Any, state: str, moved_to_folder_id: Any = None
+            self,
+            message_id: Any,
+            state: str,
+            moved_to_folder_id: Any = None,
+            folder_id: Any | None = None,
         ) -> None:
             trace.append("repo:remote_state")
-            super().update_remote_state(message_id, state, moved_to_folder_id)
+            super().update_remote_state(message_id, state, moved_to_folder_id, folder_id)
 
     repository = TracingRepository()
     raw = b"message"

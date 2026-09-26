@@ -156,5 +156,25 @@ class BaseMailFetcher(ABC):
         """Download only the headers for an oversized message."""
 
     @abstractmethod
+    def remove_remote_membership(self, raw_name: str, uid: int) -> None:
+        """Remove one message from the selected folder or Gmail label."""
+
+    @abstractmethod
+    def move_remote_message_to_trash(self, raw_name: str, uid: int) -> None:
+        """Move one message to the provider's remote trash folder."""
+
+    @abstractmethod
+    def expunge_remote_message(self, raw_name: str, uid: int) -> None:
+        """Permanently remove one message using a targeted provider operation."""
+
     def delete_remote_message(self, raw_name: str, uid: int, *, mode: str = "trash") -> None:
-        """Delete or move one remote message according to the provider policy."""
+        """Compatibility wrapper for the separated remote operations."""
+
+        if mode == "trash":
+            self.move_remote_message_to_trash(raw_name, uid)
+        elif mode == "expunge":
+            self.expunge_remote_message(raw_name, uid)
+        elif mode == "remove_membership":
+            self.remove_remote_membership(raw_name, uid)
+        else:
+            raise ValueError("mode must be 'trash', 'expunge', or 'remove_membership'")
