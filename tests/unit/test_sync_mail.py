@@ -15,9 +15,37 @@ from mail_dock.domain.errors import (
 from mail_dock.domain.fetcher import CancelToken, RemoteFolder, RemoteMessageRef
 from mail_dock.domain.messages import ParsedMessage, StoredEml
 from mail_dock.domain.ports import BaseEmlStorage, BaseManifestWriter, JSONValue
-from mail_dock.usecases.sync_mail import SyncOptions, SyncResult, force_fetch_message, sync_account
+from mail_dock.usecases.sync_mail import (
+    SyncOptions,
+    SyncResult,
+    _fetch_event,
+    force_fetch_message,
+    sync_account,
+)
 from tests.support.fake_fetcher import FakeFetcher, FakeMessage
 from tests.support.in_memory_repository import InMemoryMessageRepository
+
+
+@pytest.mark.parametrize(("labels", "expected"), [(None, None), ([], [])])
+def test_fetch_event_preserves_gmail_metadata(
+    labels: list[str] | None, expected: list[str] | None
+) -> None:
+    event = _fetch_event(
+        account_id="account",
+        folder_raw_name="INBOX",
+        folder_id=1,
+        uidvalidity=42,
+        ref=RemoteMessageRef(uid=7),
+        parsed=ParsedMessage(),
+        stored=StoredEml("eml/message.eml", "hash", 10, False),
+        gmail_msgid="123456789",
+        gmail_thrid="987654321",
+        gmail_labels=labels,
+    )
+
+    assert event["gmail_msgid"] == "123456789"
+    assert event["gmail_thrid"] == "987654321"
+    assert event["gmail_labels"] == expected
 
 
 @pytest.mark.parametrize(

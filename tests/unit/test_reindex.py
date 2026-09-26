@@ -118,10 +118,20 @@ def test_reindex_restores_snapshots_and_reparses_eml() -> None:
     repository = InMemoryMessageRepository()
     progress: list[ReindexProgress] = []
 
+    events = _base_events(relative_path, hashlib.sha256(raw).hexdigest())
+    events[0].update(
+        {
+            "auth_type": "xoauth2",
+            "oauth_provider": "google",
+            "oauth_client_id": "client-id",
+            "oauth_tenant": None,
+        }
+    )
+    events[2].update({"gmail_msgid": "123456", "gmail_thrid": "654321", "gmail_labels": []})
     result = reindex(
         repository,
         MemoryEmlStorage({relative_path: raw}),
-        MemoryManifestReader(_base_events(relative_path, hashlib.sha256(raw).hexdigest())),
+        MemoryManifestReader(events),
         cancel=CancelToken(),
         on_progress=progress.append,
     )
@@ -133,6 +143,12 @@ def test_reindex_restores_snapshots_and_reparses_eml() -> None:
     assert result.skipped_count == 0
     assert repository.folders[1]["is_sync_target"] == 0
     assert repository.messages[1]["source_item_key"] == "42:7"
+    assert repository.messages[1]["gmail_msgid"] == "123456"
+    assert repository.messages[1]["gmail_thrid"] == "654321"
+    assert repository.messages[1]["gmail_labels"] == "[]"
+    assert repository.accounts["account"]["auth_type"] == "xoauth2"
+    assert repository.accounts["account"]["oauth_provider"] == "google"
+    assert repository.accounts["account"]["oauth_client_id"] == "client-id"
     assert repository.contents[1]["subject_norm"] == "Reindexed"
     assert repository.contents[1]["body_text"] == "Rebuilt body\n"
     assert progress == [ReindexProgress(1, 1, relative_path)]

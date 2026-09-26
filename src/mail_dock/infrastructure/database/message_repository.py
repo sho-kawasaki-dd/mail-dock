@@ -29,6 +29,10 @@ _ACCOUNT_COLUMNS = (
     "is_enabled",
     "tls_mode",
     "ca_cert_path",
+    "auth_type",
+    "oauth_provider",
+    "oauth_client_id",
+    "oauth_tenant",
 )
 _FOLDER_COLUMNS = (
     "id",
@@ -69,6 +73,9 @@ _MESSAGE_COLUMNS = (
     "references_ids",
     "thread_key",
     "last_seen_at",
+    "gmail_msgid",
+    "gmail_thrid",
+    "gmail_labels",
 )
 _AUDIT_COLUMNS = (
     "occurred_at",
@@ -152,6 +159,10 @@ class SqliteMessageRepository(BaseMessageRepository):
             "is_enabled": int(account.get("is_enabled", 1)),
             "tls_mode": str(account.get("tls_mode", "implicit")),
             "ca_cert_path": account.get("ca_cert_path"),
+            "auth_type": str(account.get("auth_type", "password")),
+            "oauth_provider": account.get("oauth_provider"),
+            "oauth_client_id": account.get("oauth_client_id"),
+            "oauth_tenant": account.get("oauth_tenant"),
         }
         with self._db_io("upsert account"):
             columns = ", ".join(_ACCOUNT_COLUMNS)

@@ -18,6 +18,7 @@ from mail_dock.usecases.register_account import register_account, update_account
 from mail_dock.usecases.snapshots import (
     backfill_snapshots,
     reconcile_account_snapshots,
+    record_account_snapshot,
     recover_after_unclean_shutdown,
     repair_manifest_tails,
 )
@@ -72,6 +73,34 @@ class MemoryManifest(BaseManifestWriter, BaseManifestReader):
             if event.get("event") == "purge_intent"
             and (event.get("account_id"), event.get("source_item_key")) not in completed
         )
+
+
+def test_account_snapshot_includes_oauth_settings_but_no_secrets() -> None:
+    manifest = MemoryManifest()
+    account = {
+        "id": "account",
+        "provider_type": "imap",
+        "host": "imap.example.test",
+        "port": 993,
+        "username": "user@example.test",
+        "auth_type": "xoauth2",
+        "oauth_provider": "google",
+        "oauth_client_id": "public-client-id",
+        "oauth_tenant": None,
+        "client_secret": "must-not-persist",
+        "refresh_token": "must-not-persist",
+        "access_token": "must-not-persist",
+    }
+
+    assert record_account_snapshot(manifest, manifest, account)
+
+    snapshot = manifest.events[-1]
+    assert snapshot["auth_type"] == "xoauth2"
+    assert snapshot["oauth_provider"] == "google"
+    assert snapshot["oauth_client_id"] == "public-client-id"
+    assert "client_secret" not in snapshot
+    assert "refresh_token" not in snapshot
+    assert "access_token" not in snapshot
 
 
 def test_account_snapshot_skips_unchanged_state_and_records_changes() -> None:
@@ -353,4 +382,17 @@ class _Credentials(BaseCredentialStore):
         return None
 
     def delete_password(self, account_id: str) -> None:
+        del account_id
+
+    def set_secret(self, account_id: str, name: str, value: str) -> None:
+        del account_id, name, value
+
+    def get_secret(self, account_id: str, name: str) -> str | None:
+        del account_id, name
+        return None
+
+    def delete_secret(self, account_id: str, name: str) -> None:
+        del account_id, name
+
+    def delete_all_secrets(self, account_id: str) -> None:
         del account_id

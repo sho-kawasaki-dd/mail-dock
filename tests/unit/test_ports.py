@@ -10,16 +10,30 @@ from tests.support.in_memory_repository import InMemoryMessageRepository
 
 class MemoryCredentialStore(BaseCredentialStore):
     def __init__(self) -> None:
-        self.passwords: dict[str, str] = {}
+        self.secrets: dict[tuple[str, str], str] = {}
 
     def set_password(self, account_id: str, password: str) -> None:
-        self.passwords[account_id] = password
+        self.set_secret(account_id, "password", password)
 
     def get_password(self, account_id: str) -> str | None:
-        return self.passwords.get(account_id)
+        return self.get_secret(account_id, "password")
 
     def delete_password(self, account_id: str) -> None:
-        self.passwords.pop(account_id, None)
+        self.delete_secret(account_id, "password")
+
+    def set_secret(self, account_id: str, name: str, value: str) -> None:
+        self.secrets[(account_id, name)] = value
+
+    def get_secret(self, account_id: str, name: str) -> str | None:
+        return self.secrets.get((account_id, name))
+
+    def delete_secret(self, account_id: str, name: str) -> None:
+        self.secrets.pop((account_id, name), None)
+
+    def delete_all_secrets(self, account_id: str) -> None:
+        for key in tuple(self.secrets):
+            if key[0] == account_id:
+                del self.secrets[key]
 
 
 def test_register_account_uses_only_repository_and_credential_ports() -> None:
@@ -38,7 +52,7 @@ def test_register_account_uses_only_repository_and_credential_ports() -> None:
     )
 
     assert account_id == "account"
-    assert credentials.passwords == {"account": "secret"}
+    assert credentials.secrets == {("account", "password"): "secret"}
     assert repository.list_accounts() == [
         {
             "id": "account",
@@ -50,6 +64,10 @@ def test_register_account_uses_only_repository_and_credential_ports() -> None:
             "is_enabled": 1,
             "tls_mode": "implicit",
             "ca_cert_path": None,
+            "auth_type": "password",
+            "oauth_provider": None,
+            "oauth_client_id": None,
+            "oauth_tenant": None,
         }
     ]
 

@@ -47,6 +47,10 @@ class InMemoryMessageRepository(BaseMessageRepository):
         record.setdefault("provider_type", "imap")
         record.setdefault("tls_mode", "implicit")
         record.setdefault("ca_cert_path", None)
+        record.setdefault("auth_type", "password")
+        record.setdefault("oauth_provider", None)
+        record.setdefault("oauth_client_id", None)
+        record.setdefault("oauth_tenant", None)
         self.accounts[account_id] = record
         return account_id
 

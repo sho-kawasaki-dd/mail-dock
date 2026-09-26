@@ -285,15 +285,17 @@
 
 ### **Group I: 5.2a 資格情報・DBスキーマ**
 
-- [ ] `domain/ports.py` の `BaseCredentialStore` に `set_secret` / `get_secret` / `delete_secret` を追加する
-- [ ] `KeyringCredentialStore` / `SessionCredentialStore` / テストダブルに実装する
-- [ ] `migrations/008_oauth_accounts.sql` を追加し、`accounts.auth_type` / `oauth_provider` / `oauth_client_id` / `oauth_tenant` を追加する
-- [ ] `messages` に `gmail_msgid` / `gmail_thrid` / `gmail_labels` を追加し、`idx_msg_gmsgid` を作成する
-- [ ] `gmail_msgid` / `gmail_thrid` を10進文字列、`gmail_labels` をJSON配列としてfetchイベントへ追加し、未取得と空集合を区別する
-- [ ] `usecases/snapshots.py` の `_ACCOUNT_FIELDS` / `_account_event()` へ `auth_type` / `oauth_provider` / `oauth_client_id` / `oauth_tenant` を追加する（任意エンドポイントURL・`client_secret`・トークン類は含めない）
-- [ ] `usecases/reindex.py` の `_account_record()` で同じ非秘密カラムを復元し、旧snapshotに対しては確定済みの後方互換既定値を適用する
-- [ ] 管理対象シークレット名（`password`/`client_secret`/`refresh_token`等）を列挙定数として定義し、`delete_all_secrets(account_id)` を追加する（存在しないキーの削除は成功扱いにする冪等実装）
+- [x] `domain/ports.py` の `BaseCredentialStore` に `set_secret` / `get_secret` / `delete_secret` を追加する
+- [x] `KeyringCredentialStore` / `SessionCredentialStore` / テストダブルに実装する
+- [x] `migrations/008_oauth_accounts.sql` を追加し、`accounts.auth_type` / `oauth_provider` / `oauth_client_id` / `oauth_tenant` を追加する
+- [x] `messages` に `gmail_msgid` / `gmail_thrid` / `gmail_labels` を追加し、`idx_msg_gmsgid` を作成する
+- [x] `gmail_msgid` / `gmail_thrid` を10進文字列、`gmail_labels` をJSON配列としてfetchイベントへ追加し、未取得と空集合を区別する
+- [x] `usecases/snapshots.py` の `_ACCOUNT_FIELDS` / `_account_event()` へ `auth_type` / `oauth_provider` / `oauth_client_id` / `oauth_tenant` を追加する（任意エンドポイントURL・`client_secret`・トークン類は含めない）
+- [x] `usecases/reindex.py` の `_account_record()` で同じ非秘密カラムを復元し、旧snapshotに対しては確定済みの後方互換既定値を適用する
+- [x] 管理対象シークレット名（`password`/`client_secret`/`refresh_token`等）を列挙定数として定義し、`delete_all_secrets(account_id)` を追加する（存在しないキーの削除は成功扱いにする冪等実装）
 - [ ] アカウント削除・OAuth連携解除ユースケースから `delete_all_secrets(account_id)` を呼び出し、途中失敗時はログへ秘密値を含めずに通知する
+
+> 現行コードにはアカウント削除・OAuth連携解除ユースケースが存在しないため、資格情報クリーンアップとの接続は該当フローの実装時に行う。
 
 ### **Group J: 5.2a フェッチャー・usecases**
 

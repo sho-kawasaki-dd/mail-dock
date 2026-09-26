@@ -38,6 +38,41 @@ def _message(folder_id: int, uidvalidity: int, uid: int = 7) -> dict[str, object
     }
 
 
+def test_oauth_account_and_gmail_metadata_round_trip(
+    db_conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    repository, folder_id = _repository(db_conn, tmp_path / "metadata.db")
+    repository.upsert_account(
+        {
+            "id": "account",
+            "provider_type": "imap",
+            "auth_type": "xoauth2",
+            "oauth_provider": "google",
+            "oauth_client_id": "client-id",
+            "oauth_tenant": None,
+        }
+    )
+    repository.begin_batch()
+    repository.add_message(
+        {
+            **_message(folder_id, 11),
+            "gmail_msgid": "123456789",
+            "gmail_thrid": "987654321",
+            "gmail_labels": "[]",
+        }
+    )
+    repository.commit_batch()
+
+    assert db_conn.execute(
+        "SELECT auth_type, oauth_provider, oauth_client_id, oauth_tenant "
+        "FROM accounts WHERE id = ?",
+        ("account",),
+    ).fetchone() == ("xoauth2", "google", "client-id", None)
+    assert db_conn.execute(
+        "SELECT gmail_msgid, gmail_thrid, gmail_labels FROM messages"
+    ).fetchone() == ("123456789", "987654321", "[]")
+
+
 def test_normalize_account_provider_type_rejects_unknown_account(
     db_conn: sqlite3.Connection, tmp_path: Path
 ) -> None:

@@ -188,6 +188,9 @@ def _fetch_event(
     ref: RemoteMessageRef,
     parsed: ParsedMessage,
     stored: StoredEml,
+    gmail_msgid: str | None = None,
+    gmail_thrid: str | None = None,
+    gmail_labels: list[str] | None = None,
 ) -> Mapping[str, JSONValue]:
     return {
         "event": "fetch",
@@ -204,6 +207,9 @@ def _fetch_event(
         "internal_date": _date_iso(ref.internal_date),
         "timestamp": _now_iso(),
         "deduplicated": stored.deduplicated,
+        "gmail_msgid": gmail_msgid,
+        "gmail_thrid": gmail_thrid,
+        "gmail_labels": gmail_labels,
     }
 
 

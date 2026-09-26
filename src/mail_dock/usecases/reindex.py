@@ -123,6 +123,10 @@ def _account_record(event: Mapping[str, JSONValue]) -> MessageRecord | None:
     port = _integer(event, "port")
     tls_mode = event.get("tls_mode", "implicit")
     ca_cert_path = event.get("ca_cert_path")
+    auth_type = event.get("auth_type", "password")
+    oauth_provider = event.get("oauth_provider")
+    oauth_client_id = event.get("oauth_client_id")
+    oauth_tenant = event.get("oauth_tenant")
     if (
         account_id is None
         or provider_type is None
@@ -131,6 +135,10 @@ def _account_record(event: Mapping[str, JSONValue]) -> MessageRecord | None:
         or port is None
         or not isinstance(tls_mode, str)
         or (ca_cert_path is not None and not isinstance(ca_cert_path, str))
+        or not isinstance(auth_type, str)
+        or (oauth_provider is not None and not isinstance(oauth_provider, str))
+        or (oauth_client_id is not None and not isinstance(oauth_client_id, str))
+        or (oauth_tenant is not None and not isinstance(oauth_tenant, str))
     ):
         return None
     return {
@@ -143,7 +151,20 @@ def _account_record(event: Mapping[str, JSONValue]) -> MessageRecord | None:
         "is_enabled": int(bool(event.get("is_enabled", True))),
         "tls_mode": tls_mode,
         "ca_cert_path": ca_cert_path,
+        "auth_type": auth_type,
+        "oauth_provider": oauth_provider,
+        "oauth_client_id": oauth_client_id,
+        "oauth_tenant": oauth_tenant,
     }
+
+
+def _string_list(event: Mapping[str, JSONValue], field: str) -> list[str] | None:
+    value = event.get(field)
+    if value is None:
+        return None
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return [item for item in value if isinstance(item, str)]
+    return None
 
 
 def _folder_record(event: Mapping[str, JSONValue]) -> MessageRecord | None:
@@ -393,6 +414,13 @@ def reindex(
                 "in_reply_to": parsed.in_reply_to,
                 "references_ids": parsed.references_ids,
                 "thread_key": parsed.thread_key,
+                "gmail_msgid": _text(event, "gmail_msgid"),
+                "gmail_thrid": _text(event, "gmail_thrid"),
+                "gmail_labels": (
+                    json.dumps(labels, ensure_ascii=False)
+                    if (labels := _string_list(event, "gmail_labels")) is not None
+                    else None
+                ),
             }
             destination = state.moved_to_folder_raw_name
             contents: MessageContents | None = None

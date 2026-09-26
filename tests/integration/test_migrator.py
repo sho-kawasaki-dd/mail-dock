@@ -25,15 +25,25 @@ def test_empty_database_migrates_to_latest_version(
 ) -> None:
     db_path = tmp_path / "metadata.db"
 
-    assert migrate(db_conn, db_path) == 7
-    assert current_version(db_conn) == 7
+    assert migrate(db_conn, db_path) == 8
+    assert current_version(db_conn) == 8
     assert db_conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
     account_columns = {row[1] for row in db_conn.execute("PRAGMA table_info(accounts)")}
     assert {"tls_mode", "ca_cert_path"}.issubset(account_columns)
+    assert {
+        "auth_type",
+        "oauth_provider",
+        "oauth_client_id",
+        "oauth_tenant",
+    }.issubset(account_columns)
+    message_columns = {row[1] for row in db_conn.execute("PRAGMA table_info(messages)")}
+    assert {"gmail_msgid", "gmail_thrid", "gmail_labels"}.issubset(message_columns)
     db_conn.execute("INSERT INTO accounts (id, provider_type) VALUES (?, ?)", ("account", "imap"))
     assert db_conn.execute(
-        "SELECT tls_mode, ca_cert_path FROM accounts WHERE id = ?", ("account",)
-    ).fetchone() == ("implicit", None)
+        "SELECT tls_mode, ca_cert_path, auth_type, oauth_provider, oauth_client_id, oauth_tenant "
+        "FROM accounts WHERE id = ?",
+        ("account",),
+    ).fetchone() == ("implicit", None, "password", None, None, None)
 
     indexes = {
         row[1]: db_conn.execute(
@@ -55,13 +65,18 @@ def test_empty_database_migrates_to_latest_version(
     assert indexes["idx_msg_path"] == (
         "CREATE INDEX idx_msg_path\nON messages(account_id, relative_path)"
     )
+    assert indexes["idx_msg_gmsgid"] == (
+        "CREATE INDEX idx_msg_gmsgid\n"
+        "ON messages(account_id, gmail_msgid)\n"
+        "WHERE gmail_msgid IS NOT NULL"
+    )
 
 
 def test_pst_import_migration_creates_import_tables_and_indexes(
     db_conn: sqlite3.Connection,
     tmp_path: Path,
 ) -> None:
-    assert migrate(db_conn, tmp_path / "metadata.db") == 7
+    assert migrate(db_conn, tmp_path / "metadata.db") == 8
 
     import_columns = {row[1] for row in db_conn.execute("PRAGMA table_info(pst_imports)")}
     assert import_columns == {
@@ -154,7 +169,7 @@ def test_phase4_migration_backs_up_existing_v4_database(
     )
     db_conn.commit()
 
-    assert migrate(db_conn, tmp_path / "metadata.db") == 7
+    assert migrate(db_conn, tmp_path / "metadata.db") == 8
 
     backup_path = tmp_path / "metadata.db.bak.4"
     assert backup_path.is_file()
@@ -173,7 +188,7 @@ def test_nonempty_v0_database_is_backed_up_before_migration(tmp_path: Path) -> N
         connection.execute("CREATE TABLE legacy (value TEXT)")
         connection.execute("INSERT INTO legacy VALUES ('old')")
         connection.commit()
-        assert migrate(connection, db_path) == 7
+        assert migrate(connection, db_path) == 8
     finally:
         connection.close()
 
@@ -188,7 +203,7 @@ def test_nonempty_v0_database_is_backed_up_before_migration(tmp_path: Path) -> N
 
     rerun = connect(db_path)
     try:
-        assert migrate(rerun, db_path) == 7
+        assert migrate(rerun, db_path) == 8
     finally:
         rerun.close()
     assert not (tmp_path / "metadata.db.bak.0.1").exists()
@@ -246,7 +261,7 @@ def test_timestamp_migration_normalizes_legacy_values_and_defaults(
     )
     db_conn.commit()
 
-    assert migrate(db_conn, tmp_path / "metadata.db") == 7
+    assert migrate(db_conn, tmp_path / "metadata.db") == 8
 
     values = db_conn.execute(
         """
@@ -325,7 +340,7 @@ def test_provider_type_normalization_records_manifest_before_db_update(
     """
 
     db_path = tmp_path / "metadata.db"
-    assert migrate(db_conn, db_path) == 7
+    assert migrate(db_conn, db_path) == 8
     db_conn.execute(
         "INSERT INTO accounts (id, provider_type, host, port, username) VALUES (?, ?, ?, ?, ?)",
         ("legacy-account", "onamae_imap", "imap.example.test", 993, "user"),

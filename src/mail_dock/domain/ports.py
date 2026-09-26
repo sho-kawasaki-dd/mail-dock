@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 
 from mail_dock.domain.fetcher import CancelToken
@@ -15,7 +16,19 @@ from mail_dock.domain.messages import AttachmentSavePlan, RenderedMessage, Saved
 
 type JSONValue = bool | int | float | str | list[JSONValue] | dict[str, JSONValue] | None
 
+
+class ManagedSecretName(StrEnum):
+    """Secret names owned by the application and removed with an account."""
+
+    PASSWORD = "password"
+    CLIENT_SECRET = "client_secret"
+    REFRESH_TOKEN = "refresh_token"
+
+
+MANAGED_SECRET_NAMES = tuple(secret.value for secret in ManagedSecretName)
+
 __all__ = [
+    "MANAGED_SECRET_NAMES",
     "AccessToken",
     "AttachmentSavePlan",
     "BaseAccessTokenProvider",
@@ -31,6 +44,7 @@ __all__ = [
     "BasePstManifestWriter",
     "BasePurgeStorage",
     "JSONValue",
+    "ManagedSecretName",
     "OAuthAuthorizationRequest",
     "OAuthTokenResponse",
     "SavedFile",
@@ -53,6 +67,22 @@ class BaseCredentialStore(ABC):
     @abstractmethod
     def delete_password(self, account_id: str) -> None:
         """Remove an account password from the credential backend."""
+
+    @abstractmethod
+    def set_secret(self, account_id: str, name: str, value: str) -> None:
+        """Store a named account secret in the configured credential backend."""
+
+    @abstractmethod
+    def get_secret(self, account_id: str, name: str) -> str | None:
+        """Return a named account secret, or ``None`` when it is not stored."""
+
+    @abstractmethod
+    def delete_secret(self, account_id: str, name: str) -> None:
+        """Remove a named account secret; deleting a missing value is successful."""
+
+    @abstractmethod
+    def delete_all_secrets(self, account_id: str) -> None:
+        """Remove every application-managed secret for an account."""
 
 
 @dataclass(frozen=True)

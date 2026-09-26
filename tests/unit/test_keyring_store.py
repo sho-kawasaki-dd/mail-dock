@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import keyring
 import pytest
+from keyring.errors import PasswordDeleteError
 
 from mail_dock.domain.errors import CredentialStoreError
 from mail_dock.infrastructure.security import keyring_store
@@ -52,7 +53,10 @@ def test_keyring_store_saves_loads_and_deletes(monkeypatch: pytest.MonkeyPatch) 
         return passwords.get((service, account_id))
 
     def delete_password(service: str, account_id: str) -> None:
-        passwords.pop((service, account_id), None)
+        try:
+            del passwords[(service, account_id)]
+        except KeyError as error:
+            raise PasswordDeleteError from error
 
     monkeypatch.setattr(
         "mail_dock.infrastructure.security.keyring_store.keyring.set_password", set_password
@@ -74,6 +78,25 @@ def test_keyring_store_saves_loads_and_deletes(monkeypatch: pytest.MonkeyPatch) 
     assert store.get_password("account") == "secret"
 
     store.delete_password("account")
+    assert store.get_password("account") is None
+
+    store.set_password("account", "legacy-password")
+    store.set_secret("account", "password", "generic-password")
+    assert store.get_password("account") == "legacy-password"
+    assert store.get_secret("account", "password") == "generic-password"
+
+    store.set_secret("a:b", "c", "first")
+    store.set_secret("a", "b:c", "second")
+    assert store.get_secret("a:b", "c") == "first"
+    assert store.get_secret("a", "b:c") == "second"
+
+    store.set_secret("account", "client_secret", "client")
+    store.set_secret("account", "refresh_token", "refresh")
+    store.delete_all_secrets("account")
+    store.delete_all_secrets("account")
+    assert store.get_secret("account", "client_secret") is None
+    assert store.get_secret("account", "refresh_token") is None
+    assert store.get_secret("account", "password") is None
     assert store.get_password("account") is None
 
 

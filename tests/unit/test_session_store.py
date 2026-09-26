@@ -18,6 +18,22 @@ def test_session_store_saves_loads_and_deletes() -> None:
     assert store.get_password("account") is None
 
 
+def test_session_store_namespaces_and_cleans_up_managed_secrets() -> None:
+    store = SessionCredentialStore()
+    store.set_secret("account:a", "b", "first")
+    store.set_secret("account", "a:b", "second")
+    store.set_secret("account", "client_secret", "client")
+    store.set_secret("account", "refresh_token", "refresh")
+
+    assert store.get_secret("account:a", "b") == "first"
+    assert store.get_secret("account", "a:b") == "second"
+    store.delete_all_secrets("account")
+    store.delete_all_secrets("account")
+    assert store.get_secret("account", "client_secret") is None
+    assert store.get_secret("account", "refresh_token") is None
+    assert store.get_secret("account:a", "b") == "first"
+
+
 def test_session_store_isolated_between_instances() -> None:
     first_store = SessionCredentialStore()
     second_store = SessionCredentialStore()

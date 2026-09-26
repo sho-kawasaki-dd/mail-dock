@@ -26,6 +26,10 @@ _ACCOUNT_FIELDS = (
     "is_enabled",
     "tls_mode",
     "ca_cert_path",
+    "auth_type",
+    "oauth_provider",
+    "oauth_client_id",
+    "oauth_tenant",
 )
 _FOLDER_FIELDS = (
     "account_id",
@@ -54,6 +58,10 @@ def _account_event(account: MessageRecord) -> dict[str, JSONValue]:
         "is_enabled": bool(account.get("is_enabled", True)),
         "tls_mode": str(account.get("tls_mode", "implicit")),
         "ca_cert_path": account.get("ca_cert_path"),
+        "auth_type": str(account.get("auth_type", "password")),
+        "oauth_provider": account.get("oauth_provider"),
+        "oauth_client_id": account.get("oauth_client_id"),
+        "oauth_tenant": account.get("oauth_tenant"),
         "timestamp": _timestamp(),
     }
 
