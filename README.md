@@ -46,6 +46,21 @@ Use the "Storage" menu's "Safely eject storage" action before physically removin
 
 In Windows, set the removable drive's policy to **Quick removal** (Disk Management / Device Manager policy tab) rather than "Better performance". Quick removal disables the Windows write cache for the device, which keeps `os.replace` and fsync behavior consistent with what mail-dock assumes. Avoid running the archive drive through a USB hub or on bus power, since power drops on those paths are a common cause of unexpected detachment.
 
+## Gmail accounts and Google OAuth verification status
+
+mail-dock does not ship or proxy its own Google OAuth client. Each user creates their own Google Cloud project, configures its OAuth consent screen, and registers their own Gmail account(s) as test users (step-by-step console instructions land with the Phase 5.2a client-setup task; the verification procedure used to validate this policy is in [手順書_Phase5_GroupG_Gmail-OAuth2-PoC.md](docs/手順書_Phase5_GroupG_Gmail-OAuth2-PoC.md)).
+
+Google's own guidance on ["when verification is not needed"](https://support.google.com/cloud/answer/13464323) draws a hard line between self/known-user operation and public release:
+
+- **Self-use or a small number of known users (mail-dock's intended usage):** keep the consent screen's publishing status at **"Testing"**, and add only yourself (and any other trusted users, up to 100) as test users. This falls under Google's own exemption categories ("Personal Use apps" and "Development/Testing/Staging apps"), so **no Google verification review and no CASA security assessment (paid, annual) are required**.
+- **General public release:** publishing the consent screen as "In production" for unknown/unlimited users would require Google's verification review and, for the restricted `https://mail.google.com/` scope, the CASA assessment. mail-dock does not pursue this path — it is out of scope for this project.
+
+Trade-offs of staying in "Testing" status:
+
+- Every sign-in shows Google's "Google hasn't verified this app" warning screen (click through "Advanced" → "Go to (app name)").
+- A refresh token for the restricted `https://mail.google.com/` scope expires after **7 days** while the consent screen is in "Testing" status. IMAP connection attempts after expiry fail with `invalid_grant`, at which point the account needs to be re-authorized with Google.
+- The consent screen is capped at 100 test users while in "Testing" status.
+
 ## Development setup
 
 Requirements: Python 3.13, [uv](https://docs.astral.sh/uv/), and Git. From the repository root:

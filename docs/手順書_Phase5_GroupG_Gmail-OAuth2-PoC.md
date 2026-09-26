@@ -104,7 +104,9 @@ Group Gの目的は、**Group H〜L（本実装）に着手する前に**、以�
   - 不特定多数への一般公開は、Googleの確認（検証済みアプリ）とCASAセキュリティ評価（有償・年次）が必要になり、本PoCの範囲外
 - 技術的な接続可否（G-2/G-3）と、この運用判断を混同しないこと。
 
-**完了条件**: 上記の区分をドキュメント（README等）に整理して記載すること。
+**確認済みの結論（2026-09-26）**: Google公式ヘルプ「[When is verification not needed](https://support.google.com/cloud/answer/13464323)」が明文化する「Personal Use apps（100人未満の自己利用）」「Development/Testing/Staging apps」の2区分に、mail-dockの想定運用（各ユーザーが自分のGoogle Cloudプロジェクトを作り、同意画面を「テスト中」のまま自己利用・少数の既知テストユーザーに限定する）がそのまま該当する。したがって、この運用形態を続ける限りGoogle検証審査・CASAセキュリティ評価は不要と確定した。一般公開（本番公開・不特定多数への提供）は本プロジェクトのスコープ外のままとする。結論はREADMEの「Gmail accounts and Google OAuth verification status」節へ反映済み。
+
+**完了条件**: 上記の区分をドキュメント（README等）に整理して記載すること（達成済み）。
 
 ---
 

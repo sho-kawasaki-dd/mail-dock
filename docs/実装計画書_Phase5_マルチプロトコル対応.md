@@ -54,7 +54,7 @@
 | D-11 | 同時接続数・レート制限 | サーバー固有の同時接続数上限やレート制限は既存の `usecases/retry.py` の `TransientError` リトライ機構に委ねる。Gmail固有のスロットル応答（D-19参照）はこの機構へ長めのバックオフ経路を追加する形で対応し、フェッチャー実装へリトライを持ち込まない |
 | D-12 | 実サーバー検証の代替（5.1） | Dockerの Dovecot 設定を拡張し、STARTTLS・`LOGINDISABLED`・自己署名証明書の3シナリオを結合テストで再現する。実運用前には少なくとも1つの非Onamaeサーバー（さくら等）での手動検証を推奨する |
 | D-13 | Gmail取得方式 | **IMAP + XOAUTH2** を採用する。Gmail REST API（`users.messages` / `historyId` 差分同期）は不採用とする。理由: 既存の `GenericImapFetcher` / UID増分同期 / EML保存パイプラインをほぼそのまま再利用でき、`BaseMailFetcher` の契約（UID・`RFC822` 生EML取得）と自然に整合するため。REST APIは、将来ラベル同期の精度向上等が必要になった場合の拡張余地としてのみ設計上残す（具体実装はしない） |
-| D-14 | OAuthクライアントの配布方式 | mail-dock は特定の `client_id` / `client_secret` を同梱・配布しない。**ユーザー自身がGoogle Cloudプロジェクトを作成し、OAuth同意画面とデスクトップアプリ用クライアントIDを用意する**運用とする。理由: `https://mail.google.com/` は制限付きスコープであり、公開アプリとして提供するにはGoogleのCASAセキュリティ評価（有償・年次）が必須であり、OSSデスクトップアプリとして現実的ではない。README に手順（同意画面の設定、テストユーザー登録、スコープ追加、クライアントID発行）を記載する |
+| D-14 | OAuthクライアントの配布方式 | mail-dock は特定の `client_id` / `client_secret` を同梱・配布しない。**ユーザー自身がGoogle Cloudプロジェクトを作成し、OAuth同意画面とデスクトップアプリ用クライアントIDを用意する**運用とする。理由: `https://mail.google.com/` は制限付きスコープであり、公開アプリとして提供するにはGoogleのCASAセキュリティ評価（有償・年次）が必須であり、OSSデスクトップアプリとして現実的ではない。同意画面の公開ステータスは「テスト中」のまま自己利用・少数の既知テストユーザー運用に限定し、Google検証審査・CASAは要求しない（Group G G-5で確認済み。根拠と詳細はREADME「Gmail accounts and Google OAuth verification status」節を参照）。README に手順（同意画面の設定、テストユーザー登録、スコープ追加、クライアントID発行）を記載する |
 | D-15 | 依存関係 | **追加のサードパーティ依存パッケージを追加しない。** OAuth2（認可コード＋PKCE＋ループバックリダイレクト）は標準ライブラリ（`http.server` / `urllib` / `secrets` / `hashlib` / `base64` / `json`）のみで実装する。開発計画書 2.1 に残る「`google-auth-oauthlib`（将来対応用）」の記述はこの決定に合わせて削除する（Group Pでタスク化） |
 | D-16 | ラベルと `message_folders` | Gmailの「1通が複数ラベルに属する」性質への対応を **5.2a と 5.2b に分割**する。5.2a では同期対象を既定でSPECIAL-USE `\All`（「すべてのメール」相当フォルダ）のみとし、既存の `messages.folder_id` 単一列のまま「1メッセージ=1フォルダ」の枠組みで動かす（ラベルは `gmail_labels` 列に文字列として保持するだけで検索・フィルタには使わない）。5.2b で `message_folders` 中間テーブルへ移行し、複数フォルダ所属・削除検知・検索フィルタを正式対応させる |
 | D-17 | INBOXとAll Mailの二重登録（5.2a の暫定挙動） | 5.2a では `\All` 以外のフォルダも `is_sync_target` に追加できる（ユーザー選択式の既存挙動を変えない）が、INBOXと「すべてのメール」を同時に同期対象にすると同一メールが別UIDで二重に保存される。**5.2aではこれを「既知の暫定挙動」として許容し、UIに警告を表示するに留める**（5.2bの `message_folders`移行で解消する）。理由: 5.2aの目的はまず「動くGmail接続」を確立することであり、二重登録の完全排除は `message_folders` 移行と不可分であるため、5.2a単体で作り込む投資対効果が低い |
@@ -224,8 +224,8 @@
 - [x] G-1: Google Cloud プロジェクトを作成し、OAuth同意画面（External）で制限付きスコープ `https://mail.google.com/` を追加し、テストユーザーとしてPoC用アカウントを登録する
 - [x] G-2: デスクトップアプリ用OAuthクライアントを発行し、Authorization Code + PKCE + ループバックリダイレクトで認可コードを取得できることを確認する
 - [x] G-3: 取得した `refresh_token` / `access_token` でXOAUTH2によるIMAP接続・`LIST`・`UID FETCH`（`X-GM-MSGID`/`X-GM-THRID`/`X-GM-LABELS`を含む）が成功することを実機で確認する
-- [] G-4: 7日失効はGoogle公式仕様としてREADMEへ記録し、`invalid_grant`時に再連携へ遷移する受入条件を確定する。7日待機による実測は任意の長期観察とし、実装ブロッカーにしない（D-25）
-- [ ] G-5: 「本番」公開・検証・CASAの要否を技術PoCから分離した運用判断として整理し、自己利用/100人未満の既知ユーザー利用と一般公開を混同しない
+- [ ] G-4: 7日失効はGoogle公式仕様としてREADMEへ記録し、`invalid_grant`時に再連携へ遷移する受入条件を確定する。7日待機による実測は任意の長期観察とし、実装ブロッカーにしない（D-25）
+- [x] G-5: 「本番」公開・検証・CASAの要否を技術PoCから分離した運用判断として整理し、自己利用/100人未満の既知ユーザー利用と一般公開を混同しない（結論・2026-09-26: Google公式ヘルプ「[When is verification not needed](https://support.google.com/cloud/answer/13464323)」の「Personal Use apps（100人未満の自己利用）」「Development/Testing/Staging apps」の2区分に該当するため、OAuth同意画面の公開ステータスを「テスト中」のまま自己利用・少数の既知テストユーザー運用に限定する限り、Google検証審査・CASAセキュリティ評価は不要と確定した。一般公開（本番公開・不特定多数への提供）は本プロジェクトでは行わずスコープ外のままとし、技術的な接続可否（G-2/G-3）とこの運用判断を混同しない。詳細はREADME「Gmail accounts and Google OAuth verification status」節を参照）
 - [ ] G-6: Gmailのスロットル応答は公式資料または実運用で観測できた場合にfixtureへ追加し、意図的に帯域制限へ到達する試験は行わない。未観測コードは合成応答で分類を検証する
 - [ ] G-7: Docker Dovecot で `auth_mechanisms = xoauth2` によるローカルトークン検証が結合テストとして再現可能かを確認する。再現できない場合はD-26に従いFakeフェッチャーへの切替方針を確定する
 - [ ] G-8: PoCの実測結果を本書の該当D項目（D-13, D-18, D-19, D-25, D-26）へ反映し、必要であれば意思決定を更新する
