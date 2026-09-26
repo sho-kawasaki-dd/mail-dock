@@ -120,6 +120,8 @@ Group Gの目的は、**Group H〜L（本実装）に着手する前に**、以�
 
 **完了条件**: 観測できた実レスポンス（あれば）を記録し、無い場合は合成応答での検証方針を確認すること。
 
+**確認済みの結論（2026-09-26）**: IETF datatrackerでRFC 5530「IMAP Response Codes」（2009年制定）を確認したところ、`OVERQUOTA`と`LIMIT`はIANA登録済みの正式なIMAP応答コードである（§3・§6 IANA Considerations）。一方`THROTTLED`はRFC 5530に登録が無く、Google公式の[IMAP Extensions](https://developers.google.com/workspace/gmail/imap/imap-extensions)・[IMAP, POP, and SMTP](https://developers.google.com/workspace/gmail/imap/imap-smtp)・[Add Gmail to another email client](https://support.google.com/mail/answer/7126229)のいずれにも記載が見つからなかった。実運用での偶然観測も無いため、`OVERQUOTA`/`LIMIT`はRFC5530根拠での分類を維持し、`THROTTLED`は合成応答（fixture）でのみ分類挙動を検証する方針とする（意図的な帯域制限到達試験は行わない）。結論は実装計画書D-19へ反映済み。
+
 ---
 
 ## G-7: Docker DovecotでのXOAUTH2結合テスト再現性の確認
@@ -133,6 +135,14 @@ Group Gの目的は、**Group H〜L（本実装）に着手する前に**、以�
    - 実Gmailサーバーに対する検証は、本書のPoCスクリプトによる**手動確認**に留める（Phase 4レビュー修正案の「ソケット切断の実際の再現は狙わない」と同じ考え方）
 
 **完了条件**: Docker Dovecotでの`xoauth2`再現可否を判定し、再現できない場合は上記の代替方針（Fake単体テスト＋手動確認）で合意すること。
+
+**確認済みの結論（再現成功・2026-09-26）**: 一時的な検証コンテナで実際に再現できた。
+
+- 本リポジトリが使用する`dovecot/dovecot:2.3.21.1`イメージには`passdb { driver = oauth2 }`が標準搭載済み（`/usr/share/dovecot/dovecot-oauth2.conf.ext`が同梱されており、外部プラグインや追加ビルドは不要）。
+- 最小設定（`auth_mechanisms = xoauth2`、`passdb { driver = oauth2; mechanisms = xoauth2; args = /etc/dovecot/dovecot-oauth2.conf.ext }`、`dovecot-oauth2.conf.ext`に`tokeninfo_url = http://127.0.0.1:{port}/introspect?access_token=`と`username_attribute = email`のみ）で、標準ライブラリの`http.server`によるローカルのトークンイントロスペクションスタブ（Googleの実エンドポイントの代わりに固定トークンを検証するダミー実装、外部ネットワーク不要）と組み合わせて動作した。
+  - 注意点: `active_attribute`/`active_value`を設定すると、スタブが返すJSON真偽値とDovecotの文字列比較が一致せず誤って認証失敗になった。この検証には使わず、HTTPステータスコード（200/401）のみで有効性を判定させるのが簡潔だった。
+- Python `imaplib.IMAP4.authenticate("XOAUTH2", callback)` で実Dovecotに対し、成功系（有効トークン→`AUTH RESULT: OK`、`LIST`成功）と失敗系（無効トークン→SASL継続チャレンジ→最終的に`NO [AUTHENTICATIONFAILED]`）の両方を確認した。失敗系のSASL継続チャレンジは、`GenericImapFetcher`のXOAUTH2コールバックが空行（`b""`）を返すべき形（D-23/F-18/レビュー修正案3.1節）と一致することも確認した。
+- 結論: D-26の「再現できない場合の代替方針」は不要と判明。恒久的な`tests/docker/compose.yaml`サービス化と`tests/integration/`への結合テスト追加は**Group J/Oで実施する**（本タスクでは再現可否の判定のみ行い、検証用の一時コンテナ・スタブスクリプトは確認後に破棄済みでリポジトリへの変更は無い）。結論は実装計画書D-26へ反映済み。
 
 ---
 
@@ -149,6 +159,8 @@ Group G完了後、以下を[実装計画書_Phase5_マルチプロトコル対�
 | D-26 | G-7で判定したDocker結合テストの再現可否と、再現できない場合の代替方針 |
 
 その後、Group Gの全チェックボックス（G-1〜G-8）を実装計画書上でチェックし、Group H（OAuth2基盤の本実装）へ進む。
+
+**反映済み（2026-09-26）**: 上表の5項目すべてを実装計画書のD-13/D-18/D-19/D-25/D-26へ反映し、Group Gの全チェックボックス（G-1〜G-8）をチェック済み。
 
 ---
 
