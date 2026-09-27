@@ -364,12 +364,12 @@
 
 ### **Group O: 静的テスト・CI（全サブフェーズ共通）**
 
-- [ ] `tests/unit/test_ports.py` を拡張し、`domain` / `usecases` に PySide6・`mail_dock.infrastructure` のimportが無いこと、`presentation` に `sqlite3` のimportが無いことを確認する。現行composition rootの `presentation/context.py` だけはinfrastructure importの明示的な例外とする
-- [ ] CLIにOAuth関連サブコマンドが存在しないことを固定する静的テストを追加する
-- [ ] 秘密情報（`client_secret` / `refresh_token` / `access_token`）がDB・`config.json`・ログ・マニフェストへ一切出力されないことを固定するテストを追加する
-- [ ] OAuth token endpointがHTTPSかつプロバイダ許可ホストであること、DBやユーザー入力から任意URLを注入できないことを固定するテストを追加する
-- [ ] `uv run ruff format --check .` / `uv run ruff check .` / `uv run mypy` / `uv run pytest -m "not docker and not gui and not pst"` を実行し、全テスト通過を確認する
-- [ ] `message_folders` 移行後も既存の全結合テスト・単体テストが壊れていないことを確認する
+- [ ] `tests/unit/test_ports.py` を拡張し、`domain` / `usecases` に PySide6・`mail_dock.infrastructure` のimportが無いこと、`presentation` に `sqlite3` のimportが無いことを確認する。現行composition rootの `presentation/context.py` だけはinfrastructure importの明示的な例外とする（検査を追加。実行時に `usecases/reindex.py`・`reparse.py`・`sync_mail.py`・`verify.py` のinfrastructure importを検出しており、依存分離が未完了）
+- [x] CLIにOAuth関連サブコマンドが存在しないことを固定する静的テストを追加する（全subparserを再帰走査）
+- [x] 秘密情報（`client_secret` / `refresh_token` / `access_token`）がDB・`config.json`・ログ・マニフェストへ一切出力されないことを固定するテストを追加する（既存のDB/config/snapshot/manifest/OAuthエラーログ検証を確認）
+- [x] OAuth token endpointがHTTPSかつプロバイダ許可ホストであること、DBやユーザー入力から任意URLを注入できないことを固定するテストを追加する（Google/Microsoft両endpointのHTTPS・許可ホスト・HTTP拒否テストを追加。許可外hostの通信前拒否も既存テストで確認）
+- [ ] `uv run ruff format --check .` / `uv run ruff check .` / `uv run mypy` / `uv run pytest -m "not docker and not gui and not pst"` を実行し、全テスト通過を確認する（format成功、mypy成功、変更3ファイルのruff成功。全体ruffは未変更の `tools/gmail_oauth_poc/gmail_poc.py` に既存6件、標準テストは678 passed・3 skipped・依存境界テスト1件failed）
+- [ ] `message_folders` 移行後も既存の全結合テスト・単体テストが壊れていないことを確認する（標準対象は678件成功。上記の依存境界テストが失敗するため全体完了には未到達）
 
 ### **Group P: ドキュメント整合**
 

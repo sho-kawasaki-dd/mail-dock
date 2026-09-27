@@ -67,6 +67,26 @@ def test_microsoft_authorization_uses_localhost_dynamic_redirect_and_allowed_ten
         client._pending.pop(request.request_id).server.server_close()
 
 
+@pytest.mark.parametrize(
+    ("provider_name", "tenant"),
+    [("google", None), ("microsoft", "organizations")],
+)
+def test_provider_endpoints_require_https_and_allowlisted_hosts(
+    provider_name: str, tenant: str | None
+) -> None:
+    provider = oauth2_module._provider(provider_name, tenant)
+
+    for endpoint in (provider.authorization_endpoint, provider.token_endpoint):
+        parsed = urllib.parse.urlsplit(endpoint)
+        assert parsed.scheme == "https"
+        assert parsed.hostname in provider.allowed_hosts
+        oauth2_module._validate_endpoint(endpoint, provider.allowed_hosts)
+        with pytest.raises(ConfigError, match="approved HTTPS endpoint"):
+            oauth2_module._validate_endpoint(
+                endpoint.replace("https://", "http://", 1), provider.allowed_hosts
+            )
+
+
 def test_microsoft_localhost_redirect_accepts_loopback_callback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

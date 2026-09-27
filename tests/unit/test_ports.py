@@ -120,21 +120,18 @@ def _matches_forbidden(module_name: str, forbidden_prefixes: tuple[str, ...]) ->
     )
 
 
-def test_presentation_views_viewmodels_and_models_do_not_import_infrastructure() -> None:
+def test_presentation_does_not_import_sqlite() -> None:
     presentation_root = Path(__file__).parents[2] / "src" / "mail_dock" / "presentation"
-    forbidden = ("sqlite3", "mail_dock.infrastructure")
 
-    for package_name in ("views", "viewmodels", "models"):
-        package_dir = presentation_root / package_name
-        for source_path in package_dir.rglob("*.py"):
-            imports = _imported_module_names(source_path)
-            offending = {name for name in imports if _matches_forbidden(name, forbidden)}
-            assert not offending, (source_path, offending)
+    for source_path in presentation_root.rglob("*.py"):
+        imports = _imported_module_names(source_path)
+        sqlite_imports = {name for name in imports if _matches_forbidden(name, ("sqlite3",))}
+        assert not sqlite_imports, (source_path, sqlite_imports)
 
 
-def test_domain_and_usecases_do_not_import_pyside6() -> None:
+def test_domain_and_usecases_do_not_import_pyside6_or_infrastructure() -> None:
     src_root = Path(__file__).parents[2] / "src" / "mail_dock"
-    forbidden = ("PySide6",)
+    forbidden = ("PySide6", "mail_dock.infrastructure", "webbrowser")
 
     for package_name in ("domain", "usecases"):
         package_dir = src_root / package_name

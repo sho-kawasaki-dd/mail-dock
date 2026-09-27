@@ -73,7 +73,7 @@ class _CallbackResult:
 
 def _make_callback_handler(result: _CallbackResult) -> type[http.server.BaseHTTPRequestHandler]:
     class Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self) -> None:  # noqa: N802 (stdlib method name)
+        def do_GET(self) -> None:
             query = urllib.parse.urlparse(self.path).query
             params = urllib.parse.parse_qs(query)
             result.code = params.get("code", [None])[0]
@@ -89,7 +89,7 @@ def _make_callback_handler(result: _CallbackResult) -> type[http.server.BaseHTTP
                 b"and return to the terminal.</p></body></html>"
             )
 
-        def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+        def log_message(self, format: str, *args: object) -> None:
             pass  # suppress default request logging (no secrets in it, but keep output clean)
 
     return Handler
@@ -177,7 +177,7 @@ def _exchange_code_for_tokens(
     ).encode("ascii")
     request = urllib.request.Request(_TOKEN_ENDPOINT, data=body, method="POST")
     try:
-        with urllib.request.urlopen(request, timeout=30.0) as response:  # noqa: S310 (fixed HTTPS endpoint)
+        with urllib.request.urlopen(request, timeout=30.0) as response:
             return _decode_json_object(response.read())
     except urllib.error.HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace")
@@ -200,7 +200,7 @@ def _refresh_access_token(
     ).encode("ascii")
     request = urllib.request.Request(_TOKEN_ENDPOINT, data=body, method="POST")
     try:
-        with urllib.request.urlopen(request, timeout=30.0) as response:  # noqa: S310 (fixed HTTPS endpoint)
+        with urllib.request.urlopen(request, timeout=30.0) as response:
             return _decode_json_object(response.read())
     except urllib.error.HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace")
@@ -212,7 +212,7 @@ class _Xoauth2Callback:
     any subsequent continuation challenge (Phase 5 review finding #1)."""
 
     def __init__(self, email: str, access_token: str) -> None:
-        self._sasl_string = f"user={email}\x01auth=Bearer {access_token}\x01\x01".encode("utf-8")
+        self._sasl_string = f"user={email}\x01auth=Bearer {access_token}\x01\x01".encode()
         self._called = False
 
     def __call__(self, _challenge: bytes) -> bytes:
@@ -303,7 +303,8 @@ def main() -> int:
         raise SystemExit("[G-2] Token response did not include an access_token.")
     print(
         "[G-2] Token exchange succeeded "
-        f"(access_token length={len(access_token)}, refresh_token present={refresh_token is not None})."
+        f"(access_token length={len(access_token)}, "
+        f"refresh_token present={refresh_token is not None})."
     )
     if not isinstance(refresh_token, str):
         raise SystemExit(

@@ -1,3 +1,4 @@
+import argparse
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -155,6 +156,27 @@ def test_cli_has_no_destructive_subcommand(command: str) -> None:
 def test_cli_has_no_pst_import_subcommand(command: str) -> None:
     with pytest.raises(SystemExit):
         _build_parser().parse_args([command])
+
+
+def test_cli_has_no_oauth_interactive_subcommands() -> None:
+    pending_parsers = [_build_parser()]
+    command_names: set[str] = set()
+
+    while pending_parsers:
+        current_parser = pending_parsers.pop()
+        for action in current_parser._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                command_names.update(action.choices)
+                pending_parsers.extend(action.choices.values())
+
+    assert not {
+        command_name
+        for command_name in command_names
+        if any(
+            term in command_name.casefold()
+            for term in ("oauth", "authorize", "login", "token", "refresh")
+        )
+    }
 
 
 def test_main_routes_gui_and_no_command_without_starting_storage_session(
