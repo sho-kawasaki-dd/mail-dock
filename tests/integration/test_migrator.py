@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 import sqlite3
 from importlib import resources
 from pathlib import Path
@@ -10,6 +11,7 @@ import pytest
 
 import mail_dock.infrastructure.database.migrator as migrator
 from mail_dock.domain.errors import MigrationError, SchemaVersionTooNewError
+from mail_dock.domain.message_identity import imap_source_item_key
 from mail_dock.infrastructure.database.connection import connect
 from mail_dock.infrastructure.database.message_folder_migration import finalize_message_folders
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
@@ -581,3 +583,221 @@ def test_message_folder_finalizer_merges_gmail_duplicates_and_preserves_membersh
         event.get("event") == "message_identity_linked"
         for event in reader_factory("gmail").read_all_events()
     )
+
+
+def _insert_legacy_message(connection: sqlite3.Connection, *, account_id: str, uid: int) -> None:
+    connection.execute(
+        "INSERT INTO folders (account_id, raw_name, display_name) VALUES (?, ?, ?)",
+        (account_id, "INBOX", "Inbox"),
+    )
+    folder_id = int(
+        connection.execute("SELECT id FROM folders WHERE account_id = ?", (account_id,)).fetchone()[
+            0
+        ]
+    )
+    connection.execute(
+        """INSERT INTO messages (
+            account_id, folder_id, content_key, source_item_key, uid, uidvalidity,
+            remote_state, local_state, relative_path, file_hash, subject
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            account_id,
+            folder_id,
+            f"{account_id}-content",
+            f"42:{uid}",
+            uid,
+            42,
+            "present",
+            "active",
+            f"eml/{account_id}/message.eml",
+            "a" * 64,
+            f"Subject {account_id}",
+        ),
+    )
+    message_id = int(
+        connection.execute(
+            "SELECT id FROM messages WHERE account_id = ?", (account_id,)
+        ).fetchone()[0]
+    )
+    connection.execute(
+        "INSERT INTO message_folders (message_id, folder_id, uid, uidvalidity, remote_state) "
+        "VALUES (?, ?, ?, ?, 'present')",
+        (message_id, folder_id, uid, 42),
+    )
+
+
+def test_message_folder_finalizer_resumes_after_an_interrupted_account_loop(
+    db_conn: sqlite3.Connection,
+    tmp_path: Path,
+) -> None:
+    """Finalization loops over accounts one at a time (D-34: not one big atomic
+    step). A crash right after one account's manifest write + merge commit, but
+    before the next account is even journaled, must be resumable without
+    re-emitting the first account's already-durable manifest events, and must
+    still reach the finalized (legacy-column-free) schema once retried.
+    """
+    assert migrate(db_conn, tmp_path / "metadata.db") == 9
+    for account_id in ("account-a", "account-b"):
+        db_conn.execute(
+            "INSERT INTO accounts (id, provider_type) VALUES (?, ?)", (account_id, "imap")
+        )
+    _insert_legacy_message(db_conn, account_id="account-a", uid=1)
+    _insert_legacy_message(db_conn, account_id="account-b", uid=2)
+    db_conn.commit()
+
+    def reader_factory(account_id: str) -> ManifestReader:
+        return ManifestReader(tmp_path, account_id)
+
+    calls: list[str] = []
+
+    def crashing_writer_factory(account_id: str) -> ManifestWriter:
+        calls.append(account_id)
+        if account_id == "account-b":
+            raise MigrationError("simulated crash before account-b is journaled")
+        return ManifestWriter(tmp_path, account_id)
+
+    with pytest.raises(MigrationError, match="simulated crash"):
+        finalize_message_folders(db_conn, crashing_writer_factory, reader_factory)
+
+    assert calls == ["account-a", "account-b"]
+    # Finalization only rebuilds `messages` after every account is merged, so the
+    # crash leaves the legacy dual-mode schema in place.
+    assert "folder_id" in {row[1] for row in db_conn.execute("PRAGMA table_info(messages)")}
+    account_a_key = imap_source_item_key("INBOX", 42, 1)
+    assert db_conn.execute(
+        "SELECT source_item_key FROM messages WHERE account_id = ?", ("account-a",)
+    ).fetchone() == (account_a_key,)
+    assert (
+        db_conn.execute(
+            "SELECT source_item_key FROM messages WHERE account_id = ?", ("account-b",)
+        ).fetchone()[0]
+        == "42:2"  # account-b was never reached, still holds its pre-finalization key
+    )
+    account_a_snapshots_before_retry = [
+        event
+        for event in reader_factory("account-a").read_all_events()
+        if event.get("event") == "message_membership_snapshot"
+    ]
+    assert len(account_a_snapshots_before_retry) == 1
+
+    def writer_factory(account_id: str) -> ManifestWriter:
+        return ManifestWriter(tmp_path, account_id)
+
+    assert finalize_message_folders(db_conn, writer_factory, reader_factory)
+
+    # account-a must not have been re-journaled by the retry.
+    assert [
+        event
+        for event in reader_factory("account-a").read_all_events()
+        if event.get("event") == "message_membership_snapshot"
+    ] == account_a_snapshots_before_retry
+    account_b_key = imap_source_item_key("INBOX", 42, 2)
+    assert db_conn.execute(
+        "SELECT source_item_key FROM messages ORDER BY source_item_key"
+    ).fetchall() == [(account_a_key,), (account_b_key,)]
+    columns = {row[1] for row in db_conn.execute("PRAGMA table_info(messages)")}
+    assert not columns & {"folder_id", "uid", "uidvalidity"}
+    assert db_conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    assert db_conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+
+    # Fully idempotent: a second retry has nothing left to finalize.
+    assert finalize_message_folders(db_conn, writer_factory, reader_factory) is False
+
+
+def test_009_migration_can_be_restored_from_its_pre_migration_backup(tmp_path: Path) -> None:
+    """`migrate()` backs up the database before applying 009 (and every other
+    migration). If an operator abandons a 009 migration attempt (e.g. because
+    the post-migration finalizer raised on a real EML hash mismatch), restoring
+    that backup verbatim and re-running the migration must work cleanly.
+    """
+    db_path = tmp_path / "metadata.db"
+    connection = connect(db_path)
+    try:
+        migration_dir = resources.files("mail_dock").joinpath("migrations")
+        for migration_name in (
+            "001_init.sql",
+            "002_sync_cursor.sql",
+            "003_timestamp_format.sql",
+            "004_flag_refresh.sql",
+            "005_phase4.sql",
+            "006_pst_import.sql",
+            "007_generic_imap_connection.sql",
+            "008_oauth_accounts.sql",
+        ):
+            migration = migration_dir.joinpath(migration_name)
+            connection.executescript(migration.read_text(encoding="utf-8"))
+        connection.execute("PRAGMA user_version = 8")
+        connection.execute(
+            "INSERT INTO accounts (id, provider_type, host, port, username) VALUES (?, ?, ?, ?, ?)",
+            ("legacy", "imap", "imap.example.test", 993, "user"),
+        )
+        connection.execute(
+            "INSERT INTO folders (account_id, raw_name, display_name) VALUES (?, ?, ?)",
+            ("legacy", "INBOX", "Inbox"),
+        )
+        folder_id = int(connection.execute("SELECT id FROM folders").fetchone()[0])
+        connection.execute(
+            """INSERT INTO messages (
+                account_id, folder_id, content_key, source_item_key, uid, uidvalidity,
+                remote_state, local_state, relative_path, file_hash, subject
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "legacy",
+                folder_id,
+                "legacy-content",
+                "42:7",
+                7,
+                42,
+                "present",
+                "active",
+                "eml/legacy/message.eml",
+                "a" * 64,
+                "Subject legacy",
+            ),
+        )
+        connection.commit()
+
+        assert migrate(connection, db_path) == 9
+    finally:
+        connection.close()
+
+    backup_path = tmp_path / "metadata.db.bak.8"
+    assert backup_path.is_file()
+    backup = connect(backup_path, readonly=True)
+    try:
+        assert current_version(backup) == 8
+        assert backup.execute("SELECT source_item_key FROM messages").fetchall() == [("42:7",)]
+        assert (
+            backup.execute(
+                "SELECT name FROM sqlite_master WHERE name = 'message_folders'"
+            ).fetchone()
+            is None
+        )
+    finally:
+        backup.close()
+
+    # Restore the pre-009 backup to a fresh location, as an operator would, and
+    # re-run the migration from that clean restore point.
+    restored_path = tmp_path / "restored" / "metadata.db"
+    restored_path.parent.mkdir()
+    shutil.copyfile(backup_path, restored_path)
+
+    restored = connect(restored_path)
+    try:
+        assert current_version(restored) == 8
+        assert restored.execute("SELECT source_item_key FROM messages").fetchall() == [("42:7",)]
+
+        assert migrate(restored, restored_path) == 9
+
+        assert current_version(restored) == 9
+        membership_columns = {
+            row[1] for row in restored.execute("PRAGMA table_info(message_folders)")
+        }
+        assert "message_id" in membership_columns
+        assert restored.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+    finally:
+        restored.close()
+
+    # The restored copy's own migration produced its own pre-009 backup,
+    # independent of the abandoned attempt's backup file.
+    assert (tmp_path / "restored" / "metadata.db.bak.8").is_file()

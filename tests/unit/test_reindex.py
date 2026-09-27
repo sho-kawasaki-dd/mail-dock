@@ -10,6 +10,7 @@ import pytest
 
 from mail_dock.domain.errors import StorageError
 from mail_dock.domain.fetcher import CancelToken
+from mail_dock.domain.message_identity import imap_source_item_key
 from mail_dock.domain.messages import StoredEml
 from mail_dock.domain.ports import BaseEmlStorage, BaseManifestReader, JSONValue
 from mail_dock.infrastructure.database.connection import connect
@@ -391,3 +392,186 @@ def test_rebuild_database_replaces_existing_database_only_after_verification(
         assert messages == [("imap:SU5CT1g:42:7",)]
     finally:
         connection.close()
+
+
+def test_rebuild_database_recovers_a_copyuid_merge_after_a_crash_before_the_db_commit(
+    tmp_path: Path,
+) -> None:
+    """Recover a COPYUID-confirmed MOVE merge purely from the manifest.
+
+    This reproduces a crash between `delete_remote.execute()`'s manifest
+    `flush_and_sync()` (which durably records `message_identity_linked` +
+    `message_membership_snapshot`) and the DB transaction that applies them
+    (`_commit_completed_state`): the manifest below is exactly what is durable at
+    that crash point, while no live database has ever applied it. Rebuilding twice
+    from the identical manifest -- as a retried recovery would do -- replays the
+    same `message_identity_linked` event again and must not duplicate its effect.
+    """
+    root = tmp_path / "storage"
+    initialize_root(root)
+    storage = EmlStorage(root)
+    raw = _raw("Moved")
+    stored = storage.save("account", datetime(2026, 1, 2), raw)
+
+    canonical_key = imap_source_item_key("INBOX", 42, 1)
+    alias_key = imap_source_item_key("Trash", 7, 99)
+
+    writer = ManifestWriter(root, "account")
+    writer.append(
+        {
+            "event": "account_snapshot",
+            "account_id": "account",
+            "provider_type": "imap",
+            "display_name": "Account",
+            "host": "imap.example.com",
+            "port": 993,
+            "username": "user@example.com",
+            "timestamp": "2026-01-01T00:00:00+00:00",
+        }
+    )
+    writer.append(
+        {
+            "event": "folder_snapshot",
+            "account_id": "account",
+            "folder_raw_name": "INBOX",
+            "display_name": "Inbox",
+            "uidvalidity": 42,
+            "delimiter": "/",
+            "timestamp": "2026-01-01T00:00:00+00:00",
+        }
+    )
+    writer.append(
+        {
+            "event": "folder_snapshot",
+            "account_id": "account",
+            "folder_raw_name": "Trash",
+            "display_name": "Trash",
+            "uidvalidity": 7,
+            "delimiter": "/",
+            "timestamp": "2026-01-01T00:00:00+00:00",
+        }
+    )
+    writer.append(
+        {
+            "event": "fetch",
+            "account_id": "account",
+            "folder_raw_name": "INBOX",
+            "uid": 1,
+            "uidvalidity": 42,
+            "source_item_key": canonical_key,
+            "message_id": "<moved@example.com>",
+            "relative_path": stored.relative_path,
+            "file_hash": stored.file_hash,
+            "size_bytes": stored.size_bytes,
+            "internal_date": "2026-01-02T00:00:00+00:00",
+            "timestamp": "2026-01-02T00:00:00+00:00",
+            "deduplicated": False,
+        }
+    )
+    writer.append(
+        {
+            "event": "fetch",
+            "account_id": "account",
+            "folder_raw_name": "Trash",
+            "uid": 99,
+            "uidvalidity": 7,
+            "source_item_key": alias_key,
+            "message_id": "<moved@example.com>",
+            "relative_path": stored.relative_path,
+            "file_hash": stored.file_hash,
+            "size_bytes": stored.size_bytes,
+            "internal_date": "2026-01-02T00:00:02+00:00",
+            "timestamp": "2026-01-02T00:00:02+00:00",
+            "deduplicated": True,
+        }
+    )
+    writer.append(
+        {
+            "event": "remote_delete_completed",
+            "account_id": "account",
+            "folder_raw_name": "INBOX",
+            "uid": 1,
+            "uidvalidity": 42,
+            "mode": "trash",
+            "timestamp": "2026-01-02T00:00:02+00:00",
+        }
+    )
+    writer.append(
+        {
+            "event": "message_identity_linked",
+            "account_id": "account",
+            "canonical_source_item_key": canonical_key,
+            "alias_source_item_key": alias_key,
+            "evidence_kind": "copyuid",
+            "file_hash": stored.file_hash,
+            "timestamp": "2026-01-02T00:00:02+00:00",
+        }
+    )
+    writer.append(
+        {
+            "event": "message_membership_snapshot",
+            "account_id": "account",
+            "source_item_key": canonical_key,
+            "memberships": [
+                {
+                    "folder_raw_name": "INBOX",
+                    "uid": 1,
+                    "uidvalidity": 42,
+                    "remote_state": "moved",
+                    "moved_to_folder_raw_name": "Trash",
+                    "imap_flags": None,
+                    "flags_seen_at": None,
+                    "last_seen_at": "2026-01-02T00:00:02+00:00",
+                },
+                {
+                    "folder_raw_name": "Trash",
+                    "uid": 99,
+                    "uidvalidity": 7,
+                    "remote_state": "present",
+                    "moved_to_folder_raw_name": None,
+                    "imap_flags": None,
+                    "flags_seen_at": None,
+                    "last_seen_at": "2026-01-02T00:00:02+00:00",
+                },
+            ],
+            "timestamp": "2026-01-02T00:00:02+00:00",
+        }
+    )
+    writer.close()
+
+    database_path = root / "metadata.db"
+
+    def _rebuild_and_inspect() -> tuple[
+        list[tuple[object, ...]], list[tuple[object, ...]], list[tuple[object, ...]]
+    ]:
+        result = rebuild_database(database_path, storage, [ManifestReader(root, "account")])
+        assert result.message_count == 2  # both fetches were replayed
+        connection = connect(database_path)
+        try:
+            messages = connection.execute(
+                "SELECT source_item_key, local_state FROM messages ORDER BY source_item_key"
+            ).fetchall()
+            memberships = connection.execute(
+                "SELECT f.raw_name, mf.uid, mf.uidvalidity, mf.remote_state "
+                "FROM message_folders AS mf JOIN folders AS f ON f.id = mf.folder_id "
+                "ORDER BY f.raw_name"
+            ).fetchall()
+            aliases = connection.execute(
+                "SELECT observed_source_item_key FROM message_identity_aliases"
+            ).fetchall()
+            return messages, memberships, aliases
+        finally:
+            connection.close()
+
+    first_messages, first_memberships, first_aliases = _rebuild_and_inspect()
+    assert first_messages == [(canonical_key, "active")]
+    assert first_memberships == [
+        ("INBOX", 1, 42, "moved"),
+        ("Trash", 99, 7, "present"),
+    ]
+    assert first_aliases == [(alias_key,)]
+
+    second_messages, second_memberships, second_aliases = _rebuild_and_inspect()
+    assert second_messages == first_messages
+    assert second_memberships == first_memberships
+    assert second_aliases == first_aliases
