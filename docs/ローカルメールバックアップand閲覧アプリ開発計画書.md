@@ -1494,6 +1494,7 @@ mail-dock本体は **GPL-3.0-or-later** で公開する。同梱する `readpst`
 | **Phase 5.2a: Gmail OAuth2** | 完了 | IMAP + XOAUTH2、標準ライブラリによるAuthorization Code + PKCE、秘密情報のkeyring保管、Gmailメタデータ取得。単一フォルダ扱いの移行期間を含む。 |
 | **Phase 5.2b: Gmailラベル** | 完了 | canonical `messages` と `message_folders` / identity aliases へ移行し、複数ラベル所属、保守的なMOVE統合、snapshot/reindexに対応。 |
 | **Phase 5.3: Microsoft 365 / Outlook.com** | 完了 | 許可リスト付きOAuth2プロバイダ定義とテナント設定を使い、同じIMAP + XOAUTH2基盤に対応。共有メールボックス・委任アクセスは対象外。 |
+| **Phase 6: 配布とライセンス** | 未着手 | PyInstaller（onedir・windowed）によるビルド、凍結実行時の互換性修正（`__file__`相対参照・子プロセス起動）、Inno Setupインストーラー、readpst依存のMSYS2ロックファイル化と対応ソース添付、Qt/PySide6の対応ソース添付、`self-check`診断コマンドとバージョン情報ダイアログ、GPL成果物の充足を検査するリリースCIを実装する。詳細は [実装計画書_Phase6_配布とライセンス.md](./実装計画書_Phase6_配布とライセンス.md) を参照する。 |
 
 詳細な要件・決定事項・検証履歴は [実装計画書_Phase5_マルチプロトコル対応.md](./実装計画書_Phase5_マルチプロトコル対応.md) を参照する。
 
