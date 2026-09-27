@@ -133,6 +133,9 @@ class _PurgeContext:
     def create_purge_storage(self) -> object:
         return object()
 
+    def create_pst_import_repository(self) -> object:
+        return object()
+
     def create_manifest_writer(self, account_id: str) -> _PurgeManifest:
         self.manifest_accounts.append(account_id)
         return _PurgeManifest(account_id)
@@ -583,11 +586,17 @@ def test_acknowledge_storage_unsupported_persists_timestamp_and_reloads(
     assert isinstance(acknowledged["capability_ack_at"], str)
 
 
+class _RecoveryConnectionManager:
+    def get_connection(self) -> str:
+        return "connection"
+
+
 class _RecoverySession:
     def __init__(self, unclean: bool) -> None:
         self.settings = config.AppConfig()
         self.root = Path("/attached")
         self.was_unclean_shutdown = unclean
+        self.connection_manager = _RecoveryConnectionManager()
 
     def __enter__(self) -> _RecoverySession:
         return self
@@ -626,6 +635,8 @@ def test_start_session_runs_range_verify_and_purge_recovery_after_unclean_shutdo
     monkeypatch.setattr(
         app, "backfill_snapshots", lambda *_args, **_kwargs: calls.append("backfill")
     )
+    monkeypatch.setattr(app, "reconcile_account_snapshots", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(app, "finalize_message_folders", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         app, "repair_manifest_tails", lambda *_args, **_kwargs: calls.append("repair")
     )
@@ -665,6 +676,8 @@ def test_start_session_skips_recovery_after_a_clean_shutdown(
     monkeypatch.setattr(
         app, "backfill_snapshots", lambda *_args, **_kwargs: calls.append("backfill")
     )
+    monkeypatch.setattr(app, "reconcile_account_snapshots", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(app, "finalize_message_folders", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         app,
         "repair_manifest_tails",
