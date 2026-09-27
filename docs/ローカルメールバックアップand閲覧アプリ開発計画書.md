@@ -11,7 +11,7 @@
 * **サーバー容量の節約:** メールサーバー容量の逼迫を防ぐため、ローカルへの完全保管（SHA-256による検証済み）を確認したうえで、ユーザー操作によりサーバー上のメールを削除できるようにする。  
 * **ローカルデータの非破壊保存 (Append-Only):** サーバー上でメールが削除・移動されても、ローカルに保存した .eml は**システム都合では一切削除しない**。実ファイルを削除できるのは「ユーザーがアプリ上で明示的にゴミ箱へ移動し、かつ、30日の猶予期間が経過した場合またはゴミ箱の中のメールをさらに削除した場合」のみとする。  
 * **可搬性の確保:** データベース（SQLite）とバイナリ（.eml）を同一のストレージルート配下で管理し、外付けドライブの挿し替えやドライブレター（D:\\, E:\\等）の変更に柔軟に対応する。EMLは標準形式のため、本アプリが無くても Thunderbird 等の一般的なメールクライアントで閲覧できる。  
-* **高い拡張性（マルチプロトコル対応）:** メール取得・削除ロジックをインターフェースとして抽象化し、お名前.com等の標準IMAP（Basic認証）から、将来的なGmail/Outlook（OAuth2 \+ XOAUTH2 / REST API）への対応拡張を容易にする。
+* **高い拡張性（マルチプロトコル対応）:** メール取得・削除ロジックをインターフェースとして抽象化し、汎用IMAP・Gmail・Microsoft 365/Outlook.comを単一の `GenericImapFetcher` で扱う。OAuth2はIMAP + XOAUTH2を使い、Gmail REST APIは採用しない。
 * **過去資産（.pst）の永続化:** **2029年10月の Outlook Classic サポート終了**に向けてプロトコルをIMAPへ移行することを前提に、POP3時代にローカルへ蓄積された `.pst` ファイル内のメールを標準形式の `.eml` へ変換し、Outlookに依存せず永続的に閲覧可能な状態にする。
 
 ### **1.3 設計不変条件（Design Invariants）**
@@ -29,7 +29,7 @@
 > PST由来の `.eml` は `readpst` による **MAPI形式からの再構成物**であり、原本 `.pst` のビット単位の複製ではない。したがって取り込み完了後は `.eml` とPST取込マニフェストを正とするが、**原本 `.pst` はユーザー自身が別途保管する**ことを前提条件とする（アプリは原本をコピーも変更もしない）。取り込み時に原本の完全な SHA-256、変換バージョン、オプション、元フォルダと各EMLの対応を記録し、後から出所を追跡できるようにする。
 
 > **PSTアーカイブとIMAPアーカイブは独立した2つの機能である。**
-> 両者は同一のストレージルート・DB・EML保管構造・検索基盤を共有するが、**データとしては一切接続しない**。重複排除・相互参照・統合ビューは行わない。`content_key` は非一意の移動候補・スレッド照合用情報に限定し、各系統の一次識別子はIMAPの `UIDVALIDITY + UID` とPSTの `source_item_key` に分離する。
+> 両者は同一のストレージルート・DB・EML保管構造・検索基盤を共有するが、**データとしては一切接続しない**。重複排除・相互参照・統合ビューは行わない。`content_key` は非一意の照合候補に限定し、canonicalな論理メッセージのキーはIMAP/GmailとPSTで独立させる（IMAP/Gmailは3.3、PSTは取込世代内の `source_item_key`）。
 
 ### **1.4 想定規模と前提条件**
 
@@ -68,9 +68,7 @@
   * レンダリングエンジン: QWebEngineView（HTMLメールのサンドボックス表示）  
   * ※ Phase 3 冒頭で `QTextBrowser` による軽量版と比較評価し、採否を判断する（後述 6章）  
 * **データベース:** SQLite（Python同梱版。FTS5 \+ trigram トークナイザーを使用）  
-* **通信・プロトコル:**  
-  * 標準ライブラリ imaplib, ssl（お名前.com IMAP over SSL / Port 993）  
-  * 将来対応用: google-auth-oauthlib（OAuth2）  
+* **通信・プロトコル:** 標準ライブラリ `imaplib` / `ssl`（IMAP）および `http.server` / `urllib` / `secrets` / `hashlib` / `base64` / `json`（OAuth2 Authorization Code + PKCE）。OAuth2の追加サードパーティ依存は導入しない。
 * **メール解析:** 標準ライブラリ email \+ beautifulsoup4（HTML→テキスト変換）\+ charset-normalizer（文字コード推定）  
 * **その他:** keyring（OS資格情報ストア）、platformdirs（設定ファイル配置）  
 * **PST変換:** **`readpst`（libpst 0.6.76 以降）を外部実行ファイルとして同梱**し、`subprocess` から起動する（Pythonの追加依存パッケージは不要）
@@ -120,10 +118,12 @@ mail-dock/
 │   │   ├── fetcher.py        # BaseMailFetcher (ABC)
 │   │   ├── importer.py       # BaseArchiveImporter (ABC) ※PST等のローカルアーカイブ取込
 │   │   ├── repository.py     # BaseMessageRepository (ABC) ※テスト時のインメモリ差し替え用
+│   │   ├── ports.py          # OAuthクライアント・トークン供給・資格情報ストア等のポート
 │   │   └── errors.py         # ドメイン例外階層（AuthenticationError / StorageDetachedError 等）
 │   │
 │   ├── usecases/             # 【内層】業務ロジック
 │   │   ├── sync_mail.py      # 同期フロー（UID増分取得→EML保存→DB登録）
+│   │   ├── oauth_authorize.py # OAuth認可・再認可（GUIワーカーから実行）
 │   │   ├── search_mail.py    # 検索条件の組み立てとリポジトリ呼び出し
 │   │   ├── delete_remote.py  # サーバー側削除の制御（事前検証を含む）
 │   │   ├── trash.py          # ローカルゴミ箱・30日経過purgeの制御
@@ -134,8 +134,7 @@ mail-dock/
 │   ├── infrastructure/       # 【外層】DB・通信・ファイルI/O
 │   │   ├── fetchers/
 │   │   │   ├── imap_common.py    # imaplib共通処理（modified UTF-7、例外ラップ）
-│   │   │   ├── generic_imap.py   # GenericImapFetcher
-│   │   │   └── gmail_oauth.py    # (将来用) GmailOAuthFetcher
+│   │   │   └── generic_imap.py   # GenericImapFetcher（password / XOAUTH2、implicit / STARTTLS）
 │   │   ├── importers/
 │   │   │   ├── readpst_locator.py # 同梱readpstの解決・-V によるバージョン確認
 │   │   │   └── readpst_runner.py  # subprocess実行・進捗監視・キャンセル・stderr捕捉
@@ -153,7 +152,8 @@ mail-dock/
 │   │   │   ├── detach.py         # ★I/O例外の分類（OSError/sqlite3.Error → StorageDetachedError）
 │   │   │   └── filename.py       # 添付ファイル名サニタイズ
 │   │   ├── security/
-│   │   │   └── keyring_store.py  # 資格情報の安全な保管
+│   │   │   ├── keyring_store.py  # 資格情報の安全な保管
+│   │   │   └── oauth2.py         # 標準ライブラリによるOAuth2・PKCE・loopback処理
 │   │   └── logging_config.py     # ロガー設定・個人情報マスキング
 │   │
 │   ├── presentation/         # 【最外層】PySide6固有の処理
@@ -174,7 +174,13 @@ mail-dock/
 │   └── migrations/
 │       ├── 001_init.sql
 │       ├── 002_sync_cursor.sql
-│       └── 006_pst_import.sql
+│       ├── 003_timestamp_format.sql
+│       ├── 004_flag_refresh.sql
+│       ├── 005_phase4.sql
+│       ├── 006_pst_import.sql
+│       ├── 007_generic_imap_connection.sql
+│       ├── 008_oauth_accounts.sql
+│       └── 009_message_folders.sql
 │
 └── tests/
     ├── unit/                 # ドメイン・ユースケース・パーサの単体テスト
@@ -201,9 +207,15 @@ UI層・DB保管層と通信層を独立させるため、アダプターパタ�
         │           ReadpstImporter            SQLite          eml/*.eml
         │           (subprocess:            (metadata.db)
         │            vendor/readpst)
-        ├─ GenericImapFetcher (Basic Auth + imaplib)
-        └─ GmailOAuthFetcher  (将来実装: OAuth2 + XOAUTH2)
+        └─ GenericImapFetcher (imaplib: password / XOAUTH2)
+
+    [OAuthAuthorize UseCase] ─ BaseOAuthClient / BaseAccessTokenProvider
+                      ▲
+                      │ implements
+                   OAuth2Client (標準ライブラリ)
 ```
+
+OAuth認可ユースケースとフェッチャーは `domain/ports.py` のポートだけに依存する。認可・トークンURLはGoogle/Microsoftの許可リスト付きプロバイダ定義から導出し、任意URLは受け付けない。ループバック待受とブラウザ起動はGUIのワーカー／presentationから行う。
 
 **`BaseMailFetcher` と `BaseArchiveImporter` は統合しない。** 前者は「接続・増分同期・サーバー削除」を持つ生きた接続の抽象であり、後者は「1回きりの一括変換」である。共通点が `EmlStorage` / `BaseMessageRepository` への出力だけであるため、無理に共通の基底へまとめると両者の制約（レジューム可否・キャンセル粒度・削除操作の有無）が噛み合わなくなる。
 
@@ -270,17 +282,23 @@ CREATE TABLE IF NOT EXISTS accounts (
     display_name  TEXT,
     host          TEXT,               -- pst_import では NULL
     port          INTEGER DEFAULT 993,-- pst_import では NULL
-    username      TEXT,               -- パスワードは keyring 側に保管（DBには保存しない）
+    username      TEXT,
+    auth_type     TEXT NOT NULL DEFAULT 'password', -- 'password' / 'xoauth2'
+    oauth_provider TEXT,               -- 'google' / 'microsoft'。provider_typeは'imap'のまま
+    oauth_client_id TEXT,               -- 秘密情報ではない。client_secretはDBに保存しない
+    oauth_tenant  TEXT,                 -- Microsoft用（consumers / organizations / tenant ID）
+    tls_mode      TEXT NOT NULL DEFAULT 'implicit', -- 'implicit' / 'starttls'
+    ca_cert_path  TEXT,                 -- 任意のCA証明書ファイル
     is_enabled    INTEGER NOT NULL DEFAULT 1,
     created_at    DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 ```
 
-* `provider_type = 'pst_import'` のアカウントに対しては、**同期・サーバー削除・フォルダ選択・定期同期をコードレベルで無効化**する（4.10参照）。UIで隠すだけではなく、ユースケース入口でガードすること。
+* 通常IMAP・Gmail・Microsoft 365/Outlook.comは `provider_type = 'imap'` とし、認証方式・プロバイダーを `auth_type` / `oauth_provider` で区別する。`provider_type = 'pst_import'` のアカウントに対しては、**同期・サーバー削除・フォルダ選択・定期同期をコードレベルで無効化**する（4.10参照）。UIで隠すだけではなく、ユースケース入口でガードすること。
 
 ### **3.2 フォルダ・同期状態テーブル (folders)**
 
-IMAPの正式な識別子は Message-ID ではなく **UIDVALIDITY + UID** である。増分同期を成立させるため、フォルダ単位の同期状態を保持する専用テーブルを設ける。同期対象の選択（ユーザー選択式）もここで管理する。
+IMAPのフォルダ内でリモート所在を特定する値は Message-ID ではなく **UIDVALIDITY + UID** である。これはmembership単位の識別情報であり、フォルダをまたぐcanonicalな論理メッセージのキーは3.3の `source_item_key` とalias規則で管理する。増分同期を成立させるため、フォルダ単位の同期状態を保持する専用テーブルを設ける。同期対象の選択（ユーザー選択式）もここで管理する。
 
 ```sql
 CREATE TABLE IF NOT EXISTS folders (
@@ -307,23 +325,11 @@ CREATE TABLE IF NOT EXISTS folders (
 CREATE TABLE IF NOT EXISTS messages (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id   TEXT    NOT NULL REFERENCES accounts(id),
-    folder_id    INTEGER NOT NULL REFERENCES folders(id),
 
     -- 識別子（Message-ID は欠損・重複し得るため単独UNIQUEにはしない）
     message_id   TEXT,                -- ヘッダーの Message-ID。NULL 許容
     content_key  TEXT NOT NULL,       -- 非一意の照合用。message_id、無ければ 'sha256:xxxx'
-    source_item_key TEXT NOT NULL,    -- 取得元での一次識別子。IMAPはUID組、PSTはStage A確定項目キー
-    uid          INTEGER,             -- IMAP UID
-    uidvalidity  INTEGER,
-
-    -- 状態管理（サーバー側とローカル側を直交した2軸で管理）
-    remote_state TEXT NOT NULL DEFAULT 'present',
-    -- 'present'   : サーバー上に存在
-    -- 'deleted'   : サーバー上から削除済み（ローカル保管のみ）
-    -- 'moved'     : 別フォルダへ移動された（moved_to_folder_id を参照）
-    -- 'unknown'   : 未確認（同期エラー等）
-    -- 'no_remote' : ★対応するサーバーが存在しない（PSTインポート由来）。永久にこの値
-    moved_to_folder_id INTEGER REFERENCES folders(id),
+    source_item_key TEXT NOT NULL,    -- canonical行の一次識別子。IMAP/Gmail/PSTごとの規則は下記
 
     local_state  TEXT NOT NULL DEFAULT 'active',
     -- 'active'  : 通常表示
@@ -345,35 +351,65 @@ CREATE TABLE IF NOT EXISTS messages (
     size_bytes   INTEGER,
     has_attachment INTEGER NOT NULL DEFAULT 0,
 
-    -- IMAPフラグのスナップショット（★後付けだと全件再取得が必要なため初期から保持）
-    imap_flags   TEXT,               -- '\\Seen \\Flagged \\Answered' 等をスペース区切りで保存
-    flags_seen_at DATETIME,          -- このフラグを確認した日時（あくまで過去のスナップショット）
-
     -- スレッド情報（★後付けすると全EML再解析が必要なため初期から保持）
     in_reply_to    TEXT,              -- In-Reply-To ヘッダの Message-ID
     references_ids TEXT,              -- References ヘッダ（スペース区切りの生値）
     thread_key     TEXT,              -- 会話ルートの Message-ID（同期時に算出）
 
-    last_seen_at DATETIME,            -- 最後にサーバーで確認できた日時
+    -- 5.2aの先行取得。値未取得(NULL)とラベルなし([])を区別する
+    gmail_msgid  TEXT,                -- X-GM-MSGID（10進文字列）
+    gmail_thrid  TEXT,                -- X-GM-THRID（10進文字列）
+    gmail_labels TEXT,                -- modified UTF-7デコード済みラベル名のJSON配列
+
     created_at   DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE INDEX idx_msg_key    ON messages(account_id, content_key);  -- 移動検知の横断照合用
-CREATE INDEX idx_msg_list   ON messages(folder_id, date_sent DESC);-- 一覧表示用
 CREATE INDEX idx_msg_thread ON messages(thread_key, date_sent);    -- スレッド表示用
 CREATE INDEX idx_msg_trash  ON messages(local_state, trashed_at);  -- purge 対象の抽出用
-
-CREATE UNIQUE INDEX uq_imap_message
-ON messages(account_id, folder_id, uidvalidity, uid)
-WHERE uid IS NOT NULL;
-
-CREATE UNIQUE INDEX uq_archive_message
-ON messages(account_id, folder_id, source_item_key)
-WHERE uid IS NULL;
+CREATE UNIQUE INDEX uq_messages_source_item_key
+ON messages(account_id, source_item_key);
+CREATE INDEX idx_msg_gmsgid
+ON messages(account_id, gmail_msgid)
+WHERE gmail_msgid IS NOT NULL;
 ```
 
-* IMAPの `source_item_key` は `"{uidvalidity}:{uid}"` とし、UIDVALIDITY変更前後の項目を混同しない。
-* PSTの `source_item_key` はStage A完了時にstaging内相対パスから安定的に生成し、`pst_import_items` と永続マニフェストへ同じ値を保存する。
+5.2a完了から5.2bのfinalizer完了までの移行期間は、互換性のため旧 `messages.folder_id` 等の単一フォルダ列も残る。以下は5.2b完了後の正規形であり、旧列を正本として併存させない。
+
+フォルダごとに変化するUID・UIDVALIDITY・リモート状態・移動先・IMAPフラグは `message_folders` に保持する。`messages` はフォルダ横断のcanonicalな論理メッセージで、`id` と最初に確定した `source_item_key` はその行の存続中変更しない。
+
+```sql
+CREATE TABLE message_folders (
+    message_id         INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    folder_id          INTEGER NOT NULL REFERENCES folders(id),
+    uid                INTEGER,
+    uidvalidity        INTEGER,
+    remote_state       TEXT NOT NULL DEFAULT 'present',
+    moved_to_folder_id INTEGER REFERENCES folders(id),
+    imap_flags         TEXT,
+    flags_seen_at      DATETIME,
+    last_seen_at       DATETIME,
+    PRIMARY KEY (message_id, folder_id)
+);
+
+CREATE UNIQUE INDEX uq_message_folders_uid
+ON message_folders(folder_id, uidvalidity, uid)
+WHERE uid IS NOT NULL;
+
+CREATE TABLE message_identity_aliases (
+    account_id               TEXT NOT NULL REFERENCES accounts(id),
+    observed_source_item_key TEXT NOT NULL,
+    message_id               INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    evidence_kind            TEXT NOT NULL,
+    UNIQUE (account_id, observed_source_item_key)
+);
+```
+
+* `UNIQUE(messages.account_id, messages.source_item_key)` を維持する。通常IMAPのキーは `imap:{folder_key}:{uidvalidity}:{uid}`（`folder_key` は `folder_raw_name` から可逆かつ衝突なく生成）、Gmailは `gmail:{X-GM-MSGID}`、PSTは取込世代内の既存キーとする。旧マニフェストのIMAPキーはreindex時に正規化する。
+* `message_identity_aliases` は過去または移動先で観測した所在キーをcanonicalな `messages.id` に解決する派生キャッシュである。Gmailの同一 `X-GM-MSGID`、またはアプリ自身のMOVEで `COPYUID` 等により対応が確定した場合など、規定の証拠がある場合だけ統合する。曖昧な外部MOVEは誤統合を避け、別行のまま保持する。
+* フォルダ別一覧・検索・件数は `message_folders` を参照し、複数フォルダ所属を重複計上しない。Gmailの `gmail_labels` は5.2aでは取得時のメタデータであり、5.2b完了後の所属の正本は `message_folders` と完全なmembership snapshotである。
+* membershipの変更ごとに全所属を `message_membership_snapshot` としてマニフェストへ追記・fsyncしてからDBを更新する。reindexは最後の完全なsnapshotとidentity linkイベントからcanonical行・所属・aliasを復元する。
+
 * `content_key` には一意性を期待せず、同一Message-IDを持つ複数項目を欠落させない。
 
 **スレッド情報の扱い**
@@ -574,8 +610,8 @@ conn.execute("PRAGMA cache_size=-64000")  # 64MB
 
 * `PRAGMA user_version` を採用し、`migrations/001_init.sql` から順次適用する。
 * **マイグレーション実行前に `metadata.db.bak.{version}` へ自動バックアップ**を取る。
-* `source_item_key` とプロバイダー別一意インデックスは `001_init.sql` から導入する。Phase 1の `002_sync_cursor.sql` で二カーソルとUIDVALIDITY別失敗管理を追加し、Phase 4で `003_timestamp_format.sql` / `004_flag_refresh.sql` / `005_phase4.sql` を追加する。Phase 4.5で `006_pst_import.sql`、Phase 5.1で `007_generic_imap_connection.sql` を追加する。`remote_state='no_remote'` はCHECK制約を置かずアプリ側で検証する。
-* Phase 5.2（Gmail対応）では「1通が複数ラベルに属する」ため、`messages.folder_id` を `message_folders` 中間テーブルへ移行する想定。この移行計画を最初からマイグレーション履歴に織り込んでおく。
+* `source_item_key` と初期の一意インデックスは `001_init.sql` から導入する。Phase 1の `002_sync_cursor.sql`、Phase 4の `003_timestamp_format.sql` / `004_flag_refresh.sql` / `005_phase4.sql`、Phase 4.5の `006_pst_import.sql` に続き、Phase 5.1で `007_generic_imap_connection.sql`、5.2aで `008_oauth_accounts.sql`、5.2bで `009_message_folders.sql` を適用する。`remote_state='no_remote'` はCHECK制約を置かずアプリ側で検証する。
+* Phase 5.2a（Gmail OAuth2）では単一フォルダ構造を維持し、Phase 5.2bで「1通が複数ラベルに属する」モデルへ移行する。009の互換スキーマと冪等finalizerにより `messages.folder_id` 等を `message_folders` へ移し、マニフェストを正としてcanonicalな `messages` を再構築する。移行期間は5.2a完了後から5.2b finalizer完了までとする。
 
 **多重起動防止とスタールロックの検出**
 
@@ -615,6 +651,12 @@ class RemoteMessageRef:
     message_id: str | None
     internal_date: datetime | None
     size_bytes: int | None  # 事前にサイズが分かるとスキップ判定に使える
+
+
+@dataclass(frozen=True)
+class RemoteMoveResult:
+    uidvalidity: int
+    uid: int
 
 
 class CancelToken:
@@ -657,14 +699,18 @@ class BaseMailFetcher(ABC):
     def download_eml_bytes(self, raw_name: str, uid: int) -> bytes: ...
 
     @abstractmethod
-    def delete_remote_message(
-        self,
-        raw_name: str,
-        uid: int,
-        *,
-        mode: str = "trash",  # "trash" | "expunge"
-    ) -> None: ...
+    def remove_remote_membership(self, raw_name: str, uid: int) -> None: ...
+
+    @abstractmethod
+    def move_remote_message_to_trash(
+        self, raw_name: str, uid: int
+    ) -> RemoteMoveResult | None: ...  # COPYUIDで対応が確定した場合は移動先UIDを返す
+
+    @abstractmethod
+    def expunge_remote_message(self, raw_name: str, uid: int) -> None: ...
 ```
+
+`remove_remote_membership` は通常IMAPのフォルダ所属またはGmailラベルを外す操作、`move_remote_message_to_trash` はゴミ箱への移動、`expunge_remote_message` は対象を完全削除する操作であり、相互に混同しない。Gmailでは `expunge` を拒否し、ゴミ箱への移動のみを許可する。
 
 **ドメイン例外階層 (`domain/errors.py`)**
 
@@ -1182,7 +1228,7 @@ Stage Aのキャンセルではreadpst停止後に不完全stagingを削除し `
 
 ### **5.3 認証・セキュリティ**
 
-* **資格情報の保管:** IMAPパスワードおよび将来のOAuth2リフレッシュトークンは、PC側の `keyring`（Windows Credential Manager等）に保管し、**DB、設定ファイル、ストレージルートには一切書き込まない**。`keyring` のバックエンドは拒否リストではなく許可リスト方式で検査し、Windowsの `WinVaultKeyring`、macOSの `Keyring`、Linuxの `SecretService.Keyring` / `DBusKeyring` など、暗号化されたOS資格情報ストアとして明示的に許可した実装だけを使用する。許可外のバックエンドでは資格情報を保存せず、平文保存へフォールバックしない。
+* **資格情報の保管:** IMAPパスワード・OAuth `client_secret`・`refresh_token` はPC側の許可済み `keyring`（Windows Credential Manager等）にのみ保管し、**DB、設定ファイル、ログ、永続マニフェスト、ストレージルートには書き込まない**。`access_token` はプロセスメモリ内だけに保持する。`keyring` のバックエンドは拒否リストではなく許可リスト方式で検査し、Windowsの `WinVaultKeyring`、macOSの `Keyring`、Linuxの `SecretService.Keyring` / `DBusKeyring` など、暗号化されたOS資格情報ストアとして明示的に許可した実装だけを使用する。許可外のバックエンドでは資格情報を保存せず、平文保存へフォールバックしない。
     * LinuxではD-Busまたはデスクトップ環境が利用できない場合に、`keyrings.alt` の平文バックエンドへ暗黙にフォールバックする可能性がある。このため、未知のバックエンドを安全とみなすことはせず、許可リスト検査で検出した時点で警告をログとUIへ表示する。
     * 許可外バックエンド検出時およびユーザーが明示的に選択した場合は、`session_only` モードを使用する。これは資格情報をプロセス内メモリにのみ保持し、ファイル・DB・ログへ永続化しないモードである。プロセス終了後は資格情報が失われるため、次回のネットワーク操作開始前にGUIまたはCLIで再入力する。
     * **資格情報をストレージルート配下へ書き込むことを明示的に禁止する。** メールデータを保管する外付けドライブが未暗号化のまま紛失しても、資格情報の流出から有効なメールアカウントの乗っ取りへ波及させないためである。暗号化要件を緩和した後も、資格情報はPC側、メールデータ・EML・メタデータはストレージルート側という保管場所の分離を維持する。
@@ -1444,7 +1490,12 @@ mail-dock本体は **GPL-3.0-or-later** で公開する。同梱する `readpst`
 | **Phase 3: GUI基礎構築 (PySide6)** | 2週間 | **QtWebEngine を採用する（確定）。`QTextBrowser` 版の比較試作は行わない**。`QTextBrowser` ではリクエストインターセプタ・カスタムスキーム・CSPを含む5層防御を満たせないため、3ペインレイアウト、遅延ロード対応の一覧モデル、QThreadによる非同期同期、HTML表示の5層サンドボックス、添付保存を実装する。QtWebEngineの起動時間・メモリ・配布サイズはPhase 3で実測し、Phase 4のパッケージング判断へ渡す |
 | **Phase 4: 統合 & 例外処理** | 1〜2週間 | サーバー削除の安全装置一式、ゴミ箱・purge、整合性チェック・再インデックス、mboxエクスポート、ドライブ非接続・移動の例外処理、**稼働中の物理切断対策一式（5.7.1）と VHDX detach による切断シナリオテスト**、**フルスケール（5万通/100GB）での実機同期テスト**（ここで `synchronous` の最終決定を行う）。**実績:** VHDX detach による実デバイス切断試験とフルスケール実機同期テストは Phase 4 では実施せず延期した（代替として、フォールト注入によるEML fsync前／`os.replace`直前／マニフェスト追記の行途中／DBコミット中の4点切断を自動テストで検証した。手順は実装計画書_Phase4_統合と例外処理.md 7章を参照）。`synchronous` の最終決定は実機テスト未実施のため Phase 4 の範囲外とし、既定 `NORMAL` を維持した |
 | **Phase 4.5: PSTアーカイブ** | 1〜2週間 | **実績:** readpst v0.6.76 のWindows実PST PoCで日本語・添付・禁止文字・予約名・衝突・長パスを確認し、方式継続とした（日本語フォルダ名のEILSEQは `activeCodePage=UTF-8` / `longPathAware=true` マニフェスト適用で解消）。マイグレーション006、PST永続マニフェスト、項目状態管理、Stage A/Bと世代交代、ウィザード、機能ガード、実PST検証、readpst同梱とGPL表記を実装。CLIのPST取込実行はGUI限定とし、CLIは `verify` / `reindex` のみPSTマニフェストに対応する。 |
-| **Phase 5: （拡張）汎用IMAP対応 / Gmail・OAuth2** | 随時 | **Phase 5.1（汎用IMAPサーバー対応）**: ID/パスワード認証を使う任意のIMAPサーバー（お名前.com以外）への対応。`GenericImapFetcher` によるSTARTTLS・`LOGINDISABLED`時のSASL PLAINフォールバック・カスタムCA証明書指定への対応。詳細は [実装計画書_Phase5.1_汎用IMAPサーバー対応.md](./実装計画書_Phase5.1_汎用IMAPサーバー対応.md) を参照。**Phase 5.2（Gmail/OAuth2）**: `GmailOAuthFetcher` 実装、OAuth2ブラウザ認証フロー、`message_folders` 中間テーブルへのマイグレーション（ラベル対応） |
+| **Phase 5.1: 汎用IMAP** | 完了 | 任意のIMAPサーバー向け `GenericImapFetcher`、STARTTLS、`LOGINDISABLED`時のSASL PLAIN、カスタムCA証明書に対応。 |
+| **Phase 5.2a: Gmail OAuth2** | 完了 | IMAP + XOAUTH2、標準ライブラリによるAuthorization Code + PKCE、秘密情報のkeyring保管、Gmailメタデータ取得。単一フォルダ扱いの移行期間を含む。 |
+| **Phase 5.2b: Gmailラベル** | 完了 | canonical `messages` と `message_folders` / identity aliases へ移行し、複数ラベル所属、保守的なMOVE統合、snapshot/reindexに対応。 |
+| **Phase 5.3: Microsoft 365 / Outlook.com** | 完了 | 許可リスト付きOAuth2プロバイダ定義とテナント設定を使い、同じIMAP + XOAUTH2基盤に対応。共有メールボックス・委任アクセスは対象外。 |
+
+詳細な要件・決定事項・検証履歴は [実装計画書_Phase5_マルチプロトコル対応.md](./実装計画書_Phase5_マルチプロトコル対応.md) を参照する。
 
 **Phase 4.5 の内訳と依存関係**
 
@@ -1491,9 +1542,9 @@ mail-dock本体は **GPL-3.0-or-later** で公開する。同梱する `readpst`
 | :---- | :---- |
 | FTS5スキーマ | 本文専用テーブル `message_contents` を content テーブルとする方式を採用 |
 | 短いキーワードの検索 | trigramの自動フォールバックは存在しないため、アプリ側で `LIKE` 経路へ明示的に分岐 |
-| メール識別子 | `content_key` は非一意の照合用。IMAPは `account_id + folder_id + uidvalidity + uid`、PSTは `account_id + folder_id + source_item_key` を一意キーとする |
+| メール識別子 | `content_key` は非一意の照合候補。canonicalな `messages` は `UNIQUE(account_id, source_item_key)` とする。通常IMAPの所在キーは `imap:{folder_key}:{uidvalidity}:{uid}`、Gmailは `gmail:{X-GM-MSGID}`、PSTは取込世代内の既存 `source_item_key`。フォルダ別UID状態は `message_folders` に置き、`UNIQUE(folder_id, uidvalidity, uid) WHERE uid IS NOT NULL` を維持する。過去・移動先のキーは `message_identity_aliases` でcanonical行へ解決する |
 | 同期方式 | UID増分同期（`last_seen_uid`）。全Message-ID取得は行わない |
-| 移動の扱い | `content_key` によるアカウント横断照合で `moved` として判定 |
+| メッセージ移動の統合 | Gmailの同一 `X-GM-MSGID`、またはアプリ自身のMOVEで `COPYUID` 等の対応が確定した場合に統合する。外部MOVE推定は両フォルダの完全走査成功・UID消失/新規・EMLハッシュ一致・候補1対1をすべて満たす場合だけ行い、曖昧な場合は重複表示を許容して誤統合を避ける |
 | 状態管理 | `remote_state` と `local_state` の2列に分離 |
 | ローカル削除 | ゴミ箱移動 → 30日経過で実ファイル削除（purge）。墓標レコードは残す |
 | 想定規模 | 最大 50,000通 / 100GB |
@@ -1516,6 +1567,12 @@ mail-dock本体は **GPL-3.0-or-later** で公開する。同梱する `readpst`
 | 起動時の検証 | クイック検証のみ自動実行。フル検証は手動 |
 | テスト環境 | Docker上の Dovecot / GreenMail を使った結合テスト |
 | Pythonバージョン | 3.13 に統一 |
+| Phase 5の分割 | 5.1汎用IMAP → 5.2a Gmail OAuth2（単一フォルダ扱い）→ 5.2b `message_folders` とラベル対応 → 5.3 Microsoft 365/Outlook.com の順に実施 |
+| IMAPプロバイダー種別 | 通常IMAP・Gmail・Microsoft 365/Outlook.comは `provider_type='imap'` とし、`auth_type` / `oauth_provider` で接続方式を区別する。PSTのみ `provider_type='pst_import'` とする |
+| OAuth2の境界 | Authorization Code + PKCE + loopbackを標準ライブラリで実装する。OAuthポートはdomainに置き、認可待受とブラウザ起動はGUI限定、CLIに対話的OAuthコマンドを設けない |
+| OAuth秘密情報 | `client_secret` / `refresh_token` は許可済みkeyringのみ、`access_token` はプロセスメモリのみ。DB・設定・ログ・永続マニフェストへ保存しない |
+| OAuthエンドポイント | Google/MicrosoftのHTTPS endpoint・scope・redirect規則は許可リスト付きプロバイダ定義から導出し、任意URLをDBやユーザー入力から受け取らない |
+| Gmailの完全削除 | Gmailアカウントでは `expunge` を拒否し、サーバー削除はゴミ箱への移動を用いる |
 | 保存データ暗号化 | アプリ層暗号化は実装せず、ブロックレベル暗号化を推奨、暗号化なしも自己責任で許可する3層モデルへ移行。暗号化状態は自動検出せず、ユーザー申告として記録・常時表示する |
 | アプリ層暗号化の不採用 | 7z / AES-ZIP / SQLCipher等は採用しない。EMLを直接閲覧できる可搬性を損ない、EMLだけ暗号化しても `metadata.db` とFTSインデックスが平文で残り、鍵喪失時には長期保管データ全体を失うため |
 | 資格情報の保存方式 | `keyring` は許可リスト方式で検査し、許可外バックエンドでは保存しない。代替の `session_only` はプロセス内メモリだけに保持し、資格情報をストレージルートへ書き込まない |

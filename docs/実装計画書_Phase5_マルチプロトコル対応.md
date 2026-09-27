@@ -55,7 +55,7 @@
 | D-12 | 実サーバー検証の代替（5.1） | Dockerの Dovecot 設定を拡張し、STARTTLS・`LOGINDISABLED`・自己署名証明書の3シナリオを結合テストで再現する。実運用前には少なくとも1つの非Onamaeサーバー（さくら等）での手動検証を推奨する |
 | D-13 | Gmail取得方式 | **IMAP + XOAUTH2** を採用する。Gmail REST API（`users.messages` / `historyId` 差分同期）は不採用とする。理由: 既存の `GenericImapFetcher` / UID増分同期 / EML保存パイプラインをほぼそのまま再利用でき、`BaseMailFetcher` の契約（UID・`RFC822` 生EML取得）と自然に整合するため。REST APIは、将来ラベル同期の精度向上等が必要になった場合の拡張余地としてのみ設計上残す（具体実装はしない）。**実測（G-2/G-3・2026-09-26）**: 本節下部のPoCスクリプト出力どおり、実Gmailに対しXOAUTH2接続・`LIST`・`UID FETCH`（`X-GM-MSGID`/`X-GM-THRID`/`X-GM-LABELS`込み）が成功しており、本決定を裏付けている |
 | D-14 | OAuthクライアントの配布方式 | mail-dock は特定の `client_id` / `client_secret` を同梱・配布しない。**ユーザー自身がGoogle Cloudプロジェクトを作成し、OAuth同意画面とデスクトップアプリ用クライアントIDを用意する**運用とする。理由: `https://mail.google.com/` は制限付きスコープであり、公開アプリとして提供するにはGoogleのCASAセキュリティ評価（有償・年次）が必須であり、OSSデスクトップアプリとして現実的ではない。同意画面の公開ステータスは「テスト中」のまま自己利用・少数の既知テストユーザー運用に限定し、Google検証審査・CASAは要求しない（Group G G-5で確認済み。根拠と詳細はREADME「Gmail accounts and Google OAuth verification status」節を参照）。README に手順（同意画面の設定、テストユーザー登録、スコープ追加、クライアントID発行）を記載する |
-| D-15 | 依存関係 | **追加のサードパーティ依存パッケージを追加しない。** OAuth2（認可コード＋PKCE＋ループバックリダイレクト）は標準ライブラリ（`http.server` / `urllib` / `secrets` / `hashlib` / `base64` / `json`）のみで実装する。開発計画書 2.1 に残る「`google-auth-oauthlib`（将来対応用）」の記述はこの決定に合わせて削除する（Group Pでタスク化） |
+| D-15 | 依存関係 | **追加のサードパーティ依存パッケージを追加しない。** OAuth2（認可コード＋PKCE＋ループバックリダイレクト）は標準ライブラリ（`http.server` / `urllib` / `secrets` / `hashlib` / `base64` / `json`）のみで実装する。開発計画書2.1から旧 `google-auth-oauthlib` 記述を削除し、本方針を反映済み（Group P） |
 | D-16 | ラベルと `message_folders` | Gmailの「1通が複数ラベルに属する」性質への対応を **5.2a と 5.2b に分割**する。5.2a では同期対象を既定でSPECIAL-USE `\All`（「すべてのメール」相当フォルダ）のみとし、既存の `messages.folder_id` 単一列のまま「1メッセージ=1フォルダ」の枠組みで動かす（ラベルは `gmail_labels` 列に文字列として保持するだけで検索・フィルタには使わない）。5.2b で `message_folders` 中間テーブルへ移行し、複数フォルダ所属・削除検知・検索フィルタを正式対応させる |
 | D-17 | INBOXとAll Mailの二重登録（5.2a の暫定挙動） | 5.2a では `\All` 以外のフォルダも `is_sync_target` に追加できる（ユーザー選択式の既存挙動を変えない）が、INBOXと「すべてのメール」を同時に同期対象にすると同一メールが別UIDで二重に保存される。**5.2aではこれを「既知の暫定挙動」として許容し、UIに警告を表示するに留める**（5.2bの `message_folders`移行で解消する）。理由: 5.2aの目的はまず「動くGmail接続」を確立することであり、二重登録の完全排除は `message_folders` 移行と不可分であるため、5.2a単体で作り込む投資対効果が低い |
 | D-18 | `X-GM-MSGID` / `X-GM-THRID` / `X-GM-LABELS` の先行取得 | **5.2aの時点でDBとfetchマニフェストの両方へ保存する。** `gmail_msgid` / `gmail_thrid` は10進文字列、`gmail_labels` はJSON配列で記録し、未取得（`null`）と取得済みラベルなし（`[]`）を区別する。5.2aのreindexで3項目を復元できることを必須とし、一次識別子への昇格は5.2bで行う。`gmail_labels` に含まれる日本語ラベル等は modified UTF-7 で返されるため、`imap_common.decode_modified_utf7` を適用した人間可読なUTF-8文字列配列（例: `["\Inbox", "重要"]`）としてDB・マニフェストへ保存する。**確認（G-8・2026-09-26）**: Google公式のIMAP Extensionsドキュメントは `X-GM-LABELS` を「UTF-7でエンコードされたASTRINGのリスト」と明記しており、`decode_modified_utf7` を適用する本方針を裏付ける。ただし今回のPoC実行時の検証メールにはラベルが付与されておらず（`X-GM-LABELS ()`）、日本語ラベルを含む実際のmodified UTF-7エンコード例の実機取得はできていない点は引き続き未検証として残る |
@@ -373,17 +373,17 @@
 
 ### **Group P: ドキュメント整合**
 
-- [ ] 開発計画書 2.1 の依存関係一覧から「`google-auth-oauthlib`（将来対応用）」の記述を削除し、標準ライブラリのみでOAuth2を実装する方針へ更新する
-- [ ] 開発計画書 2.2 のリポジトリ構成ツリーと 2.3 のアーキテクチャ図から `infrastructure/fetchers/onamae_imap.py` および `gmail_oauth.py`（将来用）`GmailOAuthFetcher` という別クラス構成の記述を削除し、`generic_imap.py`（`GenericImapFetcher` 1本に統合、`auth_type`/`tls_mode`引数で分岐）と新設の `infrastructure/security/oauth2.py` を反映した構成へ書き換える（5.2a完了後）
-- [ ] 開発計画書 3.1 の `accounts.provider_type` コメント例示値（`'onamae_imap' / 'gmail_oauth' / 'pst_import'`）を、Gmail/MS365も `provider_type='imap'` を使い `auth_type`/`oauth_provider` カラムで区別する実際の設計に合わせて書き直す（`'gmail_oauth'`という値は存在しなくなる）
-- [ ] 開発計画書 3.3 の `messages` テーブル定義・一意インデックス（`uq_imap_message` / `uq_archive_message`）を、5.2b完了時点の `message_folders` 正規形（`UNIQUE messages(account_id, source_item_key)`、`UNIQUE message_folders(folder_id, uidvalidity, uid) WHERE uid IS NOT NULL`、`message_identity_aliases`等）へ全面的に書き換える。5.2a完了〜5.2b完了までの間は現行定義のままであることを移行注記として明記する（5.2b完了後）
-- [ ] 開発計画書 3.6 の「Phase 5.2（Gmail対応）では…`messages.folder_id` を `message_folders` 中間テーブルへ移行する想定」という記述を、5.2a/5.2bのサブフェーズ分割に合わせて書き直す（5.2b完了後）
-- [ ] 開発計画書 4.1 の `BaseMailFetcher` 抽象契約（`delete_remote_message(raw_name, uid, *, mode)`）を、5.2b時点の `remove_remote_membership` / `move_remote_message_to_trash` / `expunge_remote_message` 相当への分離契約に合わせて更新する（5.2b完了後）
-- [ ] 開発計画書 6章ロードマップのPhase 5行を、5.1 / 5.2a / 5.2b / 5.3 の4サブフェーズへ書き分ける
-- [ ] 開発計画書 8章決定事項ログの「メール識別子」エントリ（`IMAPは account_id + folder_id + uidvalidity + uid を一意キーとする`）を、5.2b完了後は `message_folders` 正規形の内容へ**追記ではなく訂正**する。あわせてサブフェーズ分割・OAuthポート・秘密情報の保管方針・エンドポイント許可リスト・Gmailの`expunge`拒否等の主要決定を追記する。追記だけでは新旧の決定事項が並存し自己矛盾するため、矛盾する旧記述は必ず置き換えること
-- [ ] 旧 [実装計画書_Phase5.1_汎用IMAPサーバー対応.md](./実装計画書_Phase5.1_汎用IMAPサーバー対応.md) の冒頭に、本書へ統合された旨の注記を追加する
-- [ ] `.github/copilot-instructions.md` に、OAuth2はGUI限定・秘密情報はkeyring/メモリのみという頻出ルールを追記する
-- [ ] `ruff check .` / `mypy .` / `pytest` を実行し、全テスト通過を確認する
+- [x] 開発計画書 2.1 の依存関係一覧から「`google-auth-oauthlib`（将来対応用）」の記述を削除し、標準ライブラリのみでOAuth2を実装する方針へ更新する
+- [x] 開発計画書 2.2 のリポジトリ構成ツリーと 2.3 のアーキテクチャ図から旧Fetcher構成を削除し、`generic_imap.py`（`GenericImapFetcher` 1本に統合、`auth_type`/`tls_mode`引数で分岐）と `infrastructure/security/oauth2.py` を反映した
+- [x] 開発計画書 3.1 の `accounts.provider_type` をGmail/MS365も `imap` とし、`auth_type` / `oauth_provider` で区別する設計に更新した
+- [x] 開発計画書 3.3 を5.2b完了時点のcanonical `messages` / `message_folders` / `message_identity_aliases` 正規形へ書き換え、5.2aから5.2bへの移行期間を注記した
+- [x] 開発計画書 3.6 を5.2a/5.2bのサブフェーズ分割とfinalizerに合わせて更新した
+- [x] 開発計画書 4.1 の削除契約を `remove_remote_membership` / `move_remote_message_to_trash` / `expunge_remote_message` へ分離した
+- [x] 開発計画書 6章ロードマップを5.1 / 5.2a / 5.2b / 5.3へ分割した
+- [x] 開発計画書 8章の旧メール識別子判断を訂正し、サブフェーズ・OAuth・秘密情報・許可endpoint・Gmail expunge拒否を記録した
+- [x] 旧 [実装計画書_Phase5.1_汎用IMAPサーバー対応.md](./実装計画書_Phase5.1_汎用IMAPサーバー対応.md) の冒頭で統合済みの旨を確認した
+- [x] `.github/copilot-instructions.md` にOAuth2のGUI限定・秘密情報のkeyring/メモリ保管ルールを明記した
+- [x] `ruff check .` / `mypy .` / `pytest` を実行し、全テスト通過を確認する（`uv run ruff check .` / `uv run ruff format --check .` / `uv run mypy .` / `uv run pytest` 成功。679 passed・178 skipped）
 
 ---
 

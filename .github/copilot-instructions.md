@@ -6,7 +6,7 @@
 ## プロジェクト概要
 
 IMAP（お名前.com等）上のメールをローカル外付けドライブへ `.eml` として保管するバックアップ・閲覧デスクトップアプリ（PySide6）。
-将来的にGmail等のOAuth2対応、および過去の `.pst` を `.eml` へ変換して永続化する「PSTアーカイブ」機能を持つ。
+汎用IMAP・Gmail・Microsoft 365/Outlook.comに対応し、過去の `.pst` を `.eml` へ変換して永続化する「PSTアーカイブ」機能も持つ。
 IMAPアーカイブとPSTアーカイブは**ストレージ・DB・検索基盤のみ共有し、データとしては一切接続しない**独立機能。
 
 ## 設計不変条件（最優先。実装判断に迷ったら必ずこれに従う）
@@ -55,7 +55,7 @@ presentation/   ← PySide6固有（View/ViewModel/QThreadワーカー）
 - 添付ファイル名は敵性入力として扱い、パストラバーサル・NTFS禁止文字・予約名・実行可能拡張子を必ずサニタイズする（4.6-4参照）。
 - HTMLメール表示は5層防御（オフレコプロファイル・属性無効化・リクエストインターセプタ・`cid:`スキーム・CSP注入）をすべて実装する。JavaScript無効化だけで済ませない。
 - `subprocess`（readpst）は `shell=False`・引数リスト・同梱バイナリの絶対パス解決のみ。ユーザー入力をコマンド文字列に連結しない。
-- パスワード・`client_secret`・`refresh_token` は `keyring` のみに保管し、`access_token` はプロセスメモリのみに保持する。これらの秘密情報はDB・設定ファイル・マニフェスト・ログへ書き込まない。OAuth2の初回認可と再認可はGUI限定とする。
+- パスワード・`client_secret`・`refresh_token` は許可済み `keyring` のみに保管し、`access_token` はプロセスメモリのみに保持する。これらの秘密情報はDB・設定ファイル・マニフェスト・ログへ書き込まない。OAuth2の初回認可・再認可・loopback callback待受はGUI限定とし、CLIにOAuth認可コマンドを追加しない。
 - PST取込本体（Stage A/B・再変換）は対話確認が必要なためGUI限定とし、CLIへPST取込サブコマンドを追加しない。CLIの `verify` / `reindex` はPSTマニフェストを対象にする。
 
 ## ビルド・テスト
