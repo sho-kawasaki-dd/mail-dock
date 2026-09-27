@@ -12,7 +12,13 @@ from pathlib import Path
 
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.importer import SourceFileSnapshot, StagedMessage
-from mail_dock.domain.messages import AttachmentSavePlan, RenderedMessage, SavedFile, StoredEml
+from mail_dock.domain.messages import (
+    AttachmentSavePlan,
+    ParsedMessage,
+    RenderedMessage,
+    SavedFile,
+    StoredEml,
+)
 
 type JSONValue = bool | int | float | str | list[JSONValue] | dict[str, JSONValue] | None
 
@@ -37,6 +43,7 @@ __all__ = [
     "BaseIntegrityStorage",
     "BaseManifestReader",
     "BaseManifestWriter",
+    "BaseMessageParser",
     "BaseMessageRenderer",
     "BaseOAuthClient",
     "BasePstImportStorage",
@@ -221,6 +228,14 @@ class BasePurgeStorage(ABC):
     @abstractmethod
     def delete(self, relative_path: str) -> None:
         """Delete a storage-relative file; missing files are already purged."""
+
+
+class BaseMessageParser(ABC):
+    """Use-case port for parsing raw EML bytes into provider-independent metadata."""
+
+    @abstractmethod
+    def parse(self, raw: bytes, internal_date: datetime | None) -> ParsedMessage:
+        """Parse EML bytes without leaking parsing exceptions to callers."""
 
 
 class BaseMessageRenderer(ABC):

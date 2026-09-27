@@ -20,8 +20,9 @@ from mail_dock.infrastructure.database.reindex import rebuild_database
 from mail_dock.infrastructure.storage.eml_storage import EmlStorage
 from mail_dock.infrastructure.storage.manifest import ManifestReader, ManifestWriter
 from mail_dock.infrastructure.storage.storage_root import initialize_root
-from mail_dock.usecases.reindex import ReindexProgress, reindex
+from mail_dock.usecases.reindex import ReindexProgress
 from tests.support.in_memory_repository import InMemoryMessageRepository
+from tests.support.usecase_adapters import reindex
 
 
 class MemoryManifestReader(BaseManifestReader):

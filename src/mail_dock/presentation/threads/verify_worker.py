@@ -18,6 +18,8 @@ from mail_dock.domain.ports import (
     BaseManifestReader,
 )
 from mail_dock.domain.repository import BaseMessageRepository
+from mail_dock.infrastructure.parsing.eml_parser import EmlParser
+from mail_dock.infrastructure.storage.pst_manifest import PstManifestReader
 from mail_dock.presentation.errors import user_message
 from mail_dock.presentation.threads.worker import OperationGate, Worker, _Task, operation_gate
 from mail_dock.usecases.reindex import ReindexProgress, ReindexResult, reindex
@@ -140,6 +142,7 @@ class VerifyWorker(Worker):
         self._exclusive_write_guard = exclusive_write_guard
         self._operation_gate = operation_gate
         self._clock = clock
+        self._parser = EmlParser()
         self._operations_by_token: dict[CancelToken, VerifyOperation] = {}
 
         self.task_completed.connect(self._on_task_completed)
@@ -232,6 +235,7 @@ class VerifyWorker(Worker):
                 self._repository_factory(),
                 cast(BaseEmlStorage, self._storage_factory()),
                 self._manifest_reader(),
+                parser=self._parser,
                 cancel=token,
                 on_progress=self._forward_progress(),
             )
@@ -253,6 +257,7 @@ class VerifyWorker(Worker):
             return self._reparse_usecase(
                 self._repository_factory(),
                 cast(BaseEmlStorage, self._storage_factory()),
+                parser=self._parser,
                 account_id=account_id,
                 only_failed=only_failed,
                 cancel=token,
@@ -274,7 +279,9 @@ class VerifyWorker(Worker):
         token: CancelToken,
     ) -> ManifestVerifyResult:
         self._ensure_exclusive_write()
-        return self._verify_manifest_usecase(root, cancel=token)
+        return self._verify_manifest_usecase(
+            root, pst_manifest_reader_factory=PstManifestReader, cancel=token
+        )
 
     def _ensure_exclusive_write(self) -> None:
         """Require the presentation layer to serialize repository mutations."""

@@ -21,16 +21,20 @@ from mail_dock.domain.message_identity import (
     remote_source_item_key,
 )
 from mail_dock.domain.messages import ParsedMessage, StoredEml
-from mail_dock.domain.ports import BaseEmlStorage, BaseManifestWriter, JSONValue
+from mail_dock.domain.ports import (
+    BaseEmlStorage,
+    BaseManifestWriter,
+    BaseMessageParser,
+    JSONValue,
+)
 from mail_dock.usecases.sync_mail import (
     SyncOptions,
     SyncResult,
     _fetch_event,
-    force_fetch_message,
-    sync_account,
 )
 from tests.support.fake_fetcher import FakeFetcher, FakeMessage
 from tests.support.in_memory_repository import InMemoryMessageRepository
+from tests.support.usecase_adapters import force_fetch_message, sync_account
 
 
 def test_message_identity_keys_are_folder_scoped_and_gmail_canonical() -> None:
@@ -653,11 +657,7 @@ def test_oversize_downloads_headers_only_and_records_failure() -> None:
     assert repo.failures[("account", folder_id, 41, 1)]["error_class"] == "oversize"
 
 
-def test_parse_failure_keeps_eml_and_records_empty_contents(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import mail_dock.usecases.sync_mail as sync_module
-
+def test_parse_failure_keeps_eml_and_records_empty_contents() -> None:
     repo, folder_id = _repository()
     raw = _eml(1)
     fetcher = FakeFetcher(
@@ -666,11 +666,11 @@ def test_parse_failure_keeps_eml_and_records_empty_contents(
         eml_bytes={("INBOX", 1): raw},
     )
 
-    def failed_parser(raw_bytes: bytes, internal_date: datetime | None) -> ParsedMessage:
-        del raw_bytes, internal_date
-        return ParsedMessage(parse_error="invalid MIME")
+    class FailingParser(BaseMessageParser):
+        def parse(self, raw: bytes, internal_date: datetime | None) -> ParsedMessage:
+            del raw, internal_date
+            return ParsedMessage(parse_error="invalid MIME")
 
-    monkeypatch.setattr(sync_module, "parse_eml", failed_parser)
     sync_account(
         fetcher,
         repo,
@@ -679,6 +679,7 @@ def test_parse_failure_keeps_eml_and_records_empty_contents(
         account_id="account",
         options=SyncOptions(),
         cancel=CancelToken(),
+        parser=FailingParser(),
     )
 
     message = repo.get_message_by_uid("account", folder_id, 41, 1)

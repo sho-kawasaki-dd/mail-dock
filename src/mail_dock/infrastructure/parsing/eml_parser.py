@@ -12,6 +12,7 @@ from email.message import Message
 from email.parser import BytesParser
 
 from mail_dock.domain.messages import ParsedAttachment, ParsedMessage
+from mail_dock.domain.ports import BaseMessageParser
 
 from .charset import decode_text
 from .headers import (
@@ -185,3 +186,10 @@ def parse_eml(raw: bytes, internal_date: datetime | None) -> ParsedMessage:
         has_attachment=any(not attachment.is_inline for attachment in attachments),
         parse_error=_format_parse_error(defect_names, parse_exception),
     )
+
+
+class EmlParser(BaseMessageParser):
+    """Adapter exposing :func:`parse_eml` through the use-case parser port."""
+
+    def parse(self, raw: bytes, internal_date: datetime | None) -> ParsedMessage:
+        return parse_eml(raw, internal_date)

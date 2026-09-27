@@ -7,9 +7,10 @@ import pytest
 from mail_dock.domain.errors import PermanentError
 from mail_dock.domain.fetcher import RemoteFolder
 from mail_dock.usecases.sync_folders import refresh_folders, set_sync_target
-from mail_dock.usecases.sync_mail import SyncOptions, sync_account
+from mail_dock.usecases.sync_mail import SyncOptions
 from tests.support.fake_fetcher import FakeFetcher
 from tests.support.in_memory_repository import InMemoryMessageRepository
+from tests.support.usecase_adapters import sync_account
 
 
 def test_refresh_folders_adds_new_folders_disabled_and_updates_display_name() -> None:
@@ -89,8 +90,8 @@ def test_pst_accounts_are_rejected_by_sync_use_case() -> None:
         sync_account(
             FakeFetcher(),
             repository,
-            object(),  # type: ignore[arg-type]
-            object(),  # type: ignore[arg-type]
+            object(),
+            object(),
             account_id="pst-account",
             options=SyncOptions(),
         )

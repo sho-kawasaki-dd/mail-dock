@@ -11,6 +11,7 @@ from typing import Final
 from urllib.parse import unquote_to_bytes
 
 from mail_dock.domain.normalize import replace_surrogates
+from mail_dock.domain.time_format import to_utc, to_utc_iso8601
 
 from .charset import normalize_charset_label
 
@@ -196,23 +197,15 @@ def parse_content_disposition_filename(part: Message) -> str | None:
     return None
 
 
-def _as_utc(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
-
-
 def parse_date_header(value: str | None, internal_date: datetime | None) -> datetime | None:
     """Parse Date and use INTERNALDATE for invalid or implausibly future values."""
-    fallback = _as_utc(internal_date)
+    fallback = to_utc(internal_date)
     if not value:
         return fallback
 
     try:
         parsed_value = parsedate_to_datetime(value)
-        parsed = _as_utc(parsed_value)
+        parsed = to_utc(parsed_value)
     except (TypeError, ValueError, OverflowError):
         return fallback
 
@@ -221,17 +214,6 @@ def parse_date_header(value: str | None, internal_date: datetime | None) -> date
     if parsed > datetime.now(UTC) + timedelta(days=1):
         return fallback
     return parsed
-
-
-def to_utc_iso8601(value: datetime) -> str:
-    """Format a datetime as a UTC ISO 8601 timestamp without fractional seconds."""
-    utc_value = _as_utc(value)
-    if utc_value is None:
-        raise ValueError("datetime value is required")
-    return (
-        f"{utc_value.year:04d}-{utc_value.month:02d}-{utc_value.day:02d}"
-        f"T{utc_value.hour:02d}:{utc_value.minute:02d}:{utc_value.second:02d}Z"
-    )
 
 
 def _first_message_id(value: str | None) -> str | None:
@@ -260,3 +242,13 @@ def derive_content_key(message_id: str | None, eml_sha256: str) -> str:
     if normalized_message_id:
         return normalized_message_id
     return f"sha256:{eml_sha256[:32]}"
+
+
+__all__ = [
+    "decode_header_value",
+    "derive_content_key",
+    "derive_thread_key",
+    "parse_content_disposition_filename",
+    "parse_date_header",
+    "to_utc_iso8601",
+]

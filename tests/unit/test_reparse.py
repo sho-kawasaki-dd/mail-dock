@@ -6,8 +6,9 @@ from datetime import datetime
 from mail_dock.domain.errors import StorageError
 from mail_dock.domain.messages import StoredEml
 from mail_dock.domain.ports import BaseEmlStorage
-from mail_dock.usecases.reparse import ReparseResult, reparse_messages
+from mail_dock.usecases.reparse import ReparseResult
 from tests.support.in_memory_repository import InMemoryMessageRepository
+from tests.support.usecase_adapters import reparse_messages
 
 
 class MemoryEmlStorage(BaseEmlStorage):

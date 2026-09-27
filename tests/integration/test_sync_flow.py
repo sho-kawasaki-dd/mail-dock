@@ -9,7 +9,7 @@ from mail_dock.domain.fetcher import CancelToken
 from mail_dock.infrastructure.storage.eml_storage import EmlStorage
 from mail_dock.infrastructure.storage.manifest import ManifestWriter, read_events
 from mail_dock.infrastructure.storage.storage_root import initialize_root
-from mail_dock.usecases.sync_mail import SyncOptions, sync_account
+from mail_dock.usecases.sync_mail import SyncOptions
 from tests.support.imap_integration import (
     append_message,
     create_mailbox,
@@ -20,6 +20,7 @@ from tests.support.imap_integration import (
     service,
     unique_mailbox,
 )
+from tests.support.usecase_adapters import sync_account
 
 
 @pytest.mark.docker

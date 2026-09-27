@@ -8,7 +8,7 @@ from mail_dock.domain.fetcher import CancelToken
 from mail_dock.infrastructure.storage.eml_storage import EmlStorage
 from mail_dock.infrastructure.storage.manifest import ManifestWriter
 from mail_dock.infrastructure.storage.storage_root import initialize_root
-from mail_dock.usecases.sync_mail import SyncOptions, sync_account
+from mail_dock.usecases.sync_mail import SyncOptions
 from tests.support.dovecot_uidvalidity import force_uidvalidity_change_in_container
 from tests.support.imap_integration import (
     append_message,
@@ -20,6 +20,7 @@ from tests.support.imap_integration import (
     service,
     unique_mailbox,
 )
+from tests.support.usecase_adapters import sync_account
 
 
 @pytest.mark.docker

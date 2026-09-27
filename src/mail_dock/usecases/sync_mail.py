@@ -23,10 +23,9 @@ from mail_dock.domain.errors import (
 from mail_dock.domain.fetcher import BaseMailFetcher, CancelToken, RemoteMessageRef
 from mail_dock.domain.message_identity import imap_source_item_key, remote_source_item_key
 from mail_dock.domain.messages import ParsedMessage, StoredEml
-from mail_dock.domain.ports import BaseEmlStorage, BaseManifestWriter, JSONValue
+from mail_dock.domain.ports import BaseEmlStorage, BaseManifestWriter, BaseMessageParser, JSONValue
 from mail_dock.domain.repository import BaseMessageRepository, MessageContents, MessageRecord
-from mail_dock.infrastructure.parsing.eml_parser import parse_eml
-from mail_dock.infrastructure.parsing.headers import to_utc_iso8601
+from mail_dock.domain.time_format import to_utc_iso8601
 from mail_dock.usecases.account_guards import ensure_imap_account
 from mail_dock.usecases.retry import with_retry
 from mail_dock.usecases.snapshots import folder_snapshot_event
@@ -428,6 +427,7 @@ def sync_account(
     *,
     account_id: str,
     options: SyncOptions,
+    parser: BaseMessageParser,
     cancel: CancelToken | None = None,
     on_progress: Callable[[SyncProgress], None] | None = None,
 ) -> SyncResult:
@@ -591,7 +591,7 @@ def sync_account(
             headers = with_retry(
                 lambda: fetcher.download_eml_headers(folder_raw_name, ref.uid), cancel=token
             )
-            parsed = parse_eml(headers, ref.internal_date)
+            parsed = parser.parse(headers, ref.internal_date)
             record = _record_for_message(
                 account_id=account_id,
                 folder_id=folder_id,
@@ -626,7 +626,7 @@ def sync_account(
         if ref.size_bytes is None:
             stats.estimated_bytes += len(raw)
         if len(raw) > options.max_message_bytes:
-            parsed = parse_eml(raw, ref.internal_date)
+            parsed = parser.parse(raw, ref.internal_date)
             record = _record_for_message(
                 account_id=account_id,
                 folder_id=folder_id,
@@ -660,7 +660,7 @@ def sync_account(
         stored = storage.reuse(existing.relative_path, file_hash) if existing is not None else None
         if stored is None:
             stored = storage.save(account_id, ref.internal_date, raw)
-        parsed = parse_eml(raw, ref.internal_date)
+        parsed = parser.parse(raw, ref.internal_date)
         record = _record_for_message(
             account_id=account_id,
             folder_id=folder_id,
@@ -1383,6 +1383,7 @@ def force_fetch_message(
     folder_id: Any,
     uidvalidity: int,
     uid: int,
+    parser: BaseMessageParser,
     cancel: CancelToken | None = None,
 ) -> SyncResult:
     """Fetch one message while deliberately bypassing the normal size limit.
@@ -1418,7 +1419,7 @@ def force_fetch_message(
     stored = storage.reuse(existing.relative_path, file_hash) if existing is not None else None
     if stored is None:
         stored = storage.save(account_id, ref.internal_date, raw)
-    parsed = parse_eml(raw, ref.internal_date)
+    parsed = parser.parse(raw, ref.internal_date)
     record = _record_for_message(
         account_id=account_id,
         folder_id=folder_id,

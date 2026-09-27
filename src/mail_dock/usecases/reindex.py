@@ -19,6 +19,7 @@ from mail_dock.domain.messages import ParsedMessage
 from mail_dock.domain.ports import (
     BaseEmlStorage,
     BaseManifestReader,
+    BaseMessageParser,
     BasePstManifestReader,
     JSONValue,
 )
@@ -28,8 +29,7 @@ from mail_dock.domain.repository import (
     MessageContents,
     MessageRecord,
 )
-from mail_dock.infrastructure.parsing.eml_parser import parse_eml
-from mail_dock.infrastructure.parsing.headers import to_utc_iso8601
+from mail_dock.domain.time_format import to_utc_iso8601
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -293,6 +293,7 @@ def reindex(
     storage: BaseEmlStorage,
     manifest_reader: BaseManifestReader,
     *,
+    parser: BaseMessageParser,
     cancel: CancelToken | None = None,
     on_progress: Callable[[ReindexProgress], None] | None = None,
 ) -> ReindexResult:
@@ -526,7 +527,9 @@ def reindex(
                 # A completed purge intentionally has no EML left to parse.
                 raw = None
 
-            parsed = parse_eml(raw, _internal_date(event)) if raw is not None else ParsedMessage()
+            parsed = (
+                parser.parse(raw, _internal_date(event)) if raw is not None else ParsedMessage()
+            )
             state = states.get(fetch.key, _MessageState("present"))
             event_size = event.get("size_bytes")
             size_bytes = event_size if isinstance(event_size, int) else len(raw or b"")
@@ -738,6 +741,7 @@ def reindex_pst(
     storage: BaseEmlStorage,
     manifest_reader: BasePstManifestReader,
     *,
+    parser: BaseMessageParser,
     status: str = "completed",
     is_active: bool = True,
     replaces_id: int | None = None,
@@ -851,7 +855,7 @@ def reindex_pst(
             except (FileNotFoundError, StorageError):
                 skipped_count += 1
                 continue
-        parsed = parse_eml(raw, None) if raw is not None else ParsedMessage()
+        parsed = parser.parse(raw, None) if raw is not None else ParsedMessage()
         parse_error = parse_failed.get(source_item_key) or oversize.get(source_item_key)
         local_state = (
             "purged" if source_item_key in purged else "active" if is_active else "trashed"

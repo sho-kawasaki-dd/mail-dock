@@ -13,7 +13,7 @@ from mail_dock.infrastructure.storage.manifest import ManifestWriter
 from mail_dock.infrastructure.storage.storage_root import initialize_root
 from mail_dock.usecases.search_messages import search_messages
 from mail_dock.usecases.search_query import parse_query
-from mail_dock.usecases.sync_mail import SyncOptions, sync_account
+from mail_dock.usecases.sync_mail import SyncOptions
 from tests.support.eml_builder import AttachmentSpec, build_eml, build_related_email
 from tests.support.imap_integration import (
     append_raw_message,
@@ -25,6 +25,7 @@ from tests.support.imap_integration import (
     service,
     unique_mailbox,
 )
+from tests.support.usecase_adapters import sync_account
 
 SEARCHABLE_SUBJECT = "Fullwidth \uff34\uff25\uff33\uff34 subject"
 FULLWIDTH_SEARCH = "\uff33\uff25\uff21\uff32\uff23\uff28"

@@ -12,9 +12,8 @@ from typing import Any
 from mail_dock.domain.errors import OperationCancelledError
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.messages import ParsedMessage
-from mail_dock.domain.ports import BaseEmlStorage
+from mail_dock.domain.ports import BaseEmlStorage, BaseMessageParser
 from mail_dock.domain.repository import BaseMessageRepository, MessageContents
-from mail_dock.infrastructure.parsing.eml_parser import parse_eml
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -75,6 +74,7 @@ def reparse_messages(
     repo: BaseMessageRepository,
     storage: BaseEmlStorage,
     *,
+    parser: BaseMessageParser,
     account_id: str | None = None,
     only_failed: bool = True,
     message_ids: Sequence[int] | None = None,
@@ -134,7 +134,7 @@ def reparse_messages(
             _LOGGER.warning("Stored EML hash mismatch: relative_path=%s", relative_path)
             continue
 
-        parsed = parse_eml(raw, _internal_date(record))
+        parsed = parser.parse(raw, _internal_date(record))
         if parsed.parse_error is not None:
             parse_failed_count += 1
             skipped_count += 1

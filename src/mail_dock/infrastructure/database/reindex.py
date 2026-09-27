@@ -19,6 +19,7 @@ from mail_dock.infrastructure.database.message_folder_migration import finalize_
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
 from mail_dock.infrastructure.database.migrator import migrate
 from mail_dock.infrastructure.database.pst_import_repository import SqlitePstImportRepository
+from mail_dock.infrastructure.parsing.eml_parser import EmlParser
 from mail_dock.infrastructure.storage.detach import storage_io
 from mail_dock.infrastructure.storage.manifest import ManifestReader, ManifestWriter
 from mail_dock.infrastructure.storage.pst_manifest import PstManifestReader
@@ -74,6 +75,7 @@ def rebuild_database(
     temporary_path = database_path.with_name(f"{database_path.name}.reindex-{uuid.uuid4().hex}.tmp")
     connection: sqlite3.Connection | None = None
     results: list[ReindexResult] = []
+    parser = EmlParser()
     try:
         connection = connect(temporary_path, journal_mode=journal_mode)
         migrate(connection, temporary_path)
@@ -88,6 +90,7 @@ def rebuild_database(
                 repository,
                 storage,
                 manifest_reader,
+                parser=parser,
                 cancel=cancel,
                 on_progress=on_progress,
             )
@@ -99,6 +102,7 @@ def rebuild_database(
                 connection,
                 storage,
                 database_path.parent,
+                parser=parser,
                 cancel=cancel,
             )
         )
@@ -134,6 +138,7 @@ def _rebuild_pst_manifests(
     storage: BaseEmlStorage,
     storage_root: Path,
     *,
+    parser: EmlParser,
     cancel: CancelToken | None,
 ) -> list[ReindexResult]:
     """Rebuild valid PST generations without guessing from orphaned files."""
@@ -200,6 +205,7 @@ def _rebuild_pst_manifests(
                     pst_repository,
                     storage,
                     reader,
+                    parser=parser,
                     status="completed" if is_active else "superseded",
                     is_active=is_active,
                     replaces_id=rebuilt.get(replaces_uuid) if replaces_uuid else None,

@@ -35,6 +35,7 @@ from mail_dock.domain.repository import (
     BasePstImportRepository,
     MessageRecord,
 )
+from mail_dock.infrastructure.parsing.eml_parser import EmlParser
 from mail_dock.presentation.errors import user_message
 from mail_dock.presentation.threads.worker import OperationGate, Worker, _Task, operation_gate
 from mail_dock.usecases.account_guards import is_pst_account
@@ -248,6 +249,7 @@ class SyncWorker(Worker):
         self._pst_import_storage_factory = pst_import_storage
         self._pst_importer_factory = pst_importer
         self._pst_manifest_factory = pst_manifest_factory
+        self._parser = EmlParser()
         self._operations_by_token: dict[CancelToken, SyncOperation] = {}
 
         self.task_failed.connect(self._on_task_failed)
@@ -325,6 +327,7 @@ class SyncWorker(Worker):
                     manifest,
                     account_id=account_id,
                     options=options,
+                    parser=self._parser,
                     cancel=token,
                     on_progress=self._forward_progress(),
                 )
@@ -402,6 +405,7 @@ class SyncWorker(Worker):
                         folder_id=folder_id,
                         uidvalidity=uidvalidity,
                         uid=uid,
+                        parser=self._parser,
                         cancel=token,
                     )
             finally:
@@ -421,6 +425,7 @@ class SyncWorker(Worker):
                 reparse_messages(
                     self._repository_factory(),
                     self._storage_factory(),
+                    parser=self._parser,
                     account_id=account_id,
                     only_failed=True,
                     message_ids=message_ids,

@@ -15,8 +15,7 @@ from mail_dock.infrastructure.database.message_repository import SqliteMessageRe
 from mail_dock.infrastructure.database.migrator import migrate
 from mail_dock.infrastructure.storage.eml_storage import EmlStorage
 from mail_dock.infrastructure.storage.manifest import ManifestReader, ManifestWriter, read_events
-from mail_dock.usecases.sync_mail import SyncOptions, sync_account
-from mail_dock.usecases.verify import verify_manifest
+from mail_dock.usecases.sync_mail import SyncOptions
 from tests.support.fake_fetcher import FakeFetcher
 from tests.support.fault_injection import (
     FaultInjectingConnection,
@@ -26,6 +25,7 @@ from tests.support.fault_injection import (
     fail_before_eml_fsync,
     fail_before_eml_replace,
 )
+from tests.support.usecase_adapters import sync_account, verify_manifest
 
 ACCOUNT_ID = "account"
 FOLDER_NAME = "INBOX"

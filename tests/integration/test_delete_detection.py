@@ -9,7 +9,7 @@ from mail_dock.infrastructure.database.message_folder_migration import finalize_
 from mail_dock.infrastructure.storage.eml_storage import EmlStorage
 from mail_dock.infrastructure.storage.manifest import ManifestReader, ManifestWriter
 from mail_dock.infrastructure.storage.storage_root import initialize_root
-from mail_dock.usecases.sync_mail import SyncOptions, sync_account
+from mail_dock.usecases.sync_mail import SyncOptions
 from tests.support.imap_integration import (
     append_message,
     append_raw_message,
@@ -21,6 +21,7 @@ from tests.support.imap_integration import (
     service,
     unique_mailbox,
 )
+from tests.support.usecase_adapters import sync_account
 
 
 @pytest.mark.docker

@@ -21,7 +21,6 @@ from mail_dock.domain.ports import (
     JSONValue,
 )
 from mail_dock.domain.repository import BaseMessageRepository, MessageRecord
-from mail_dock.infrastructure.storage.pst_manifest import PstManifestReader
 
 _LOGGER = logging.getLogger(__name__)
 _CRC_SEPARATOR = b"|CRC32:"
@@ -540,7 +539,12 @@ def _verify_manifest_file(path: Any) -> tuple[int, int]:
     return records_checked, before - truncate_at
 
 
-def verify_manifest(root: Any, *, cancel: CancelToken | None = None) -> ManifestVerifyResult:
+def verify_manifest(
+    root: Any,
+    *,
+    pst_manifest_reader_factory: Callable[[Any, str], BasePstManifestReader],
+    cancel: CancelToken | None = None,
+) -> ManifestVerifyResult:
     """Validate manifest CRCs and repair only malformed final records."""
 
     token = _token(cancel)
@@ -568,7 +572,7 @@ def verify_manifest(root: Any, *, cancel: CancelToken | None = None) -> Manifest
         file_records, file_repaired_bytes = _verify_manifest_file(path)
         if path.parent.parent.name == "pst":
             import_uuid = path.parent.name
-            tuple(PstManifestReader(resolved_root, import_uuid).read_all_events())
+            tuple(pst_manifest_reader_factory(resolved_root, import_uuid).read_all_events())
         files_checked += 1
         records_checked += file_records
         repaired_bytes += file_repaired_bytes

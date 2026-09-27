@@ -17,9 +17,9 @@ from mail_dock.usecases.verify import (
     orphan_scan,
     quick_verify,
     range_verify,
-    verify_manifest,
 )
 from tests.support.in_memory_repository import InMemoryMessageRepository
+from tests.support.usecase_adapters import verify_manifest
 
 
 class MemoryIntegrityStorage(BaseIntegrityStorage):

@@ -17,7 +17,7 @@ from mail_dock.infrastructure.database.reindex import rebuild_database
 from mail_dock.infrastructure.storage.eml_storage import EmlStorage
 from mail_dock.infrastructure.storage.manifest import ManifestReader, ManifestWriter
 from mail_dock.infrastructure.storage.storage_root import initialize_root
-from mail_dock.usecases.sync_mail import SyncOptions, sync_account
+from mail_dock.usecases.sync_mail import SyncOptions
 from tests.support.imap_integration import (
     append_message,
     create_mailbox,
@@ -28,6 +28,7 @@ from tests.support.imap_integration import (
     service,
     unique_mailbox,
 )
+from tests.support.usecase_adapters import sync_account
 
 
 def _cache_snapshot(connection: sqlite3.Connection) -> dict[str, object]:

@@ -60,6 +60,7 @@ from mail_dock.infrastructure.logging_config import (
     set_storage_log_target,
     setup_logging,
 )
+from mail_dock.infrastructure.parsing.eml_parser import EmlParser
 from mail_dock.infrastructure.security.keyring_store import (
     KeyringBackendStatus,
     KeyringCredentialStore,
@@ -78,6 +79,7 @@ from mail_dock.infrastructure.storage.capabilities import (
 from mail_dock.infrastructure.storage.detach import storage_io
 from mail_dock.infrastructure.storage.eml_storage import EmlStorage, cleanup_tmp
 from mail_dock.infrastructure.storage.manifest import ManifestReader, ManifestWriter
+from mail_dock.infrastructure.storage.pst_manifest import PstManifestReader
 from mail_dock.infrastructure.storage.storage_root import (
     DriveKind,
     RootProbe,
@@ -1138,6 +1140,7 @@ def _run_sync_command(
                         flag_refresh_window_days=settings.flag_refresh_window_days,
                         flag_refresh_min_interval_seconds=settings.flag_refresh_min_interval_seconds,
                     ),
+                    parser=EmlParser(),
                     cancel=token,
                     on_progress=_print_sync_progress,
                 )
@@ -1164,6 +1167,7 @@ def _run_reparse_command(
         result = reparse_messages(
             repo,
             EmlStorage(storage_root),
+            parser=EmlParser(),
             account_id=args.account,
             only_failed=not args.all,
             cancel=token,
@@ -1339,7 +1343,9 @@ def _run_verify_command(
                 ]
             result = _combine_orphan_results(orphan_results)
         elif mode == "manifest":
-            result = verify_manifest(storage_root, cancel=token)
+            result = verify_manifest(
+                storage_root, pst_manifest_reader_factory=PstManifestReader, cancel=token
+            )
         else:
             raise ConfigError(f"Unknown verification mode: {mode}")
     finally:
@@ -1382,6 +1388,7 @@ def _run_reindex_command(
                 repo,
                 storage,
                 ManifestReader(storage_root, account_id),
+                parser=EmlParser(),
                 cancel=token,
                 on_progress=_print_reindex_progress,
             )
