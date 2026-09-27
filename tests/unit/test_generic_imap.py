@@ -515,13 +515,20 @@ def test_google_condstore_flag_refresh_requests_gmail_labels(fake_imap: None) ->
     assert fetch_command[1] == ("1:*", "(UID FLAGS X-GM-LABELS)", "(CHANGEDSINCE 41)")
 
 
+@pytest.mark.parametrize(
+    ("oauth_provider", "tenant"),
+    [("google", None), ("microsoft", "organizations")],
+)
 def test_xoauth2_connect_refreshes_and_uses_the_access_token(
-    fake_imap: None, monkeypatch: pytest.MonkeyPatch
+    fake_imap: None,
+    monkeypatch: pytest.MonkeyPatch,
+    oauth_provider: str,
+    tenant: str | None,
 ) -> None:
     credentials = SessionCredentialStore()
     credentials.set_secret("account", "refresh_token", "stored-refresh-token")
     client = OAuth2Client()
-    refresh_calls: list[tuple[str, str, str]] = []
+    refresh_calls: list[tuple[str, str, str, str | None]] = []
 
     def refresh_access_token(
         provider: str,
@@ -532,8 +539,8 @@ def test_xoauth2_connect_refreshes_and_uses_the_access_token(
         tenant: str | None = None,
         on_refresh_token_rotated: object = None,
     ) -> OAuthTokenResponse:
-        del client_secret, tenant
-        refresh_calls.append((provider, client_id, refresh_token))
+        del client_secret
+        refresh_calls.append((provider, client_id, refresh_token, tenant))
         if callable(on_refresh_token_rotated):
             on_refresh_token_rotated("rotated-refresh-token")
         return OAuthTokenResponse(
@@ -546,8 +553,9 @@ def test_xoauth2_connect_refreshes_and_uses_the_access_token(
         client,
         credentials,
         account_id="account",
-        provider="google",
+        provider=oauth_provider,
         client_id="client-id",
+        tenant=tenant,
     )
     fetcher = GenericImapFetcher(
         "imap.example.test",
@@ -555,7 +563,7 @@ def test_xoauth2_connect_refreshes_and_uses_the_access_token(
         None,
         auth_type="xoauth2",
         account_id="account",
-        oauth_provider="google",
+        oauth_provider=oauth_provider,
         oauth_client_id="client-id",
         access_token_provider=token_provider,
     )
@@ -565,7 +573,7 @@ def test_xoauth2_connect_refreshes_and_uses_the_access_token(
     auth_command = next(
         command for command in FakeImap.instances[0].commands if command[0] == "AUTHENTICATE"
     )
-    assert refresh_calls == [("google", "client-id", "stored-refresh-token")]
+    assert refresh_calls == [(oauth_provider, "client-id", "stored-refresh-token", tenant)]
     assert credentials.get_secret("account", "refresh_token") == "rotated-refresh-token"
     assert auth_command[1][1] == b"user=user@example.test\x01auth=Bearer fresh-access-token\x01\x01"
 

@@ -105,6 +105,7 @@ class _AccountEditContext:
         self.connection_manager = None
         self.credential_store = credential_store
         self._repository = repository
+        self.oauth_begin_calls: list[tuple[str, str, str, str | None]] = []
 
     def create_message_repository(self) -> _AccountRepository:
         return self._repository
@@ -117,9 +118,13 @@ class _AccountEditContext:
 
     def begin_oauth_authorization(
         self,
-        _account_id: str,
-        _client_id: str,
+        account_id: str,
+        client_id: str,
+        *,
+        provider: str = "google",
+        tenant: str | None = None,
     ) -> OAuthAuthorizationRequest:
+        self.oauth_begin_calls.append((account_id, client_id, provider, tenant))
         return OAuthAuthorizationRequest(
             "request-1", "http://127.0.0.1:12345/?state=test", "http://127.0.0.1:12345/"
         )
@@ -244,6 +249,40 @@ def test_account_dialog_oauth_authorization_completes_on_worker(
     values = dialog._account_values()
     assert values is not None
     assert values["auth_type"] == "xoauth2"
+    dialog._stop_worker()
+
+
+def test_account_dialog_microsoft_oauth_uses_outlook_host_and_tenant(
+    qtbot: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    credentials = _CredentialStore()
+    context = _AccountEditContext(_AccountRepository(_editable_account()), credentials)
+    monkeypatch.setattr(
+        "mail_dock.presentation.views.dialogs.settings_dialog.QDesktopServices.openUrl",
+        lambda _url: True,
+    )
+    dialog = AccountDialog(context)
+    qtbot.addWidget(dialog)
+
+    dialog._account_id_edit.setText("microsoft-account")
+    dialog._username_edit.setText("user@example.com")
+    dialog._auth_type_edit.setCurrentIndex(dialog._auth_type_edit.findData("xoauth2"))
+    dialog._oauth_provider_edit.setCurrentIndex(dialog._oauth_provider_edit.findData("microsoft"))
+    dialog._oauth_tenant_edit.setCurrentText("consumers")
+    dialog._oauth_client_id_edit.setText("desktop-client-id")
+
+    assert dialog._host_edit.text() == "outlook.office365.com"
+    dialog._authorize_google()
+    qtbot.waitUntil(lambda: dialog._oauth_linked, timeout=2_000)
+
+    assert context.oauth_begin_calls == [
+        ("microsoft-account", "desktop-client-id", "microsoft", "consumers")
+    ]
+    values = dialog._account_values()
+    assert values is not None
+    assert values["oauth_provider"] == "microsoft"
+    assert values["oauth_tenant"] == "consumers"
     dialog._stop_worker()
 
 

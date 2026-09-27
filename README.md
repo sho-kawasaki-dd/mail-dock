@@ -61,6 +61,14 @@ Trade-offs of staying in "Testing" status:
 - A refresh token for the restricted `https://mail.google.com/` scope expires after **7 days** while the consent screen is in "Testing" status. IMAP connection attempts after expiry fail with `invalid_grant`, at which point the account needs to be re-authorized with Google.
 - The consent screen is capped at 100 test users while in "Testing" status.
 
+## Microsoft 365 and Outlook.com accounts
+
+Microsoft IMAP uses OAuth2 with the user's own Microsoft Entra application registration. In the Azure portal, create an app registration and choose the account types that match the intended accounts (work/school accounts, personal Microsoft accounts, or both). Under **Authentication**, add the **Mobile and desktop applications** platform with the redirect URI `http://localhost`; mail-dock uses that registered loopback URI with a dynamically assigned port. Do not configure a client secret for this public desktop client.
+
+Under **API permissions**, add the delegated permission `IMAP.AccessAsUser.All` for Office 365 Exchange Online and grant consent if the tenant requires it. The app also requests `offline_access` so the account can refresh its access token. In mail-dock, choose OAuth2 and Microsoft 365 / Outlook.com, enter the Application (client) ID, select `organizations` for work/school accounts or `consumers` for personal Outlook.com accounts (or enter the tenant ID), and authenticate in the browser. The default IMAP endpoint is `outlook.office365.com` on port 993 with implicit TLS.
+
+Only the signed-in user's mailbox is supported. Shared mailboxes and delegated access are out of scope; do not enter another mailbox address as a substitute for the authenticating user's account.
+
 ## Development setup
 
 Requirements: Python 3.13, [uv](https://docs.astral.sh/uv/), and Git. From the repository root:

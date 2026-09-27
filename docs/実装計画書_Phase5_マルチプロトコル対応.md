@@ -29,7 +29,7 @@
 - [ ] OAuth2の認可コード＋PKCEフローを、追加のサードパーティ依存を増やさずに実装する（5.2a）
 - [ ] `client_secret` / `refresh_token` / `access_token` をディスク上のいかなる永続ファイルへも書き込まず、ストレージルートへも一切保存しない（5.2a）
 - [ ] Gmailの「1通が複数ラベルに属する」性質を `message_folders` 中間テーブルで正しく表現する（5.2b）
-- [ ] Microsoft 365 / Outlook.com を、Gmailで確立したOAuth2基盤の再利用によって追加する（5.3）
+- [x] Microsoft 365 / Outlook.com を、Gmailで確立したOAuth2基盤の再利用によって追加する（5.3）
 - [ ] OAuth2（Gmail等）は本書の対象に含める一方、対話的な同意フローが必須の操作はGUI限定とし、CLIには追加しない
 - [ ] 追加のサードパーティ依存パッケージを一切追加しない（`google-auth-oauthlib` は開発計画書の想定から撤回し、標準ライブラリのみで実装する）
 
@@ -356,11 +356,11 @@
 
 ### **Group N: 5.3 Microsoft 365 / Outlook.com**
 
-- [ ] `oauth_provider='microsoft'` / `oauth_tenant` の設定と、許可リスト付きプロバイダ定義を追加する
-- [ ] `outlook.office365.com:993` を既定ホストとしてGmailと同じXOAUTH2経路で接続できることを確認する
-- [ ] Azure ADアプリ登録手順をREADMEへ追記する
-- [ ] テナント選択（`consumers` / `organizations` / 固有テナントID）のUI・設定項目を追加する
-- [ ] 共有メールボックス・委任アクセスを要件外として明記し、通常のOAuth2アカウント登録のみで完結することを確認する
+- [x] `oauth_provider='microsoft'` / `oauth_tenant` の設定と、許可リスト付きプロバイダ定義を追加する（既存OAuth基盤へMicrosoftの許可済みエンドポイント・スコープ・tenant検証を接続）
+- [x] `outlook.office365.com:993` を既定ホストとしてGmailと同じXOAUTH2経路で接続できることを確認する（Fake IMAPでMicrosoft tenant付きtoken refreshとXOAUTH2認証を検証。実Microsoftテナントでの接続はV-9に未実施として残す）
+- [x] Azure ADアプリ登録手順をREADMEへ追記する
+- [x] テナント選択（`consumers` / `organizations` / 固有テナントID）のUI・設定項目を追加する
+- [x] 共有メールボックス・委任アクセスを要件外として明記し、通常のOAuth2アカウント登録のみで完結することを確認する
 
 ### **Group O: 静的テスト・CI（全サブフェーズ共通）**
 
@@ -443,7 +443,7 @@
 - [ ] V-6. 秘密情報が永続出力されず、refresh tokenの有無に応じたローテーション、保存失敗、`invalid_grant`、許可外エンドポイント拒否が自動テストで固定されていること
 - [ ] V-7（5.2b）. `metadata.db` を削除し、EML＋fetchイベント＋最後の `message_membership_snapshot` からGmailの `message_folders` とフォルダ別状態まで完全復元できること
 - [ ] V-8（5.2b）. 同一メールが複数ラベルに属しても検索・一覧・件数・削除検知・共有EML判定が二重計上されず、通常IMAPの別フォルダで同じUIDVALIDITY/UIDが存在しても一意性衝突しないこと
-- [ ] V-9（5.3）. Microsoft 365アカウントで、OAuthポートの実装を変更せず、許可リスト付きプロバイダ定義とテナント設定だけでOAuth2接続が成立すること
+- [ ] V-9（5.3）. Microsoft 365アカウントで、OAuthポートの実装を変更せず、許可リスト付きプロバイダ定義とテナント設定だけでOAuth2接続が成立すること（実Microsoftテナント資格情報を用いた結合確認は未実施。ローカルFake IMAPで共通XOAUTH2経路を検証済み）
 - [ ] V-10. `uv run ruff format --check .` / `uv run ruff check .` / `uv run mypy` が成功すること
 - [ ] V-11. `uv run pytest -m "not docker and not gui and not pst"` がCIで緑になること
 - [ ] V-12. `domain` / `usecases` がPySide6・infrastructure実装をimportせず、OAuthブラウザ起動を含まないこと。`presentation/context.py` のcomposition root例外が静的テストで明示されていること

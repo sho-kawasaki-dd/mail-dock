@@ -215,6 +215,45 @@ def test_refresh_posts_to_fixed_https_endpoint_and_parses_expiry(
     assert result.expires_at <= datetime.now(UTC) + timedelta(seconds=3601)
 
 
+def test_microsoft_refresh_uses_allowlisted_tenant_endpoint_and_scopes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeResponse(io.BytesIO):
+        status = 200
+
+        def __enter__(self) -> FakeResponse:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            self.close()
+
+    response = FakeResponse(
+        json.dumps({"access_token": "access-token", "expires_in": 3600}).encode()
+    )
+    captured: dict[str, object] = {}
+
+    class FakeOpener:
+        def open(self, request: urllib.request.Request, timeout: float) -> FakeResponse:
+            captured["url"] = request.full_url
+            if not isinstance(request.data, bytes):
+                raise AssertionError("token request body must be bytes")
+            captured["form"] = urllib.parse.parse_qs(request.data.decode())
+            return response
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *handlers: FakeOpener())
+    OAuth2Client().refresh_access_token(
+        "microsoft", "client-id", "refresh-token", tenant="organizations"
+    )
+
+    assert captured["url"] == ("https://login.microsoftonline.com/organizations/oauth2/v2.0/token")
+    assert captured["form"] == {
+        "grant_type": ["refresh_token"],
+        "client_id": ["client-id"],
+        "refresh_token": ["refresh-token"],
+        "scope": ["https://outlook.office.com/IMAP.AccessAsUser.All offline_access"],
+    }
+
+
 def test_local_http_stub_exercises_code_exchange_and_refresh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

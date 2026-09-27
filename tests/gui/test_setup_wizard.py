@@ -56,6 +56,7 @@ class _Context:
     def __init__(self) -> None:
         self.repository = _Repository()
         self.oauth_cancelled = Event()
+        self.oauth_begin_calls: list[tuple[str, str, str, str | None]] = []
 
     def create_message_repository(self) -> _Repository:
         return self.repository
@@ -68,9 +69,13 @@ class _Context:
 
     def begin_oauth_authorization(
         self,
-        _account_id: str,
-        _client_id: str,
+        account_id: str,
+        client_id: str,
+        *,
+        provider: str = "google",
+        tenant: str | None = None,
     ) -> OAuthAuthorizationRequest:
+        self.oauth_begin_calls.append((account_id, client_id, provider, tenant))
         return OAuthAuthorizationRequest(
             "request-1", "http://127.0.0.1:12345/?state=test", "http://127.0.0.1:12345/"
         )
@@ -216,7 +221,7 @@ def test_gmail_folder_selection_defaults_all_mail_and_warns_with_inbox(qtbot: An
     assert wizard._gmail_duplicate_warning.text() == ""
 
 
-def test_setup_wizard_oauth_wait_can_be_cancelled_without_blocking_gui(
+def test_setup_wizard_microsoft_oauth_wait_can_be_cancelled_without_blocking_gui(
     qtbot: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -227,10 +232,13 @@ def test_setup_wizard_oauth_wait_can_be_cancelled_without_blocking_gui(
     )
     wizard = SetupWizard(context=context)
     qtbot.addWidget(wizard)
-    wizard._account_id_edit.setText("google-account")
-    wizard._username_edit.setText("user@gmail.com")
+    wizard._account_id_edit.setText("microsoft-account")
+    wizard._username_edit.setText("user@example.com")
     wizard._auth_type_edit.setCurrentIndex(wizard._auth_type_edit.findData("xoauth2"))
+    wizard._oauth_provider_edit.setCurrentIndex(wizard._oauth_provider_edit.findData("microsoft"))
+    wizard._oauth_tenant_edit.setCurrentText("consumers")
     wizard._oauth_client_id_edit.setText("desktop-client-id")
+    assert wizard._host_edit.text() == "outlook.office365.com"
     wizard._authorize_google()
     qtbot.waitUntil(lambda: wizard._operation == "oauth_complete", timeout=2_000)
 
@@ -240,6 +248,9 @@ def test_setup_wizard_oauth_wait_can_be_cancelled_without_blocking_gui(
     qtbot.waitUntil(lambda: wizard._worker is None, timeout=2_000)
 
     assert context.oauth_cancelled.is_set()
+    assert context.oauth_begin_calls == [
+        ("microsoft-account", "desktop-client-id", "microsoft", "consumers")
+    ]
     assert wizard._oauth_status_label.text() == strings.WIZARD_STATUS_OAUTH_NOT_LINKED
 
 

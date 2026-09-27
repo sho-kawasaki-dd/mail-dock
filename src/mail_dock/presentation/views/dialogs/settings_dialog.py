@@ -168,6 +168,16 @@ class AccountDialog(QDialog):
         self._auth_type_edit.setObjectName("accountAuthTypeComboBox")
         self._auth_type_edit.addItem(strings.SETTINGS_AUTH_TYPE_PASSWORD, "password")
         self._auth_type_edit.addItem(strings.SETTINGS_AUTH_TYPE_GOOGLE, "xoauth2")
+        self._oauth_provider_edit = QComboBox(self)
+        self._oauth_provider_edit.setObjectName("oauthProviderComboBox")
+        self._oauth_provider_edit.addItem(strings.SETTINGS_OAUTH_PROVIDER_GOOGLE, "google")
+        self._oauth_provider_edit.addItem(strings.SETTINGS_OAUTH_PROVIDER_MICROSOFT, "microsoft")
+        self._oauth_tenant_edit = QComboBox(self)
+        self._oauth_tenant_edit.setObjectName("oauthTenantComboBox")
+        self._oauth_tenant_edit.setEditable(True)
+        self._oauth_tenant_edit.addItem("organizations")
+        self._oauth_tenant_edit.addItem("consumers")
+        self._oauth_tenant_edit.setPlaceholderText(strings.SETTINGS_HINT_OAUTH_TENANT)
         self._oauth_client_id_edit = QLineEdit(self)
         self._oauth_client_id_edit.setObjectName("oauthClientIdLineEdit")
         self._oauth_status_label = QLabel(strings.SETTINGS_STATUS_OAUTH_NOT_LINKED, self)
@@ -196,6 +206,13 @@ class AccountDialog(QDialog):
             self._username_edit.setText(str(account.get("username", "")))
             auth_index = self._auth_type_edit.findData(account.get("auth_type", "password"))
             self._auth_type_edit.setCurrentIndex(max(0, auth_index))
+            provider_index = self._oauth_provider_edit.findData(
+                account.get("oauth_provider", "google")
+            )
+            self._oauth_provider_edit.setCurrentIndex(max(0, provider_index))
+            tenant = account.get("oauth_tenant")
+            if isinstance(tenant, str):
+                self._oauth_tenant_edit.setCurrentText(tenant)
             self._oauth_client_id_edit.setText(str(account.get("oauth_client_id") or ""))
             self._ca_cert_path_edit.setText(str(account.get("ca_cert_path") or ""))
             self._display_name_edit.setText(str(account.get("display_name") or ""))
@@ -208,6 +225,8 @@ class AccountDialog(QDialog):
             self._tls_mode_edit.currentData(),
             self._ca_cert_path_edit.text().strip(),
             self._auth_type_edit.currentData(),
+            self._oauth_provider_edit.currentData(),
+            self._oauth_tenant_edit.currentText().strip(),
             self._oauth_client_id_edit.text().strip(),
         )
 
@@ -222,6 +241,8 @@ class AccountDialog(QDialog):
         self._tls_mode_edit.currentIndexChanged.connect(self._tls_mode_changed)
         self._ca_cert_path_edit.textChanged.connect(self._invalidate_connection_test)
         self._auth_type_edit.currentIndexChanged.connect(self._auth_type_changed)
+        self._oauth_provider_edit.currentIndexChanged.connect(self._oauth_provider_changed)
+        self._oauth_tenant_edit.currentTextChanged.connect(self._oauth_configuration_changed)
         self._oauth_client_id_edit.textChanged.connect(self._oauth_client_id_changed)
         form.addRow(strings.SETTINGS_LABEL_ACCOUNT_ID, self._account_id_edit)
         form.addRow(strings.SETTINGS_LABEL_HOST, self._host_edit)
@@ -230,6 +251,8 @@ class AccountDialog(QDialog):
         form.addRow(strings.SETTINGS_LABEL_USERNAME, self._username_edit)
         form.addRow(strings.SETTINGS_LABEL_PASSWORD, self._password_edit)
         form.addRow(strings.SETTINGS_LABEL_AUTH_TYPE, self._auth_type_edit)
+        form.addRow(strings.SETTINGS_LABEL_OAUTH_PROVIDER, self._oauth_provider_edit)
+        form.addRow(strings.SETTINGS_LABEL_OAUTH_TENANT, self._oauth_tenant_edit)
         form.addRow(strings.SETTINGS_LABEL_OAUTH_CLIENT_ID, self._oauth_client_id_edit)
         form.addRow(self._oauth_button)
         form.addRow(self._oauth_status_label)
@@ -266,13 +289,52 @@ class AccountDialog(QDialog):
             password_label.setVisible(not is_oauth)
         self._password_edit.setVisible(not is_oauth)
         self._oauth_client_id_edit.setVisible(is_oauth)
+        self._oauth_provider_edit.setVisible(is_oauth)
+        self._oauth_tenant_edit.setVisible(
+            is_oauth and self._oauth_provider_edit.currentData() == "microsoft"
+        )
         self._oauth_button.setVisible(is_oauth)
         self._oauth_status_label.setVisible(is_oauth)
         if is_oauth and not self._host_edit.text().strip():
-            self._host_edit.setText("imap.gmail.com")
+            self._host_edit.setText(self._oauth_default_host())
             self._port_edit.setValue(993)
             self._tls_mode_edit.setCurrentIndex(self._tls_mode_edit.findData("implicit"))
+        self._update_oauth_button_text()
         self._invalidate_connection_test()
+
+    def _oauth_default_host(self) -> str:
+        return (
+            "outlook.office365.com"
+            if self._oauth_provider_edit.currentData() == "microsoft"
+            else "imap.gmail.com"
+        )
+
+    def _oauth_provider_changed(self, *_args: object) -> None:
+        provider = self._oauth_provider_edit.currentData()
+        current_host = self._host_edit.text().strip()
+        if current_host in {"imap.gmail.com", "outlook.office365.com"}:
+            self._host_edit.setText(self._oauth_default_host())
+        self._oauth_tenant_edit.setVisible(
+            self._auth_type_edit.currentData() == "xoauth2" and provider == "microsoft"
+        )
+        self._oauth_linked = False
+        self._oauth_status_label.setText(strings.SETTINGS_STATUS_OAUTH_REAUTH)
+        self._update_oauth_button_text()
+        self._invalidate_connection_test()
+
+    def _oauth_configuration_changed(self, *_args: object) -> None:
+        self._oauth_linked = False
+        if self._auth_type_edit.currentData() == "xoauth2":
+            self._oauth_status_label.setText(strings.SETTINGS_STATUS_OAUTH_REAUTH)
+        self._invalidate_connection_test()
+
+    def _update_oauth_button_text(self) -> None:
+        provider_name = (
+            "Microsoft" if self._oauth_provider_edit.currentData() == "microsoft" else "Google"
+        )
+        self._oauth_button.setText(
+            f"{provider_name}と再連携" if self._oauth_linked else f"{provider_name}で認証"
+        )
 
     def _oauth_client_id_changed(self, *_args: object) -> None:
         self._oauth_linked = False
@@ -287,9 +349,7 @@ class AccountDialog(QDialog):
             if linked
             else strings.SETTINGS_STATUS_OAUTH_NOT_LINKED
         )
-        self._oauth_button.setText(
-            strings.SETTINGS_BUTTON_GOOGLE_REAUTH if linked else strings.SETTINGS_BUTTON_GOOGLE_AUTH
-        )
+        self._update_oauth_button_text()
 
     def _load_oauth_status(self) -> None:
         account_id = self._account_id_edit.text().strip()
@@ -316,9 +376,17 @@ class AccountDialog(QDialog):
             return
         self._oauth_button.setEnabled(False)
         self._status_label.setText(strings.SETTINGS_STATUS_OAUTH_WAITING)
+        provider = str(self._oauth_provider_edit.currentData())
+        tenant = (
+            self._oauth_tenant_edit.currentText().strip() or None
+            if provider == "microsoft"
+            else None
+        )
         token = self._submit(
             "oauth_begin",
-            lambda: self._context.begin_oauth_authorization(account_id, client_id),
+            lambda: self._context.begin_oauth_authorization(
+                account_id, client_id, provider=provider, tenant=tenant
+            ),
         )
         self._show_progress(strings.SETTINGS_STATUS_OAUTH_WAITING, token)
 
@@ -374,6 +442,8 @@ class AccountDialog(QDialog):
             self._tls_mode_edit.currentData(),
             self._ca_cert_path_edit.text().strip(),
             self._auth_type_edit.currentData(),
+            self._oauth_provider_edit.currentData(),
+            self._oauth_tenant_edit.currentText().strip(),
             self._oauth_client_id_edit.text().strip(),
         )
         return current != self._original_connection_values
@@ -465,9 +535,15 @@ class AccountDialog(QDialog):
             "username": username,
             "password": password,
             "auth_type": auth_type,
-            "oauth_provider": "google" if auth_type == "xoauth2" else None,
+            "oauth_provider": self._oauth_provider_edit.currentData()
+            if auth_type == "xoauth2"
+            else None,
             "oauth_client_id": oauth_client_id if auth_type == "xoauth2" else None,
-            "oauth_tenant": None,
+            "oauth_tenant": (
+                self._oauth_tenant_edit.currentText().strip() or None
+                if auth_type == "xoauth2" and self._oauth_provider_edit.currentData() == "microsoft"
+                else None
+            ),
             "tls_mode": self._tls_mode_edit.currentData(),
             "ca_cert_path": self._ca_cert_path_edit.text().strip() or None,
             "display_name": self._display_name_edit.text().strip(),

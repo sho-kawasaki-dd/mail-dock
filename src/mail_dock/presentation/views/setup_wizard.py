@@ -231,6 +231,16 @@ class SetupWizard(QWizard):
         self._auth_type_edit.setObjectName("wizardAuthTypeComboBox")
         self._auth_type_edit.addItem(strings.SETTINGS_AUTH_TYPE_PASSWORD, "password")
         self._auth_type_edit.addItem(strings.SETTINGS_AUTH_TYPE_GOOGLE, "xoauth2")
+        self._oauth_provider_edit = QComboBox()
+        self._oauth_provider_edit.setObjectName("wizardOAuthProviderComboBox")
+        self._oauth_provider_edit.addItem(strings.SETTINGS_OAUTH_PROVIDER_GOOGLE, "google")
+        self._oauth_provider_edit.addItem(strings.SETTINGS_OAUTH_PROVIDER_MICROSOFT, "microsoft")
+        self._oauth_tenant_edit = QComboBox()
+        self._oauth_tenant_edit.setObjectName("wizardOAuthTenantComboBox")
+        self._oauth_tenant_edit.setEditable(True)
+        self._oauth_tenant_edit.addItem("organizations")
+        self._oauth_tenant_edit.addItem("consumers")
+        self._oauth_tenant_edit.setPlaceholderText(strings.SETTINGS_HINT_OAUTH_TENANT)
         self._oauth_client_id_edit = QLineEdit()
         self._oauth_client_id_edit.setObjectName("wizardOAuthClientIdLineEdit")
         self._oauth_status_label = QLabel(strings.WIZARD_STATUS_OAUTH_NOT_LINKED)
@@ -248,6 +258,8 @@ class SetupWizard(QWizard):
             field.textChanged.connect(self._invalidate_connection_test)
         self._port_edit.valueChanged.connect(self._invalidate_connection_test)
         self._auth_type_edit.currentIndexChanged.connect(self._auth_type_changed)
+        self._oauth_provider_edit.currentIndexChanged.connect(self._oauth_provider_changed)
+        self._oauth_tenant_edit.currentTextChanged.connect(self._oauth_configuration_changed)
         self._oauth_client_id_edit.textChanged.connect(self._oauth_client_id_changed)
         layout.addRow(strings.WIZARD_LABEL_ACCOUNT_ID, self._account_id_edit)
         layout.addRow(strings.WIZARD_LABEL_HOST, self._host_edit)
@@ -255,6 +267,8 @@ class SetupWizard(QWizard):
         layout.addRow(strings.WIZARD_LABEL_USERNAME, self._username_edit)
         layout.addRow(strings.WIZARD_LABEL_PASSWORD, self._password_edit)
         layout.addRow(strings.WIZARD_LABEL_AUTH_TYPE, self._auth_type_edit)
+        layout.addRow(strings.SETTINGS_LABEL_OAUTH_PROVIDER, self._oauth_provider_edit)
+        layout.addRow(strings.SETTINGS_LABEL_OAUTH_TENANT, self._oauth_tenant_edit)
         layout.addRow(strings.WIZARD_LABEL_OAUTH_CLIENT_ID, self._oauth_client_id_edit)
         layout.addRow(self._oauth_button)
         layout.addRow(self._oauth_status_label)
@@ -449,9 +463,11 @@ class SetupWizard(QWizard):
                     password=password if auth_type == "password" else None,
                     display_name=_text(self._display_name_edit) or None,
                     auth_type=auth_type,
-                    oauth_provider="google" if auth_type == "xoauth2" else None,
+                    oauth_provider=self._oauth_provider_edit.currentData()
+                    if auth_type == "xoauth2"
+                    else None,
                     oauth_client_id=oauth_client_id if auth_type == "xoauth2" else None,
-                    oauth_tenant=None,
+                    oauth_tenant=self._oauth_tenant() if auth_type == "xoauth2" else None,
                     manifest=manifest,
                     manifest_reader=self._context.create_manifest_reader(account_id),
                 )
@@ -461,7 +477,9 @@ class SetupWizard(QWizard):
             self._show_inline_error(self._account_status, error)
             return False
         self._account_id = account_id
-        self._gmail_account = auth_type == "xoauth2"
+        self._gmail_account = (
+            auth_type == "xoauth2" and self._oauth_provider_edit.currentData() == "google"
+        )
         return True
 
     def _validate_folders(self) -> bool:
@@ -530,9 +548,11 @@ class SetupWizard(QWizard):
                 password=password if auth_type == "password" else None,
                 auth_type=auth_type,
                 account_id=account_id,
-                oauth_provider="google" if auth_type == "xoauth2" else None,
+                oauth_provider=self._oauth_provider_edit.currentData()
+                if auth_type == "xoauth2"
+                else None,
                 oauth_client_id=oauth_client_id if auth_type == "xoauth2" else None,
-                oauth_tenant=None,
+                oauth_tenant=self._oauth_tenant() if auth_type == "xoauth2" else None,
             ),
         )
         self._show_progress(strings.WIZARD_STATUS_TESTING_CONNECTION, token)
@@ -546,12 +566,53 @@ class SetupWizard(QWizard):
         if password_label is not None:
             password_label.setVisible(not is_oauth)
         self._password_edit.setVisible(not is_oauth)
+        self._oauth_provider_edit.setVisible(is_oauth)
+        self._oauth_tenant_edit.setVisible(
+            is_oauth and self._oauth_provider_edit.currentData() == "microsoft"
+        )
         self._oauth_client_id_edit.setVisible(is_oauth)
         self._oauth_button.setVisible(is_oauth)
         self._oauth_status_label.setVisible(is_oauth)
         if is_oauth and not _text(self._host_edit):
-            self._host_edit.setText("imap.gmail.com")
+            self._host_edit.setText(self._oauth_default_host())
             self._port_edit.setValue(993)
+        self._oauth_button.setText(self._oauth_authorization_button_text())
+        self._invalidate_connection_test()
+
+    def _oauth_default_host(self) -> str:
+        return (
+            "outlook.office365.com"
+            if self._oauth_provider_edit.currentData() == "microsoft"
+            else "imap.gmail.com"
+        )
+
+    def _oauth_authorization_button_text(self) -> str:
+        provider_name = (
+            "Microsoft" if self._oauth_provider_edit.currentData() == "microsoft" else "Google"
+        )
+        return f"{provider_name}で認証"
+
+    def _oauth_tenant(self) -> str | None:
+        if self._oauth_provider_edit.currentData() != "microsoft":
+            return None
+        return self._oauth_tenant_edit.currentText().strip() or None
+
+    def _oauth_provider_changed(self, *_args: object) -> None:
+        if self._host_edit.text().strip() in {"imap.gmail.com", "outlook.office365.com"}:
+            self._host_edit.setText(self._oauth_default_host())
+        self._oauth_tenant_edit.setVisible(
+            self._auth_type_edit.currentData() == "xoauth2"
+            and self._oauth_provider_edit.currentData() == "microsoft"
+        )
+        self._oauth_linked = False
+        self._oauth_status_label.setText(strings.WIZARD_STATUS_OAUTH_REAUTH)
+        self._oauth_button.setText(self._oauth_authorization_button_text())
+        self._invalidate_connection_test()
+
+    def _oauth_configuration_changed(self, *_args: object) -> None:
+        self._oauth_linked = False
+        if self._auth_type_edit.currentData() == "xoauth2":
+            self._oauth_status_label.setText(strings.WIZARD_STATUS_OAUTH_REAUTH)
         self._invalidate_connection_test()
 
     def _oauth_client_id_changed(self, *_args: object) -> None:
@@ -575,11 +636,15 @@ class SetupWizard(QWizard):
             self._account_status.setText(strings.ERROR_STARTUP_FAILED)
             return
         context = self._context
+        provider = str(self._oauth_provider_edit.currentData())
+        tenant = self._oauth_tenant()
         self._oauth_button.setEnabled(False)
         self._account_status.setText(strings.WIZARD_STATUS_OAUTH_WAITING)
         token = self._submit_operation(
             "oauth_begin",
-            lambda: context.begin_oauth_authorization(account_id, client_id),
+            lambda: context.begin_oauth_authorization(
+                account_id, client_id, provider=provider, tenant=tenant
+            ),
         )
         self._show_progress(strings.WIZARD_STATUS_OAUTH_WAITING, token)
 
