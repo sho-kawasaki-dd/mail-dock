@@ -11,6 +11,7 @@ import pytest
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.message_identity import imap_source_item_key
 from mail_dock.infrastructure.database.connection import connect
+from mail_dock.infrastructure.database.message_folder_migration import finalize_message_folders
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
 from mail_dock.infrastructure.database.migrator import migrate
 from mail_dock.infrastructure.database.reindex import rebuild_database
@@ -55,7 +56,8 @@ def _cache_snapshot(connection: sqlite3.Connection) -> dict[str, object]:
         "c.body_text, c.attachment_names "
         "FROM message_contents AS c "
         "JOIN messages AS m ON m.id = c.message_id "
-        "JOIN folders AS f ON f.id = m.folder_id "
+        "JOIN message_folders AS mf ON mf.message_id = m.id "
+        "JOIN folders AS f ON f.id = mf.folder_id "
         "ORDER BY f.raw_name, m.source_item_key"
     ).fetchall()
     fts_results = connection.execute(
@@ -119,6 +121,11 @@ def test_reindex_after_real_sync_preserves_the_semantic_cache(tmp_path: Path) ->
     root = tmp_path / "storage"
     initialize_root(root)
     register_account_and_folder(repository, account_id, mailbox)
+    finalize_message_folders(
+        connection,
+        lambda target_account_id: ManifestWriter(root, target_account_id),
+        lambda target_account_id: ManifestReader(root, target_account_id),
+    )
     storage = EmlStorage(root)
     manifest = ManifestWriter(root, account_id)
     fetcher = make_fetcher(settings)

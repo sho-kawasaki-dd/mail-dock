@@ -435,19 +435,21 @@
 
 各項目の完了を確認したうえで、対応するタスクのチェックボックスを埋めること。
 
-- [ ] V-1（ブロッカー）. 実Gmailで認可コード＋PKCE、refresh、XOAUTH2接続、`LIST`、`X-GM-MSGID` / `X-GM-THRID` / `X-GM-LABELS` の取得が成功すること。7日失効の待機実測と帯域制限到達は完了条件に含めない
-- [ ] V-2. 汎用IMAP（5.1）で、STARTTLS・`LOGINDISABLED`・カスタムCA証明書（誤ったCA/未指定時の検証失敗を含む）の3シナリオがDocker結合テストで通ること。既存の暗黙的TLS結合テストが回帰していないこと。Docker/WSL環境で実際に実行して確認した結果を記録すること
-- [ ] V-3. `007` 後処理がsnapshot追記・fsync後にDBを正規化し、各中断点からの再実行後も `reindex.py` が `provider_type="imap"` とTLS設定を復元すること
-- [ ] V-4. 実Gmailアカウント（またはOAuth2スタブ）でXOAUTH2接続・同期・EML保存が成功し、5.2aの時点でDB削除後もfetchマニフェストから `X-GM-*` が復元されること
-- [ ] V-5. Gmailアカウントに対する `delete_remote` の `mode="expunge"` が拒否され、`trash` のみ実行できること
-- [ ] V-6. 秘密情報が永続出力されず、refresh tokenの有無に応じたローテーション、保存失敗、`invalid_grant`、許可外エンドポイント拒否が自動テストで固定されていること
-- [ ] V-7（5.2b）. `metadata.db` を削除し、EML＋fetchイベント＋最後の `message_membership_snapshot` からGmailの `message_folders` とフォルダ別状態まで完全復元できること
-- [ ] V-8（5.2b）. 同一メールが複数ラベルに属しても検索・一覧・件数・削除検知・共有EML判定が二重計上されず、通常IMAPの別フォルダで同じUIDVALIDITY/UIDが存在しても一意性衝突しないこと
+- [ ] V-1（ブロッカー）. 実Gmailで認可コード＋PKCE、refresh、XOAUTH2接続、`LIST`、`X-GM-MSGID` / `X-GM-THRID` / `X-GM-LABELS` の取得が成功すること。7日失効の待機実測と帯域制限到達は完了条件に含めない（本セッションでは実Google資格情報を用意できないため未実行。G-2/G-3のPoC実行結果（本書該当節）を既存の裏付けとして扱う）
+- [x] V-2. 汎用IMAP（5.1）で、STARTTLS・`LOGINDISABLED`・カスタムCA証明書（誤ったCA/未指定時の検証失敗を含む）の3シナリオがDocker結合テストで通ること。既存の暗黙的TLS結合テストが回帰していないこと。Docker/WSL環境で実際に実行して確認した結果を記録すること（2026-09-27再実施: Docker 29.8.1 / Compose v5.5.1のWSL2環境で`docker compose -f tests/docker/compose.yaml up -d --wait`の上`MAILDOCK_DOCKER=1 uv run pytest -m docker`を実行し22件全て緑。実行中に2件の既存バグを発見・修正した: (1) `tests/integration/test_sync_flow.py`が新設の`message_membership_snapshot`イベント追加前のイベント数（3件）のまま固定されていたため4件へ更新、(2) `tests/integration/test_reindex.py`が削除済みの`messages.folder_id`列を直接参照するSQLを使っていたため`message_folders`経由のJOINへ修正、および同テストが`open_repository()`後に`finalize_message_folders()`を呼んでおらず（`test_delete_detection.py`は呼んでいた）レガシースキーマのままsource_item_key単位のmembership検証が空になっていた点を、他のDocker結合テストと同じ呼び出しパターンで修正）
+- [x] V-3. `007` 後処理がsnapshot追記・fsync後にDBを正規化し、各中断点からの再実行後も `reindex.py` が `provider_type="imap"` とTLS設定を復元すること（`tests/integration/test_migrator.py`の該当結合テストが`pytest -m "not docker and not gui and not pst"`実行の679件に含まれ緑であることを2026-09-27に確認）
+- [ ] V-4. 実Gmailアカウント（またはOAuth2スタブ）でXOAUTH2接続・同期・EML保存が成功し、5.2aの時点でDB削除後もfetchマニフェストから `X-GM-*` が復元されること（実Gmail資格情報が本セッションで利用できないため未実行。単体/結合テストでのスタブ検証はGroup L完了時点で既に緑）
+- [x] V-5. Gmailアカウントに対する `delete_remote` の `mode="expunge"` が拒否され、`trash` のみ実行できること（`tests/unit/test_delete_remote.py`の該当テストが標準テストスイートに含まれ緑であることを2026-09-27に確認）
+- [x] V-6. 秘密情報が永続出力されず、refresh tokenの有無に応じたローテーション、保存失敗、`invalid_grant`、許可外エンドポイント拒否が自動テストで固定されていること（Group Oで追加済みの秘密情報非出力テスト・OAuthエンドポイント許可リストテストが標準テストスイートに含まれ緑であることを2026-09-27に確認）
+- [x] V-7（5.2b）. `metadata.db` を削除し、EML＋fetchイベント＋最後の `message_membership_snapshot` からGmailの `message_folders` とフォルダ別状態まで完全復元できること（2026-09-27のDocker結合テスト再実行で`tests/integration/test_reindex.py`のreindex系テストが実IMAPサーバー相手に緑であることを確認。上記V-2の修正込み）
+- [x] V-8（5.2b）. 同一メールが複数ラベルに属しても検索・一覧・件数・削除検知・共有EML判定が二重計上されず、通常IMAPの別フォルダで同じUIDVALIDITY/UIDが存在しても一意性衝突しないこと（`message_folders`関連の単体テストが標準テストスイートに含まれ緑であることを2026-09-27に確認）
 - [ ] V-9（5.3）. Microsoft 365アカウントで、OAuthポートの実装を変更せず、許可リスト付きプロバイダ定義とテナント設定だけでOAuth2接続が成立すること（実Microsoftテナント資格情報を用いた結合確認は未実施。ローカルFake IMAPで共通XOAUTH2経路を検証済み）
-- [ ] V-10. `uv run ruff format --check .` / `uv run ruff check .` / `uv run mypy` が成功すること
-- [ ] V-11. `uv run pytest -m "not docker and not gui and not pst"` がCIで緑になること
-- [ ] V-12. `domain` / `usecases` がPySide6・infrastructure実装をimportせず、OAuthブラウザ起動を含まないこと。`presentation/context.py` のcomposition root例外が静的テストで明示されていること
-- [ ] V-13. CLIにOAuth関連・PST関連の対話的サブコマンドが存在しないことが静的テストで固定されていること
+- [x] V-10. `uv run ruff format --check .` / `uv run ruff check .` / `uv run mypy` が成功すること（2026-09-27実行: 3コマンドとも成功。`ruff check . --fix`が先行して修正した内容を含む）
+- [x] V-11. `uv run pytest -m "not docker and not gui and not pst"` がCIで緑になること（2026-09-27実行: 679 passed, 3 skipped）
+- [x] V-12. `domain` / `usecases` がPySide6・infrastructure実装をimportせず、OAuthブラウザ起動を含まないこと。`presentation/context.py` のcomposition root例外が静的テストで明示されていること（`tests/unit/test_ports.py`が標準テストスイートに含まれ緑であることを2026-09-27に確認）
+- [x] V-13. CLIにOAuth関連・PST関連の対話的サブコマンドが存在しないことが静的テストで固定されていること（Group Oで追加済みのCLI静的検査テストが標準テストスイートに含まれ緑であることを2026-09-27に確認）
+
+**参考（本検証で追加調査したが未修正の既知課題）**: GUI結合テスト（`MAILDOCK_GUI=1 QT_QPA_PLATFORM=offscreen uv run pytest -m gui`）を試行実行したところ、`tests/gui/test_app_bootstrap.py`の5件（`test_rebase_root_candidates_follows_a_changed_drive_letter`・`test_device_arrival_uses_matching_uuid_on_a_changed_drive_letter`・`test_immediate_startup_purge_does_not_prompt_and_separates_manifests`・`test_start_session_runs_range_verify_and_purge_recovery_after_unclean_shutdown`・`test_start_session_skips_recovery_after_a_clean_shutdown`）が失敗した。原因は`presentation/app.py::_start_session`に`reconcile_account_snapshots()`と`finalize_message_folders()`が追加された後、これらのテストのフェイク`AppContext`（`create_message_repository()`が文字列`"repo"`を返すだけのスタブ）に対して両関数の呼び出しがモック化されておらず、実装がフェイクへ実SQL相当の操作を試みて`AttributeError`になるため。V-1〜V-13のいずれにも該当せず（`-m gui`は本検証の対象外）、本セッションでは修正を保留した。修正時はテストの`monkeypatch`に`reconcile_account_snapshots`・`finalize_message_folders`の無害化を追加する対応が妥当と見込まれる。
 
 ---
 

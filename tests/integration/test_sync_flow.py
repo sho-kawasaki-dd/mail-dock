@@ -70,12 +70,13 @@ def test_real_sync_keeps_eml_manifest_and_database_consistent(tmp_path: Path) ->
     manifest_paths = list((root / "manifests" / "imap" / account_id).glob("events-*.jsonl"))
     assert len(manifest_paths) == 1
     events = list(read_events(manifest_paths[0]))
-    assert len(events) == 3
+    assert len(events) == 4
     assert events[0]["event"] == "folder_snapshot"
     assert events[1]["event"] == "fetch"
     assert events[1]["relative_path"] == relative_path
     assert events[1]["file_hash"] == file_hash
-    assert events[2]["event"] == "checkpoint"
+    assert events[2]["event"] == "message_membership_snapshot"
+    assert events[3]["event"] == "checkpoint"
 
 
 @pytest.mark.docker
