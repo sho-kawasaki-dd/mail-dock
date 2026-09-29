@@ -184,9 +184,9 @@ G（Inno Setup） → H（CI） → I（ドキュメント整合）
 
 ### **3.2 グループB: バージョン単一化**
 
-- [ ] `pyproject.toml` を `dynamic = ["version"]` + `[tool.hatch.version]` へ変更する
-- [ ] `[dependency-groups] build = ["pyinstaller"]` を追加し `uv.lock` を更新する
-- [ ] タグ `v{version}` と `__version__` の一致検査ロジックを追加する（`verify` ジョブで使用）
+- [x] `pyproject.toml` を `dynamic = ["version"]` + `[tool.hatch.version]` へ変更する
+- [x] `[dependency-groups] build = ["pyinstaller"]` を追加し `uv.lock` を更新する
+- [x] タグ `v{version}` と `__version__` の一致検査ロジックを追加する（`verify` ジョブで使用）
 
 ### **3.3 グループC: 自己診断・バージョン情報ダイアログ（*Aに依存*）**
 
