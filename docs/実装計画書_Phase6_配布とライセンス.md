@@ -47,7 +47,7 @@
 | F-1 | 新規 `infrastructure/app_paths.py` に `is_frozen() -> bool`（`sys.frozen` 判定）と `bundle_root() -> Path`（凍結時は `Path(sys._MEIPASS)`、非凍結時はリポジトリルート `Path(__file__).resolve().parents[3]`）を実装すること | D-1 |
 | F-2 | `infrastructure/importers/readpst_locator.py` の `default_vendor_dir()` を `app_paths.bundle_root() / "vendor" / "readpst"` に置き換え、`Path(__file__).resolve().parents[4]` への依存を除去すること | F-1 |
 | F-3 | `presentation/views/main_window.py` の `_open_encryption_guide()` を `app_paths.bundle_root() / "README.md"` に置き換えること | F-1 |
-| F-4 | `infrastructure/storage/capabilities.py` の排他ロックプローブ用子プロセス起動を、インラインの `_CHILD_LOCK_SCRIPT` 文字列から新規 `infrastructure/storage/lock_probe.py`（`run_lock_probe_child(path: str) -> int` と `if __name__ == "__main__":` エントリ）へ切り出すこと。非凍結時は `[sys.executable, "-m", "mail_dock.infrastructure.storage.lock_probe", path]`、凍結時は `[sys.executable, "--maildock-internal-lock-probe", path]` で起動すること。Windows での子プロセス起動時は `creationflags=subprocess.CREATE_NO_WINDOW` を指定し、GUI プロセス生成に伴うタスクバーの一瞬のチラつきやフォーカス奪取を防止すること。子の終了コードは `0=ロック取得成功`、`1=ロック競合`、`2以上=プローブ異常` とし、親は `1` の場合だけ排他ロックが有効と判定すること。起動失敗・異常終了・タイムアウトを成功扱いしない。タイムアウトは定数 `_LOCK_PROBE_TIMEOUT_SECONDS` として切り出し、値は「グループ0」の実測最大値の2倍以上（既定5秒）とする。タイムアウト時は現行どおり `False`（非対応側）を返し、`degraded` 判定になることをテストで固定する | F-1 |
+| F-4 | `infrastructure/storage/capabilities.py` の排他ロックプローブ用子プロセス起動を、インラインの `_CHILD_LOCK_SCRIPT` 文字列から新規 `infrastructure/storage/lock_probe.py`（`run_lock_probe_child(path: str) -> int` と `if __name__ == "__main__":` エントリ）へ切り出すこと。非凍結時は `[sys.executable, "-m", "mail_dock.infrastructure.storage.lock_probe", path]`、凍結時は `[sys.executable, "--maildock-internal-lock-probe", path]` で起動すること。Windows での子プロセス起動時は `creationflags=subprocess.CREATE_NO_WINDOW` を指定し、GUI プロセス生成に伴うタスクバーの一瞬のチラつきやフォーカス奪取を防止すること。子の終了コードは `0=ロック取得成功`、`1=ロック競合`、`2以上=プローブ異常` とし、親は `1` の場合だけ排他ロックが有効と判定すること。起動失敗・異常終了・タイムアウトを成功扱いしない。タイムアウトは定数 `_LOCK_PROBE_TIMEOUT_SECONDS` として切り出し、値は「グループ0」の実測最大値の2倍以上（既定5秒）とする。タイムアウト時は現行どおり `False`（非対応側）を返し、`degraded` 判定になることをテストで固定する。2026-09-29の最小PyInstaller PoCでは最大0.110秒だったため、暫定値は既定の5秒とし、実アプリでV-1を再確認する | F-1 |
 | F-5 | 新規 `packaging/pyinstaller/entry_gui.py` が起動直後（`mail_dock` を含む重い import の前。判定に必要なのは `sys` と `lock_probe` のみ）に `--maildock-internal-lock-probe <path>` 引数を検出した場合、`lock_probe.run_lock_probe_child()` の戻り値でそのまま終了し、それ以外は `mail_dock.__main__.main()` を呼ぶこと。内部フラグの引数不備や実行時例外は `2以上` で終了させ、`_LOCK_PROBE_TIMEOUT_SECONDS`（F-4）内に確実に応答できること。また、windowed exe（`console=False`）で `sys.stdout` や `sys.stderr` が `None` になることによる `AttributeError` を防ぐため、未接続時はダミーストリーム（`io.StringIO` や `os.devnull` 相当）へ安全に初期化すること | F-4 |
 | F-6 | 凍結時の `__main__.main()` は、`config.load()` より前の最小ログ初期化（`debug=False`）→引数解析（argparse の `SystemExit` を捕捉）→許可コマンド確認→`--debug` 指定時のログ再設定→設定読込・実行の順とし、`app_paths.is_frozen()` が真かつ `command` が `None` / `"gui"` / `"self-check"` 以外、または未知のコマンド・不正オプション等で引数解析に失敗した場合、秘密情報を含む生の引数を記録せず `LOGGER.error(...)` を残して終了コード2を返すこと。windowed exeでは標準エラーへの出力に依存せず、`sys.stderr` への出力時も `None` ガードを行うこと。argparse のエラーメッセージには生の引数が含まれるため、ログへは固定文言のみを記録し、エラーメッセージ・`argv` は書かない。凍結時に許可するオプションは `--storage-root` / `--debug` に限り、`--version` / `--help` は終了コード0で許可する。`self-check` は `config.load()` に依存させない（設定ファイル破損時も診断できるようにする）。非凍結時のCLI動作は維持する | D-2, F-1 |
 
@@ -91,7 +91,7 @@
 | # | 要件 | 根拠 |
 | :--- | :---- | :---- |
 | F-22 | 新規 `tools/collect_licenses.py`（標準ライブラリの `importlib.metadata` のみ使用）が、mail-dockの実行時依存を辿り、各パッケージのライセンスファイルを `build/licenses/python/{name}-{version}/` へコピーし、`python-packages.json` を出力すること。ライセンスファイルが見つからない依存があれば失敗すること | ― |
-| F-23 | 同ツールが、Python本体の `LICENSE.txt`（同梱するOpenSSL/SQLite等の告知を含む）、PyInstaller bootloaderのCOPYING、Qt LGPL-3/GPL-3全文に加え、実際に使用するQtWebEngine配布物に付属するChromium・第三者コンポーネントのライセンス告知資料を `build/licenses/` へ収集すること。QtWebEngineの告知が見つからない場合はビルドを失敗させ、収集元の版を `THIRD-PARTY-LICENSES.md` に記録すること。告知の収集元は PySide6 wheel 内に存在する保証がないため、グループ0のPoCで確定する（候補: F-19 で取得するQt公式ソース tarball 内の `src/3rdparty/chromium` 配下の `LICENSE` 群および qdoc）。確定した収集元を本行へ追記すること | F-22 |
+| F-23 | 同ツールが、Python本体の `LICENSE.txt`（同梱するOpenSSL/SQLite等の告知を含む）、PyInstaller bootloaderのCOPYING、Qt LGPL-3/GPL-3全文に加え、実際に使用するQtWebEngine配布物に付属するChromium・第三者コンポーネントのライセンス告知資料を `build/licenses/` へ収集すること。QtWebEngineの告知が見つからない場合はビルドを失敗させ、収集元の版を `THIRD-PARTY-LICENSES.md` に記録すること。告知の収集元は PySide6 wheel 内に存在する保証がないため、グループ0のPoCで確定する（候補: F-19 で取得するQt公式ソース tarball 内の `src/3rdparty/chromium` 配下の `LICENSE` 群および qdoc）。確定した収集元を本行へ追記すること。2026-09-29時点でPySide6 6.11.1 wheelからChromium告知は見つからず、Qt公式 `qtwebengine-everywhere-src-6.11.1.tar.xz`（578,914,356 bytes）の配布は確認したが内部告知パスは未検証のため、本PoC項目は未完了 | F-22 |
 | F-24 | `--check-inventory THIRD-PARTY-LICENSES.md` オプションで、収集した依存パッケージがすべて `THIRD-PARTY-LICENSES.md` に記載されているかを検査し、未記載があれば失敗すること | F-22 |
 
 #### **PyInstaller**
@@ -158,9 +158,15 @@ G（Inno Setup） → H（CI） → I（ドキュメント整合）
 ### **3.0 グループ0: 実現可否のPoC（*全グループの着手前に完了*）**
 
 - [ ] QtWebEngine の Chromium・第三者告知の収集元を確定する（Qt公式ソース tarball 内の `src/3rdparty/chromium` 配下の `LICENSE` 群と qdoc で足りるか）。結果を F-23 へ反映する
-- [ ] PyInstaller onedir の子プロセス起動（`--maildock-internal-lock-probe`）の応答時間を、AV有効環境を含め 10 回以上実測し、`_LOCK_PROBE_TIMEOUT_SECONDS` を確定する（V-1 の判定に使用）
+- [x] PyInstaller onedir の子プロセス起動（`--maildock-internal-lock-probe`）の応答時間を、AV有効環境を含め 10 回以上実測し、`_LOCK_PROBE_TIMEOUT_SECONDS` を確定する（V-1 の判定に使用）
 - [ ] ローカル pacman キャッシュ（`/var/cache/pacman/pkg`）と `repo.msys2.org` に現行版の `.pkg.tar.zst` / `.src.tar.zst` が残っているかを確認し、D-5 の初回ミラー採取の可否を判断する
-- [ ] 上記の結果を本書（F-4・F-23・4章）へ追記する
+- [x] 上記の結果を本書（F-4・F-23・4章）へ追記する
+
+#### PoC実施記録（2026-09-29）
+
+- 子プロセス計測: Windows 11、Windows Defenderリアルタイム保護有効、CPython 3.13.12、PyInstaller 6.22.3。最小のonedir/windowed実行ファイルで内部フラグの子プロセス起動を10回実行し、全件終了コード0、平均0.095秒、最大0.110秒。最大値の2倍を満たす暫定タイムアウトとして5秒を採用する。実アプリでの再確認はV-1で行う。
+- MSYS2: 現行libpstは `0.6.76.r79.gcc600ee-1`。バイナリはローカルpacmanキャッシュに存在し、公式repoのバイナリとソースアーカイブもHTTP 200を確認した。ソースアーカイブ内にPKGBUILDと上流Gitリポジトリがあり、HEAD `cc600ee98c4ed23b8ab0bc2cf6b6c6e9cb587e89` は既存同梱ソースと一致する。詳細は4.3節。
+- QtWebEngine: Qt公式ソースアーカイブの配布とサイズは確認したが、Chromium・第三者告知の実ファイルをまだ確認できていない。Qt公式docs/cgitの候補URLはこの環境から404/500、PySide6 wheel内にも告知ファイル候補は見つからなかったため、当該タスクは継続する。
 
 ### **3.1 グループA: 凍結ランタイム修正（*最優先。全グループの前提*）**
 
@@ -279,6 +285,10 @@ G（Inno Setup） → H（CI） → I（ドキュメント整合）
 6. `pytest -m pst` と `self-check --require-keyring` を実行し、回帰が無いことを確認する。
 7. `.src.tar.zst` の上流ソース収録状況を確認し、足りない場合は版・URL・SHA-256を固定した実ソースを追加する。対応ソースzipの内容と `THIRD-PARTY-LICENSES.md` のハッシュ表を更新する。
 8. `tools/update_readpst_lock.ps1` の仕上げ処理として、新しいパッケージファイル一式を `readpst-msys2-mirror` Releaseへアップロードする。
+
+### **4.3.1 初回PoCで確認したlibpst資材**
+
+2026-09-29に現行版の資材を確認した。ローカルpacmanキャッシュにはバイナリパッケージ105件があり、対象バイナリ `mingw-w64-ucrt-x86_64-libpst-0.6.76.r79.gcc600ee-1-any.pkg.tar.zst` も存在したが、`.src.tar.zst` はなかった。公式URL `https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-libpst-0.6.76.r79.gcc600ee-1-any.pkg.tar.zst` はHTTP 200（798,117 bytes）だった。ソース `mingw-w64-libpst-0.6.76.r79.gcc600ee-1.src.tar.zst` も公式URL `https://repo.msys2.org/mingw/sources/mingw-w64-libpst-0.6.76.r79.gcc600ee-1.src.tar.zst` から取得でき、SHA-256は `DCBE0A150EE9DB28CBD579EA6A75858CF321541936105D1CF2FFB90CEE90FDD8`。アーカイブ内の上流Git HEADは既存vendor内の `libpst-cc600ee98c4ed23b8ab0bc2cf6b6c6e9cb587e89.tar.gz` と同一コミットで、後者のSHA-256は `D1F270D54C5296D1B5D3A6C0A70685C92DDAB58A1D34C373CF5B59215E2ACFEA`。libpst単体の初回採取は可能と判断する。全依存パッケージのソース資材・ミラー対象一覧はグループDで列挙・検証する。
 
 ### **4.4 最終手段（MSYS2からlibpstが削除された場合）**
 
