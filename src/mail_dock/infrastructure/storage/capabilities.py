@@ -23,7 +23,10 @@ from typing import BinaryIO, cast
 
 from mail_dock.domain.errors import StorageDetachedError
 from mail_dock.domain.ports import JSONValue
+from mail_dock.infrastructure import app_paths
 from mail_dock.infrastructure.storage.detach import storage_io
+
+_LOCK_PROBE_TIMEOUT_SECONDS = 5
 
 
 class CapabilityLevel(StrEnum):
@@ -93,28 +96,6 @@ class StorageCapabilities:
         )
 
 
-_CHILD_LOCK_SCRIPT = """
-import os
-import sys
-
-path = sys.argv[1]
-with open(path, "r+b") as handle:
-    handle.seek(0)
-    try:
-        if os.name == "nt":
-            import msvcrt
-
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-        else:
-            import fcntl
-
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        raise SystemExit(1)
-raise SystemExit(0)
-"""
-
-
 def _run_io_probe(operation: Callable[[], bool]) -> bool:
     try:
         with storage_io():
@@ -168,9 +149,23 @@ def _probe_exclusive_lock(lock_path: Path) -> bool:
         try:
             _lock_probe_file(handle)
             locked = True
-            process = subprocess.Popen([sys.executable, "-c", _CHILD_LOCK_SCRIPT, str(lock_path)])
+            if app_paths.is_frozen():
+                command = [sys.executable, "--maildock-internal-lock-probe", str(lock_path)]
+            else:
+                command = [
+                    sys.executable,
+                    "-m",
+                    "mail_dock.infrastructure.storage.lock_probe",
+                    str(lock_path),
+                ]
+            if os.name == "nt":
+                no_window_flag_name = "CREATE_NO_WINDOW"
+                no_window_flag = getattr(subprocess, no_window_flag_name)
+                process = subprocess.Popen(command, creationflags=no_window_flag)
+            else:
+                process = subprocess.Popen(command)
             try:
-                return process.wait(timeout=2) != 0
+                return process.wait(timeout=_LOCK_PROBE_TIMEOUT_SECONDS) == 1
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()

@@ -47,7 +47,7 @@
 | F-1 | 新規 `infrastructure/app_paths.py` に `is_frozen() -> bool`（`sys.frozen` 判定）と `bundle_root() -> Path`（凍結時は `Path(sys._MEIPASS)`、非凍結時はリポジトリルート `Path(__file__).resolve().parents[3]`）を実装すること | D-1 |
 | F-2 | `infrastructure/importers/readpst_locator.py` の `default_vendor_dir()` を `app_paths.bundle_root() / "vendor" / "readpst"` に置き換え、`Path(__file__).resolve().parents[4]` への依存を除去すること | F-1 |
 | F-3 | `presentation/views/main_window.py` の `_open_encryption_guide()` を `app_paths.bundle_root() / "README.md"` に置き換えること | F-1 |
-| F-4 | `infrastructure/storage/capabilities.py` の排他ロックプローブ用子プロセス起動を、インラインの `_CHILD_LOCK_SCRIPT` 文字列から新規 `infrastructure/storage/lock_probe.py`（`run_lock_probe_child(path: str) -> int` と `if __name__ == "__main__":` エントリ）へ切り出すこと。非凍結時は `[sys.executable, "-m", "mail_dock.infrastructure.storage.lock_probe", path]`、凍結時は `[sys.executable, "--maildock-internal-lock-probe", path]` で起動すること。Windows での子プロセス起動時は `creationflags=subprocess.CREATE_NO_WINDOW` を指定し、GUI プロセス生成に伴うタスクバーの一瞬のチラつきやフォーカス奪取を防止すること。子の終了コードは `0=ロック取得成功`、`1=ロック競合`、`2以上=プローブ異常` とし、親は `1` の場合だけ排他ロックが有効と判定すること。起動失敗・異常終了・タイムアウトを成功扱いしない。タイムアウトは定数 `_LOCK_PROBE_TIMEOUT_SECONDS` として切り出し、値は「グループ0」の実測最大値の2倍以上（既定5秒）とする。タイムアウト時は現行どおり `False`（非対応側）を返し、`degraded` 判定になることをテストで固定する。2026-09-29の最小PyInstaller PoCでは最大0.110秒だったため、暫定値は既定の5秒とし、実アプリでV-1を再確認する | F-1 |
+| F-4 | `infrastructure/storage/capabilities.py` の排他ロックプローブ用子プロセス起動を、インラインの `_CHILD_LOCK_SCRIPT` 文字列から新規 `infrastructure/storage/lock_probe.py`（`run_lock_probe_child(path: str) -> int` と `if __name__ == "__main__":` エントリ）へ切り出すこと。非凍結時は `[sys.executable, "-m", "mail_dock.infrastructure.storage.lock_probe", path]`、凍結時は `[sys.executable, "--maildock-internal-lock-probe", path]` で起動すること。Windows での子プロセス起動時は `creationflags=subprocess.CREATE_NO_WINDOW` を指定し、GUI プロセス生成に伴うタスクバーの一瞬のチラつきやフォーカス奪取を防止すること。子の終了コードは `0=ロック取得成功`、`1=ロック競合`、`2以上=プローブ異常` とし、親は `1` の場合だけ排他ロックが有効と判定すること。起動失敗・異常終了・タイムアウトを成功扱いしない。タイムアウトは定数 `_LOCK_PROBE_TIMEOUT_SECONDS` として切り出し、値は「グループ0」の実測最大値の2倍以上（既定5秒）とする。タイムアウト時は `False` を返し、既存の能力集約契約に従って `UNSUPPORTED` 判定になることをテストで固定する。2026-09-29の最小PyInstaller PoCでは最大0.110秒だったため、暫定値は既定の5秒とし、実アプリでV-1を再確認する | F-1 |
 | F-5 | 新規 `packaging/pyinstaller/entry_gui.py` が起動直後（`mail_dock` を含む重い import の前。判定に必要なのは `sys` と `lock_probe` のみ）に `--maildock-internal-lock-probe <path>` 引数を検出した場合、`lock_probe.run_lock_probe_child()` の戻り値でそのまま終了し、それ以外は `mail_dock.__main__.main()` を呼ぶこと。内部フラグの引数不備や実行時例外は `2以上` で終了させ、`_LOCK_PROBE_TIMEOUT_SECONDS`（F-4）内に確実に応答できること。また、windowed exe（`console=False`）で `sys.stdout` や `sys.stderr` が `None` になることによる `AttributeError` を防ぐため、未接続時はダミーストリーム（`io.StringIO` や `os.devnull` 相当）へ安全に初期化すること | F-4 |
 | F-6 | 凍結時の `__main__.main()` は、`config.load()` より前の最小ログ初期化（`debug=False`）→引数解析（argparse の `SystemExit` を捕捉）→許可コマンド確認→`--debug` 指定時のログ再設定→設定読込・実行の順とし、`app_paths.is_frozen()` が真かつ `command` が `None` / `"gui"` / `"self-check"` 以外、または未知のコマンド・不正オプション等で引数解析に失敗した場合、秘密情報を含む生の引数を記録せず `LOGGER.error(...)` を残して終了コード2を返すこと。windowed exeでは標準エラーへの出力に依存せず、`sys.stderr` への出力時も `None` ガードを行うこと。argparse のエラーメッセージには生の引数が含まれるため、ログへは固定文言のみを記録し、エラーメッセージ・`argv` は書かない。凍結時に許可するオプションは `--storage-root` / `--debug` に限り、`--version` / `--help` は終了コード0で許可する。`self-check` は `config.load()` に依存させない（設定ファイル破損時も診断できるようにする）。非凍結時のCLI動作は維持する | D-2, F-1 |
 
@@ -171,16 +171,16 @@ G（Inno Setup） → H（CI） → I（ドキュメント整合）
 
 ### **3.1 グループA: 凍結ランタイム修正（*最優先。全グループの前提*）**
 
-- [ ] `infrastructure/app_paths.py` を新設し `is_frozen()` / `bundle_root()` を実装する（非凍結時は `parents[3]` でリポジトリルートを解決）
-- [ ] `readpst_locator.default_vendor_dir()` を `app_paths.bundle_root()` 基準へ置き換える
-- [ ] `main_window._open_encryption_guide()` を `app_paths.bundle_root()` 基準へ置き換える
-- [ ] `infrastructure/storage/lock_probe.py` を新設し、`capabilities._CHILD_LOCK_SCRIPT` のロジックを移設する
-- [ ] `capabilities._probe_exclusive_lock()` の子プロセス起動を凍結判定で分岐させ、Windows では `CREATE_NO_WINDOW` でウィンドウ描画・チラつきを抑止する（開発時は `-m` 実行、凍結時は内部フラグ経路）
-- [ ] ロックプローブの終了コードを `0=取得成功` / `1=競合` / `2以上=異常` に分離し、親プロセスは `1` だけを排他ロック成功とみなす
-- [ ] `packaging/pyinstaller/entry_gui.py` を新設し、内部フラグ検出、`sys.stdout`/`sys.stderr` の `None` 防御、メイン処理呼び出しを実装する
-- [ ] `__main__.main()` に凍結時のログ初期化・引数解析エラーのログ記録・サブコマンド制限（`gui`/`self-check`以外を拒否、終了コード2）・`sys.stderr` の安全な出力を実装し、非凍結時のCLI動作を維持する（argparse の `SystemExit` 捕捉、固定文言のみのログ、許可オプションの限定を含む。F-6）
-- [ ] `tests/unit/test_capabilities.py` のロックプローブ関連テスト（`Popen` をラップして `-c` 起動を前提とするもの）を更新し、`Popen` 引数（`-m` 起動／凍結時の内部フラグ起動、`CREATE_NO_WINDOW`）と終了コード 0 / 1 / 2 / タイムアウトのパラメトリックテストを追加する
-- [ ] `tests/unit/test_app_paths.py` を新設する（凍結時は `_MEIPASS`、非凍結時はリポジトリルート）
+- [x] `infrastructure/app_paths.py` を新設し `is_frozen()` / `bundle_root()` を実装する（非凍結時は `parents[3]` でリポジトリルートを解決）
+- [x] `readpst_locator.default_vendor_dir()` を `app_paths.bundle_root()` 基準へ置き換える
+- [x] `main_window._open_encryption_guide()` を `app_paths.bundle_root()` 基準へ置き換える
+- [x] `infrastructure/storage/lock_probe.py` を新設し、`capabilities._CHILD_LOCK_SCRIPT` のロジックを移設する
+- [x] `capabilities._probe_exclusive_lock()` の子プロセス起動を凍結判定で分岐させ、Windows では `CREATE_NO_WINDOW` でウィンドウ描画・チラつきを抑止する（開発時は `-m` 実行、凍結時は内部フラグ経路）
+- [x] ロックプローブの終了コードを `0=取得成功` / `1=競合` / `2以上=異常` に分離し、親プロセスは `1` だけをロック成功とみなす
+- [x] `packaging/pyinstaller/entry_gui.py` を新設し、内部フラグ検出、`sys.stdout`/`sys.stderr` の `None` 防御、メイン処理呼び出しを実装する
+- [x] `__main__.main()` に凍結時のログ初期化・引数解析エラーのログ記録・サブコマンド制限（`gui`/`self-check`以外を拒否、終了コード2）・`sys.stderr` の安全な出力を実装し、非凍結時のCLI動作を維持する（argparse の `SystemExit` 捕捉、固定文言のみのログ、許可オプションの限定を含む。F-6）
+- [x] `tests/unit/test_capabilities.py` のロックプローブ関連テスト（`Popen` をラップして `-c` 起動を前提とするもの）を更新し、`Popen` 引数（`-m` 起動／凍結時の内部フラグ起動、`CREATE_NO_WINDOW`）と終了コード 0 / 1 / 2 / タイムアウトのパラメトリックテストを追加する
+- [x] `tests/unit/test_app_paths.py` を新設する（凍結時は `_MEIPASS`、非凍結時はリポジトリルート）
 
 ### **3.2 グループB: バージョン単一化**
 

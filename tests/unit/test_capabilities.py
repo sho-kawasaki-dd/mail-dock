@@ -8,6 +8,7 @@ from typing import Any, cast
 import pytest
 
 from mail_dock.domain.errors import StorageDetachedError
+from mail_dock.infrastructure import app_paths
 from mail_dock.infrastructure.storage import capabilities
 from mail_dock.infrastructure.storage.capabilities import (
     CapabilityLevel,
@@ -114,6 +115,98 @@ def test_exclusive_lock_probe_reaps_competing_process(
     assert capabilities._probe_exclusive_lock(tmp_dir / ".captest-lock") is True
     assert len(processes) == 1
     assert processes[0].poll() is not None
+
+
+@pytest.mark.parametrize(
+    ("frozen", "exit_code", "expected"),
+    [(False, 0, False), (False, 1, True), (False, 2, False), (True, 1, True)],
+)
+def test_lock_probe_selects_runtime_command_and_only_accepts_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    frozen: bool,
+    exit_code: int,
+    expected: bool,
+) -> None:
+    tmp_dir = tmp_path / "tmp"
+    tmp_dir.mkdir()
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    class FakeProcess:
+        def wait(self, *, timeout: float) -> int:
+            assert timeout == capabilities._LOCK_PROBE_TIMEOUT_SECONDS
+            return exit_code
+
+        def poll(self) -> int:
+            return exit_code
+
+    def fake_popen(*args: object, **kwargs: object) -> FakeProcess:
+        calls.append((args, kwargs))
+        return FakeProcess()
+
+    monkeypatch.setattr(app_paths, "is_frozen", lambda: frozen)
+    monkeypatch.setattr(capabilities, "_lock_probe_file", lambda handle: None)
+    monkeypatch.setattr(capabilities, "_unlock_probe_file", lambda handle: None)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    assert capabilities._probe_exclusive_lock(tmp_dir / ".captest-lock") is expected
+
+    command = calls[0][0][0]
+    if frozen:
+        assert command == [
+            sys.executable,
+            "--maildock-internal-lock-probe",
+            str(tmp_dir / ".captest-lock"),
+        ]
+    else:
+        assert command == [
+            sys.executable,
+            "-m",
+            "mail_dock.infrastructure.storage.lock_probe",
+            str(tmp_dir / ".captest-lock"),
+        ]
+    if os.name == "nt":
+        assert calls[0][1]["creationflags"] == subprocess.CREATE_NO_WINDOW
+    else:
+        assert calls[0][1] == {}
+
+
+def test_lock_probe_timeout_is_not_treated_as_success(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+
+    class FakeProcess:
+        killed = False
+
+        def wait(self, timeout: float | None = None) -> int:
+            if not self.killed:
+                assert timeout is not None
+                raise subprocess.TimeoutExpired("lock-probe", timeout)
+            return -9
+
+        def poll(self) -> int | None:
+            return -9 if self.killed else None
+
+        def kill(self) -> None:
+            self.killed = True
+
+    process = FakeProcess()
+    monkeypatch.setattr(capabilities, "_lock_probe_file", lambda handle: None)
+    monkeypatch.setattr(capabilities, "_unlock_probe_file", lambda handle: None)
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(capabilities, "_probe_replace_overwrite", lambda *args: True)
+    monkeypatch.setattr(capabilities, "_probe_wal", lambda *args: True)
+    monkeypatch.setattr(capabilities, "_probe_fsync", lambda *args: True)
+    monkeypatch.setattr(capabilities, "_probe_case_sensitivity", lambda *args: True)
+    monkeypatch.setattr(capabilities, "_probe_long_path", lambda *args: True)
+
+    measured = capabilities.probe_capabilities(root)
+
+    assert measured.exclusive_lock is False
+    assert capabilities.capability_level(measured) is CapabilityLevel.UNSUPPORTED
+    assert process.killed
 
 
 def test_probe_uses_only_tmp_and_cleans_up(tmp_path: Path) -> None:

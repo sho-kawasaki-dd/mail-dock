@@ -1,5 +1,6 @@
 import argparse
 import json
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,6 +20,7 @@ from mail_dock.__main__ import (
 )
 from mail_dock.domain.errors import SearchQueryError, StorageUnsupportedError
 from mail_dock.domain.search import MessageSummary, PageCursor, SearchPage
+from mail_dock.infrastructure import app_paths
 from mail_dock.infrastructure.security.keyring_store import KeyringBackendStatus
 from mail_dock.infrastructure.security.session_store import SessionCredentialStore
 from mail_dock.infrastructure.storage.capabilities import CapabilityLevel, StorageCapabilities
@@ -228,6 +230,54 @@ def test_main_keeps_existing_cli_commands_on_the_cli_route(
     assert main.main(["verify", "--storage-root", "/tmp/mail-dock-test"]) == 17
 
     assert [command for command, _ in calls] == ["migrate", "verify"]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [["sync", "--account", "secret@example.com"], ["gui", "--secret-token-value"]],
+)
+def test_frozen_main_rejects_cli_without_loading_config_or_logging_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    arguments: list[str],
+) -> None:
+    monkeypatch.setattr(app_paths, "is_frozen", lambda: True)
+    monkeypatch.setattr(main, "setup_logging", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        config,
+        "load",
+        lambda: pytest.fail("frozen CLI rejection must precede configuration loading"),
+    )
+
+    with caplog.at_level(logging.ERROR):
+        assert main.main(arguments) == 2
+
+    assert "secret@example.com" not in caplog.text
+    assert "secret-token-value" not in caplog.text
+    assert (
+        "Invalid command-line arguments" in caplog.text
+        or "Command is not available" in caplog.text
+    )
+
+
+def test_frozen_main_routes_gui_without_rejecting_storage_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = config.AppConfig()
+    requested_roots: list[Path | None] = []
+    monkeypatch.setattr(app_paths, "is_frozen", lambda: True)
+    monkeypatch.setattr(main, "setup_logging", lambda *args, **kwargs: None)
+    monkeypatch.setattr(config, "load", lambda: settings)
+
+    def run_gui(received_settings: config.AppConfig, requested_root: Path | None) -> int:
+        assert received_settings is settings
+        requested_roots.append(requested_root)
+        return 0
+
+    monkeypatch.setattr(main, "_run_gui", run_gui)
+
+    assert main.main(["gui", "--storage-root", "C:/mail-data"]) == 0
+    assert requested_roots == [Path("C:/mail-data")]
 
 
 def test_verify_command_runs_selected_mode(

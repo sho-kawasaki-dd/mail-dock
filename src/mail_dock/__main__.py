@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import io
 import json
 import logging
 import os
@@ -37,6 +38,7 @@ from mail_dock.domain.ports import BaseCredentialStore, BaseIntegrityStorage
 from mail_dock.domain.repository import MessageRecord
 from mail_dock.domain.search import MessageFilter, MessageSummary, PageCursor, SearchPage
 from mail_dock.domain.storage_state import StorageStateMachine
+from mail_dock.infrastructure import app_paths
 from mail_dock.infrastructure.database.backup import (
     LAST_BACKUP_STATE_KEY,
     backup_database,
@@ -1530,12 +1532,35 @@ def _exit_code(error: MailDockError) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the mail-dock command-line or graphical application."""
 
+    frozen = app_paths.is_frozen()
+    if frozen:
+        if sys.stdout is None:
+            sys.stdout = io.StringIO()
+        if sys.stderr is None:
+            sys.stderr = io.StringIO()
+        setup_logging(config.config_dir(), debug=False)
+
     parser = _build_parser()
-    args = parser.parse_args(argv)
     try:
+        args = parser.parse_args(argv)
+    except SystemExit as error:
+        if frozen and error.code != 0:
+            LOGGER.error("Invalid command-line arguments")
+            return 2
+        raise
+
+    command = getattr(args, "command", None)
+    if frozen and command not in {None, "gui", "self-check"}:
+        LOGGER.error("Command is not available in this build")
+        return 2
+
+    try:
+        debug = bool(getattr(args, "debug", False))
+        if frozen and debug:
+            setup_logging(config.config_dir(), debug=True)
         settings = config.load()
-        setup_logging(config.config_dir(), debug=bool(getattr(args, "debug", False)))
-        command = getattr(args, "command", None)
+        if not frozen:
+            setup_logging(config.config_dir(), debug=debug)
         if command in {None, "gui"}:
             return _run_gui(settings, getattr(args, "storage_root", None))
         return _run_command(
@@ -1548,11 +1573,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 130
     except MailDockError as error:
         LOGGER.error("mail-dock stopped: %s", error)
-        print(f"mail-dock: {error}", file=sys.stderr)
+        if sys.stderr is not None:
+            print(f"mail-dock: {error}", file=sys.stderr)
         return _exit_code(error)
     except OSError as error:
         LOGGER.error("mail-dock stopped during local I/O")
-        print(f"mail-dock: local I/O failed: {error}", file=sys.stderr)
+        if sys.stderr is not None:
+            print(f"mail-dock: local I/O failed: {error}", file=sys.stderr)
         return 2
     return 0
 

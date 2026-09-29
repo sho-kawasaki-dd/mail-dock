@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mail_dock.domain.errors import ConverterNotFound
+from mail_dock.infrastructure.app_paths import bundle_root
 
 _VERSION_TIMEOUT_SECONDS = 10
 
@@ -35,9 +36,9 @@ _WINDOWS_READPST_DLLS = (
 
 
 def default_vendor_dir() -> Path:
-    """Return the repository's bundled readpst directory."""
+    """Return the bundled readpst directory."""
 
-    return Path(__file__).resolve().parents[4] / "vendor" / "readpst"
+    return bundle_root() / "vendor" / "readpst"
 
 
 @dataclass(frozen=True)

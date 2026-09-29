@@ -50,6 +50,7 @@ from mail_dock.domain.messages import AttachmentSavePlan, SavedFile
 from mail_dock.domain.ports import BaseIntegrityStorage
 from mail_dock.domain.search import MessageDetail
 from mail_dock.domain.storage_state import StorageState
+from mail_dock.infrastructure.app_paths import bundle_root
 from mail_dock.presentation import strings
 from mail_dock.presentation.context import AppContext
 from mail_dock.presentation.errors import user_message
@@ -1759,7 +1760,7 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _open_encryption_guide(self) -> None:
-        guide = Path(__file__).resolve().parents[4] / "README.md"
+        guide = bundle_root() / "README.md"
         if guide.is_file():
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(guide)))
 
