@@ -91,7 +91,7 @@
 | # | 要件 | 根拠 |
 | :--- | :---- | :---- |
 | F-22 | 新規 `tools/collect_licenses.py`（標準ライブラリの `importlib.metadata` のみ使用）が、mail-dockの実行時依存を辿り、各パッケージのライセンスファイルを `build/licenses/python/{name}-{version}/` へコピーし、`python-packages.json` を出力すること。ライセンスファイルが見つからない依存があれば失敗すること | ― |
-| F-23 | 同ツールが、Python本体の `LICENSE.txt`（同梱するOpenSSL/SQLite等の告知を含む）、PyInstaller bootloaderのCOPYING、Qt LGPL-3/GPL-3全文に加え、実際に使用するQtWebEngine配布物に付属するChromium・第三者コンポーネントのライセンス告知資料を `build/licenses/` へ収集すること。QtWebEngineの告知が見つからない場合はビルドを失敗させ、収集元の版を `THIRD-PARTY-LICENSES.md` に記録すること。告知の収集元は PySide6 wheel 内に存在する保証がないため、グループ0のPoCで確定する（候補: F-19 で取得するQt公式ソース tarball 内の `src/3rdparty/chromium` 配下の `LICENSE` 群および qdoc）。確定した収集元を本行へ追記すること。2026-09-29時点でPySide6 6.11.1 wheelからChromium告知は見つからず、Qt公式 `qtwebengine-everywhere-src-6.11.1.tar.xz`（578,914,356 bytes）の配布は確認したが内部告知パスは未検証のため、本PoC項目は未完了 | F-22 |
+| F-23 | 同ツールが、Python本体の `LICENSE.txt`（同梱するOpenSSL/SQLite等の告知を含む）、PyInstaller bootloaderのCOPYING、Qt LGPL-3/GPL-3全文に加え、実際に使用するQtWebEngine配布物に付属するChromium・第三者コンポーネントのライセンス告知資料を `build/licenses/` へ収集すること。QtWebEngineの告知が見つからない場合はビルドを失敗させ、収集元の版を `THIRD-PARTY-LICENSES.md` に記録すること。告知の収集元はグループ0のPoC（2026-09-29）で確定した。PySide6 6.11.1 wheelにはChromium告知が無く、Qt公式ソース `qtwebengine-everywhere-src-{Qt版}.tar.xz`（F-19 で取得しロックとSHA-256照合済みのもの）にも**集約済みの告知ファイルは存在しない**（Qt公式の第三者告知ページはドキュメントビルド時に Chromium の `tools/licenses/licenses.py` が gn ビルド結果から生成するため、ソースからは再現できない）。そのため入力資料を原本のまま収集する。収集対象（tarball内、`qtwebengine-everywhere-src-{版}/` 基準）: `LICENSE.Chromium` / `CHROMIUM_VERSION` / `LICENSES/` / `src/core/doc/src/qwebengine-licensing.qdoc` / `src/pdf/doc/src/qtpdf-licensing.qdoc` / `src/3rdparty/chromium/LICENSE` / `src/3rdparty/chromium/**/README.chromium`（580件）と、その `License File:` 行が指すファイル（`//` 始まりはChromiumルート基準、それ以外はREADMEのあるディレクトリ基準で解決する）、および名前が `LICENSE*`/`LICENCE*`/`COPYING*`/`COPYRIGHT*`/`NOTICE*`/`UNLICENSE*` に一致するファイル。ディレクトリ構造を保ったまま `build/licenses/qtwebengine/` へ配置する（実測: 2,473件・約8.06MB）。実際に同梱されないコンポーネントの告知も含む過剰包含（上位集合）になることを許容する。`LICENSE.Chromium` または `src/3rdparty/chromium/LICENSE` が欠ける場合、tarballのSHA-256がロックと不一致の場合はビルドを失敗させる。`License File:` の参照先が存在しない場合は名前規則外の実在ファイル（`third_party/ffmpeg/CREDITS.chromium`、`third_party/freetype/src/docs/FTL.TXT` 等）を取りこぼすため参照解決を必須とし、tarball内に存在しない参照（PoC時点で97件中55件）は警告として記録して失敗にはしない。`THIRD-PARTY-LICENSES.md` には収集元のQt版・Chromium版（6.11.1 は `CHROMIUM_VERSION` = ベース 140.0.7339.264、セキュリティパッチ適用先 148.0.7778.96）・tarball のSHA-256を記録する | F-22 |
 | F-24 | `--check-inventory THIRD-PARTY-LICENSES.md` オプションで、収集した依存パッケージがすべて `THIRD-PARTY-LICENSES.md` に記載されているかを検査し、未記載があれば失敗すること | F-22 |
 
 #### **PyInstaller**
@@ -157,7 +157,7 @@ G（Inno Setup） → H（CI） → I（ドキュメント整合）
 
 ### **3.0 グループ0: 実現可否のPoC（*全グループの着手前に完了*）**
 
-- [ ] QtWebEngine の Chromium・第三者告知の収集元を確定する（Qt公式ソース tarball 内の `src/3rdparty/chromium` 配下の `LICENSE` 群と qdoc で足りるか）。結果を F-23 へ反映する
+- [x] QtWebEngine の Chromium・第三者告知の収集元を確定する（Qt公式ソース tarball 内の `src/3rdparty/chromium` 配下の `LICENSE` 群と qdoc で足りるか）。結果を F-23 へ反映する
 - [x] PyInstaller onedir の子プロセス起動（`--maildock-internal-lock-probe`）の応答時間を、AV有効環境を含め 10 回以上実測し、`_LOCK_PROBE_TIMEOUT_SECONDS` を確定する（V-1 の判定に使用）
 - [ ] ローカル pacman キャッシュ（`/var/cache/pacman/pkg`）と `repo.msys2.org` に現行版の `.pkg.tar.zst` / `.src.tar.zst` が残っているかを確認し、D-5 の初回ミラー採取の可否を判断する
 - [x] 上記の結果を本書（F-4・F-23・4章）へ追記する
@@ -166,7 +166,7 @@ G（Inno Setup） → H（CI） → I（ドキュメント整合）
 
 - 子プロセス計測: Windows 11、Windows Defenderリアルタイム保護有効、CPython 3.13.12、PyInstaller 6.22.3。最小のonedir/windowed実行ファイルで内部フラグの子プロセス起動を10回実行し、全件終了コード0、平均0.095秒、最大0.110秒。最大値の2倍を満たす暫定タイムアウトとして5秒を採用する。実アプリでの再確認はV-1で行う。
 - MSYS2: 現行libpstは `0.6.76.r79.gcc600ee-1`。バイナリはローカルpacmanキャッシュに存在し、公式repoのバイナリとソースアーカイブもHTTP 200を確認した。ソースアーカイブ内にPKGBUILDと上流Gitリポジトリがあり、HEAD `cc600ee98c4ed23b8ab0bc2cf6b6c6e9cb587e89` は既存同梱ソースと一致する。詳細は4.3節。
-- QtWebEngine: Qt公式ソースアーカイブの配布とサイズは確認したが、Chromium・第三者告知の実ファイルをまだ確認できていない。Qt公式docs/cgitの候補URLはこの環境から404/500、PySide6 wheel内にも告知ファイル候補は見つからなかったため、当該タスクは継続する。
+- QtWebEngine: `https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtwebengine-everywhere-src-6.11.1.tar.xz` を実取得し、サイズ578,914,356 bytes・SHA-256 `679C66CCC6C158FC215E9C58EF160331ECD29974232E345C05161889F8667083` を確認した（F-19 のロック初期値に使用する）。`tar -tJf` の一覧（297,686エントリ）と選択展開で調べた結果、集約済みの第三者告知ファイルは無く（Qt公式ページは `cmake/Functions.cmake` の `add_code_attributions_target` が `licenses.py` と gn ターゲット `:QtWebEngineCore` からドキュメントビルド時に生成）、`qt_attribution.json` もChromium配下には0件（examples配下の5件のみ）だった。実在する入力資料は `LICENSE.Chromium`、`src/3rdparty/chromium/LICENSE`、`README.chromium` 580件とその参照ライセンス、`LICENSES/`、licensing qdoc 2件で、README.chromium の `License File:` 参照605件のうち名前規則で拾えない実在ファイル（ffmpeg `CREDITS.chromium` 等）があるため参照解決が必要と判断した。収集元はF-23に確定して反映済み。
 
 ### **3.1 グループA: 凍結ランタイム修正（*最優先。全グループの前提*）**
 
