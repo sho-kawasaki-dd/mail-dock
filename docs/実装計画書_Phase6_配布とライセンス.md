@@ -159,13 +159,14 @@ G（Inno Setup） → H（CI） → I（ドキュメント整合）
 
 - [x] QtWebEngine の Chromium・第三者告知の収集元を確定する（Qt公式ソース tarball 内の `src/3rdparty/chromium` 配下の `LICENSE` 群と qdoc で足りるか）。結果を F-23 へ反映する
 - [x] PyInstaller onedir の子プロセス起動（`--maildock-internal-lock-probe`）の応答時間を、AV有効環境を含め 10 回以上実測し、`_LOCK_PROBE_TIMEOUT_SECONDS` を確定する（V-1 の判定に使用）
-- [ ] ローカル pacman キャッシュ（`/var/cache/pacman/pkg`）と `repo.msys2.org` に現行版の `.pkg.tar.zst` / `.src.tar.zst` が残っているかを確認し、D-5 の初回ミラー採取の可否を判断する
+- [x] ローカル pacman キャッシュ（`/var/cache/pacman/pkg`）と `repo.msys2.org` に現行版の `.pkg.tar.zst` / `.src.tar.zst` が残っているかを確認し、D-5 の初回ミラー採取の可否を判断する
 - [x] 上記の結果を本書（F-4・F-23・4章）へ追記する
 
 #### PoC実施記録（2026-09-29）
 
 - 子プロセス計測: Windows 11、Windows Defenderリアルタイム保護有効、CPython 3.13.12、PyInstaller 6.22.3。最小のonedir/windowed実行ファイルで内部フラグの子プロセス起動を10回実行し、全件終了コード0、平均0.095秒、最大0.110秒。最大値の2倍を満たす暫定タイムアウトとして5秒を採用する。実アプリでの再確認はV-1で行う。
 - MSYS2: 現行libpstは `0.6.76.r79.gcc600ee-1`。バイナリはローカルpacmanキャッシュに存在し、公式repoのバイナリとソースアーカイブもHTTP 200を確認した。ソースアーカイブ内にPKGBUILDと上流Gitリポジトリがあり、HEAD `cc600ee98c4ed23b8ab0bc2cf6b6c6e9cb587e89` は既存同梱ソースと一致する。詳細は4.3節。
+- MSYS2全依存: `THIRD-PARTY-LICENSES.md` 記載の14パッケージすべてで、バイナリはローカルpacmanキャッシュに存在し、公式repoのバイナリ・ソース（pkgbase単位の `.src.tar.zst`）も全件HTTP 200で取得できた。バイナリの公式repo版とローカルキャッシュ版のSHA-256は全件一致した。D-5 の初回ミラー採取は可能と判断する。詳細は4.3.1。
 - QtWebEngine: `https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtwebengine-everywhere-src-6.11.1.tar.xz` を実取得し、サイズ578,914,356 bytes・SHA-256 `679C66CCC6C158FC215E9C58EF160331ECD29974232E345C05161889F8667083` を確認した（F-19 のロック初期値に使用する）。`tar -tJf` の一覧（297,686エントリ）と選択展開で調べた結果、集約済みの第三者告知ファイルは無く（Qt公式ページは `cmake/Functions.cmake` の `add_code_attributions_target` が `licenses.py` と gn ターゲット `:QtWebEngineCore` からドキュメントビルド時に生成）、`qt_attribution.json` もChromium配下には0件（examples配下の5件のみ）だった。実在する入力資料は `LICENSE.Chromium`、`src/3rdparty/chromium/LICENSE`、`README.chromium` 580件とその参照ライセンス、`LICENSES/`、licensing qdoc 2件で、README.chromium の `License File:` 参照605件のうち名前規則で拾えない実在ファイル（ffmpeg `CREDITS.chromium` 等）があるため参照解決が必要と判断した。収集元はF-23に確定して反映済み。
 
 ### **3.1 グループA: 凍結ランタイム修正（*最優先。全グループの前提*）**
@@ -288,7 +289,28 @@ G（Inno Setup） → H（CI） → I（ドキュメント整合）
 
 ### **4.3.1 初回PoCで確認したlibpst資材**
 
-2026-09-29に現行版の資材を確認した。ローカルpacmanキャッシュにはバイナリパッケージ105件があり、対象バイナリ `mingw-w64-ucrt-x86_64-libpst-0.6.76.r79.gcc600ee-1-any.pkg.tar.zst` も存在したが、`.src.tar.zst` はなかった。公式URL `https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-libpst-0.6.76.r79.gcc600ee-1-any.pkg.tar.zst` はHTTP 200（798,117 bytes）だった。ソース `mingw-w64-libpst-0.6.76.r79.gcc600ee-1.src.tar.zst` も公式URL `https://repo.msys2.org/mingw/sources/mingw-w64-libpst-0.6.76.r79.gcc600ee-1.src.tar.zst` から取得でき、SHA-256は `DCBE0A150EE9DB28CBD579EA6A75858CF321541936105D1CF2FFB90CEE90FDD8`。アーカイブ内の上流Git HEADは既存vendor内の `libpst-cc600ee98c4ed23b8ab0bc2cf6b6c6e9cb587e89.tar.gz` と同一コミットで、後者のSHA-256は `D1F270D54C5296D1B5D3A6C0A70685C92DDAB58A1D34C373CF5B59215E2ACFEA`。libpst単体の初回採取は可能と判断する。全依存パッケージのソース資材・ミラー対象一覧はグループDで列挙・検証する。
+2026-09-29に現行版の資材を確認した。ローカルpacmanキャッシュにはバイナリパッケージ105件があり、対象バイナリ `mingw-w64-ucrt-x86_64-libpst-0.6.76.r79.gcc600ee-1-any.pkg.tar.zst` も存在したが、`.src.tar.zst` はなかった。公式URL `https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-libpst-0.6.76.r79.gcc600ee-1-any.pkg.tar.zst` はHTTP 200（798,117 bytes）だった。ソース `mingw-w64-libpst-0.6.76.r79.gcc600ee-1.src.tar.zst` も公式URL `https://repo.msys2.org/mingw/sources/mingw-w64-libpst-0.6.76.r79.gcc600ee-1.src.tar.zst` から取得でき、SHA-256は `DCBE0A150EE9DB28CBD579EA6A75858CF321541936105D1CF2FFB90CEE90FDD8`。アーカイブ内の上流Git HEADは既存vendor内の `libpst-cc600ee98c4ed23b8ab0bc2cf6b6c6e9cb587e89.tar.gz` と同一コミットで、後者のSHA-256は `D1F270D54C5296D1B5D3A6C0A70685C92DDAB58A1D34C373CF5B59215E2ACFEA`。libpst単体の初回採取は可能と判断する。
+
+同日、`THIRD-PARTY-LICENSES.md` 記載の全14パッケージについて、バイナリ（`https://repo.msys2.org/mingw/ucrt64/`）とソース（`https://repo.msys2.org/mingw/sources/`）を取得して確認した（取得先は `build/sources/msys2/`、Git管理外）。全件HTTP 200で、バイナリはローカルキャッシュとSHA-256が一致した。ソースのファイル名は `{pkgbase}-{版}.src.tar.zst`。pkgbaseは各バイナリの `.PKGINFO` から確認した。`libwinpthread` は `mingw-w64-winpthreads`、`gcc-libs` は `mingw-w64-gcc`、`gettext-runtime` は `mingw-w64-gettext` を指す。他は名称と同一の `mingw-w64-{名称}`。
+
+| pkgbase | 版 | `.src.tar.zst` サイズ (bytes) | `.src.tar.zst` SHA-256 |
+| :---- | :---- | ----: | :---- |
+| `mingw-w64-bzip2` | `1.0.8-4` | 818,825 | `FD9360917314D1CBCCB3CB15ED8450D1E56B8A9F733B606504ABA52C52159E54` |
+| `mingw-w64-gcc` | `16.2.0-3` | 107,228,430 | `EB3479A8B0B23810FBBBC25EF76879E867E88D09960A40145D73F5505FDA4DA0` |
+| `mingw-w64-gettext` | `1.0-1` | 10,267,655 | `CCA0D0C8F60353FACCC5AD40405240014E4A7CCC8B1C6CA9F4626AEF3097D26E` |
+| `mingw-w64-glib2` | `2.88.3-1` | 5,799,324 | `9E0662759CF5412C2A2DA94A69F7BDC04380A77819999401B20800BAA6CAE539` |
+| `mingw-w64-libffi` | `3.8.0-1` | 1,582,238 | `641EA78CE0333839EAB5262656F03FDCFD8496D7388BD7B27E4F0638AEED9ADF` |
+| `mingw-w64-libgsf` | `1.14.58-1` | 721,054 | `B950E1164FAD0855A8F110E109A8B3FB6C4E3859D5BA841861006B558EE38A99` |
+| `mingw-w64-libiconv` | `1.19-1` | 5,131,029 | `74428280C17094DA5B702C29B2E1A0ABAE59556EA5DFDD65705CC8CCC1E000FB` |
+| `mingw-w64-libpst` | `0.6.76.r79.gcc600ee-1` | 9,303,362 | `DCBE0A150EE9DB28CBD579EA6A75858CF321541936105D1CF2FFB90CEE90FDD8` |
+| `mingw-w64-libsystre` | `1.0.2-2` | 3,201 | `5CC1E1E671F9F9A4D305A8E393A54EEADEEAAA38E87F3A83A193435787EF8791` |
+| `mingw-w64-libtre` | `0.9.0-2` | 840,641 | `57EE4F3B992E4EBE9B43FC8B5A0A66000EE40DEFC1089B727799330778344301` |
+| `mingw-w64-winpthreads` | `14.0.0.r353.g6df76fa52-2` | 53,936,829 | `C7BC64F5F4CBC4BEAB2546C361D1C9F0E0709619FF6CDC6966CF24DE08247E8D` |
+| `mingw-w64-libxml2` | `2.15.3-3` | 3,780,156 | `649C866C124789F85A7BD518EF2CF982A41B3A2EE54AD13CBF7844634E2C7BA6` |
+| `mingw-w64-pcre2` | `10.48-3` | 2,212,426 | `2D97640064E42C2D800580DC2E622487B6A2D980722380CDAB5F5F71D311F39A` |
+| `mingw-w64-zlib` | `1.3.2-2` | 1,326,375 | `EEF69DEA52357E01B272D6FD6DC4D7C0773F71260CB7BCDE6047C8C383518DB3` |
+
+留意点: `gcc`（約107MB）と `winpthreads`（約54MB）のソースが大きく、ミラーRelease・対応ソースzipの容量の大半を占める。`libsystre`（3,201 bytes）は上流ソースを含まない可能性が高い。各 `.src.tar.zst` に上流の実ソースが入るか（`contains_upstream`）は、グループDで内容を検査して確定する。
 
 ### **4.4 最終手段（MSYS2からlibpstが削除された場合）**
 
