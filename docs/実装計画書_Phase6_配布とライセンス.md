@@ -200,14 +200,14 @@ G（Inno Setup） → H（CI） → I（ドキュメント整合）
 
 ### **3.4 グループD: readpst依存のロック化・対応ソース（*Aと並行可*）**
 
-- [ ] `packaging/readpst/msys2-packages.lock.json` を新設し、現行の同梱版に合わせた初期値を記録する（ソースパッケージ単位の `source_ref` 構造、`contains_upstream` を含む。F-14）
-- [ ] **ブートストラップ**: 現行版の `.pkg.tar.zst` / `.src.tar.zst` を採取して SHA-256 をロックへ記録し、`readpst-msys2-mirror` Release へ初回アップロードする（`tools/update_readpst_lock.ps1` の初回モード）
-- [ ] `tools/fetch_readpst.ps1` をロックファイル駆動の取得・検証・ミラーフォールバック方式へ書き換える（`zstd` 明示、`mt.exe` の Windows SDK パス探索を含む。F-15）
-- [ ] `tools/update_readpst_lock.ps1` を新設する（保守者用のロック再生成・DLL集合の警告付き）
-- [ ] `.src.tar.zst` に上流の実ソースが入るか各パッケージで確認し、入らないものは固定版・SHA-256で別途取得して対応ソースzipに含める
-- [ ] `tools/verify_readpst_bundle.ps1` を新設し、`release.yml` のGPL検査ロジックを移設・拡張する（実ソース・PKGBUILD・パッチ・ビルド手順・バイナリ対応情報の欠落も検出）
-- [ ] 保守者用の `readpst-msys2-mirror` Releaseへパッケージ一式をミラー保存する手順を `tools/update_readpst_lock.ps1` に組み込む
-- [ ] `tests/unit/test_readpst_lock_consistency.py`：ロックのDLL集合と `_WINDOWS_READPST_DLLS` の一致検証
+- [x] `packaging/readpst/msys2-packages.lock.json` を新設し、現行の同梱版に合わせた初期値を記録する（ソースパッケージ単位の `source_ref` 構造、`contains_upstream` を含む。F-14）
+- [ ] **ブートストラップ**: 現行版の `.pkg.tar.zst` / `.src.tar.zst` を採取して SHA-256 をロックへ記録し、`readpst-msys2-mirror` Release へ初回アップロードする（`tools/update_readpst_lock.ps1 -UploadMirror`。ローカルのGitHub CLI認証が必要）
+- [x] `tools/fetch_readpst.ps1` をロックファイル駆動の取得・検証・ミラーフォールバック方式へ書き換える（`zstd` 明示、`mt.exe` の Windows SDK パス探索を含む。F-15）
+- [x] `tools/update_readpst_lock.ps1` を新設する（保守者用のロック再生成・DLL集合の警告付き）
+- [x] `.src.tar.zst` に上流の実ソースが入るか各パッケージで確認し、全14 pkgbaseで収録を確認した（別途固定したlibpstコミットも対応ソースzipへ含める）
+- [x] `tools/verify_readpst_bundle.ps1` を新設し、`release.yml` のGPL検査ロジックを移設・拡張する（実ソース・PKGBUILD・パッチ・ビルド手順・バイナリ対応情報の欠落も検出）
+- [x] 保守者用の `readpst-msys2-mirror` Releaseへパッケージ一式をミラー保存する処理を `tools/update_readpst_lock.ps1 -UploadMirror` に実装する
+- [x] `tests/unit/test_readpst_lock_consistency.py`：ロックのDLL集合と `_WINDOWS_READPST_DLLS` の一致検証
 
 ### **3.5 グループE: 同梱ライセンス資料・Qt対応ソース（*E1はDと並行可、E2はFのビルド後*）**
 
@@ -310,7 +310,7 @@ G（Inno Setup） → H（CI） → I（ドキュメント整合）
 | `mingw-w64-pcre2` | `10.48-3` | 2,212,426 | `2D97640064E42C2D800580DC2E622487B6A2D980722380CDAB5F5F71D311F39A` |
 | `mingw-w64-zlib` | `1.3.2-2` | 1,326,375 | `EEF69DEA52357E01B272D6FD6DC4D7C0773F71260CB7BCDE6047C8C383518DB3` |
 
-留意点: `gcc`（約107MB）と `winpthreads`（約54MB）のソースが大きく、ミラーRelease・対応ソースzipの容量の大半を占める。`libsystre`（3,201 bytes）は上流ソースを含まない可能性が高い。各 `.src.tar.zst` に上流の実ソースが入るか（`contains_upstream`）は、グループDで内容を検査して確定する。
+留意点: `gcc`（約107MB）と `winpthreads`（約54MB）のソースが大きく、ミラーRelease・対応ソースzipの容量の大半を占める。グループDで全14個の `.src.tar.zst` を収録物から確認し、すべてに上流の実ソースが含まれることを確認した。形式は上流tarball、Gitオブジェクト、または直接収録されたCソースである。libpstは既存の固定コミットtarballも別途ハッシュ固定して対応ソースzipへ含める。
 
 ### **4.4 最終手段（MSYS2からlibpstが削除された場合）**
 

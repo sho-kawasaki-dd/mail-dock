@@ -69,6 +69,7 @@ from mail_dock.presentation.threads.sync_worker import (
 from mail_dock.presentation.threads.verify_worker import VerifyWorker
 from mail_dock.presentation.viewmodels.message_list_viewmodel import MessageListViewModel
 from mail_dock.presentation.views.detail_view import AttachmentSaveRequest, DetailView
+from mail_dock.presentation.views.dialogs.about_dialog import AboutDialog
 from mail_dock.presentation.views.dialogs.audit_log_dialog import AuditLogDialog
 from mail_dock.presentation.views.dialogs.confirmation_dialog import (
     ConfirmationDialog,
@@ -398,6 +399,11 @@ class MainWindow(QMainWindow):
         help_menu.addAction(self.open_log_folder_action)
         self.encryption_help_action = QAction(strings.MAIN_MENU_HELP_ENCRYPTION, self)
         help_menu.addAction(self.encryption_help_action)
+        help_menu.addSeparator()
+        self.about_action = QAction(strings.MAIN_MENU_ABOUT, self)
+        self.about_qt_action = QAction(strings.MAIN_MENU_ABOUT_QT, self)
+        help_menu.addAction(self.about_action)
+        help_menu.addAction(self.about_qt_action)
 
         self.sync_action.triggered.connect(self._sync_selected_account)
         self.refresh_folders_action.triggered.connect(self._refresh_selected_account)
@@ -417,6 +423,8 @@ class MainWindow(QMainWindow):
         self.audit_log_action.triggered.connect(self._show_audit_log)
         self.open_log_folder_action.triggered.connect(self._open_log_folder)
         self.encryption_help_action.triggered.connect(self._open_encryption_guide)
+        self.about_action.triggered.connect(self._show_about_dialog)
+        self.about_qt_action.triggered.connect(lambda: QMessageBox.aboutQt(self))
         self.storage_info_action.triggered.connect(self._show_storage_root)
         self.storage_switch_action.triggered.connect(self._request_storage_switch)
         self.storage_setup_action.triggered.connect(self._request_storage_setup)
@@ -1758,6 +1766,9 @@ class MainWindow(QMainWindow):
         path = config.config_dir() / "logs"
         path.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+    def _show_about_dialog(self) -> None:
+        AboutDialog(self).exec()
 
     def _open_encryption_guide(self) -> None:
         guide = bundle_root() / "README.md"

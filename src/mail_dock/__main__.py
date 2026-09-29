@@ -56,6 +56,7 @@ from mail_dock.infrastructure.database.message_folder_migration import finalize_
 from mail_dock.infrastructure.database.message_repository import SqliteMessageRepository
 from mail_dock.infrastructure.database.migrator import migrate
 from mail_dock.infrastructure.database.search_repository import SqliteSearchRepository
+from mail_dock.infrastructure.diagnostics import required_keyring_check, run_self_check
 from mail_dock.infrastructure.fetchers.generic_imap import GenericImapFetcher
 from mail_dock.infrastructure.logging_config import (
     purge_old_logs,
@@ -201,6 +202,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "gui",
         parents=[common],
         help="start the graphical application",
+    )
+    self_check_parser = subparsers.add_parser(
+        "self-check",
+        parents=[common],
+        help="diagnose the application runtime",
+    )
+    self_check_parser.add_argument("--output", type=Path, help="write JSON results to a file")
+    self_check_parser.add_argument(
+        "--require-keyring",
+        action="store_true",
+        help="require an approved Windows keyring backend",
     )
     account_parser = subparsers.add_parser(
         "account",
@@ -1553,6 +1565,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     if frozen and command not in {None, "gui", "self-check"}:
         LOGGER.error("Command is not available in this build")
         return 2
+
+    if command == "self-check":
+        from mail_dock.presentation.diagnostics_qt import qt_webengine_check
+
+        extra_checks = [qt_webengine_check()]
+        if getattr(args, "require_keyring", False):
+            extra_checks.append(required_keyring_check())
+        report = run_self_check(extra_checks=extra_checks)
+        output = json.dumps(report.as_dict(), ensure_ascii=False, indent=2)
+        output_path = getattr(args, "output", None)
+        if output_path is None:
+            if sys.stdout is not None:
+                print(output, file=sys.stdout)
+        else:
+            output_path.write_text(output + "\n", encoding="utf-8")
+        return 0 if report.passed else 1
 
     try:
         debug = bool(getattr(args, "debug", False))

@@ -77,6 +77,16 @@ a release. The current package provenance is:
 | `mingw-w64-ucrt-x86_64-pcre2` | `10.48-3` | BSD-3-Clause | https://pcre.org/ |
 | `mingw-w64-ucrt-x86_64-zlib` | `1.3.2-2` | Zlib | https://www.zlib.net/ |
 
+The exact binary package filenames, repository URLs, SHA-256 values, extracted
+runtime files, and one-per-pkgbase source package records are pinned in
+[`packaging/readpst/msys2-packages.lock.json`](packaging/readpst/msys2-packages.lock.json).
+All 14 source packages were inspected on 2026-09-29; each contains the
+upstream source along with its PKGBUILD and applicable patches. The release
+workflow generates `mail-dock-readpst-corresponding-source.zip` from these
+verified archives and adds the pinned libpst upstream commit. The first upload
+of the package files to the `readpst-msys2-mirror` GitHub Release remains a
+maintainer bootstrap step.
+
 ### Manifest patch applied to `readpst.exe` (D-19)
 
 On Windows, non-ASCII (e.g. Japanese) PST folder names made `readpst.exe`
