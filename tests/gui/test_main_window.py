@@ -197,6 +197,8 @@ def test_main_window_builds_three_panes_and_prevents_sync_reentry(qtbot: Any) ->
     assert window.splitter.count() == 3
     assert window.folder_tree_view.model() is window.folder_tree_model
     assert window.message_list_view.model() is window.message_table_model
+    assert window.about_action.text() == strings.MAIN_MENU_ABOUT
+    assert window.about_qt_action.text() == strings.MAIN_MENU_ABOUT_QT
 
     calls: list[bool] = []
 

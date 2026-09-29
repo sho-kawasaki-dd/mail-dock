@@ -255,8 +255,7 @@ def test_frozen_main_rejects_cli_without_loading_config_or_logging_arguments(
     assert "secret@example.com" not in caplog.text
     assert "secret-token-value" not in caplog.text
     assert (
-        "Invalid command-line arguments" in caplog.text
-        or "Command is not available" in caplog.text
+        "Invalid command-line arguments" in caplog.text or "Command is not available" in caplog.text
     )
 
 

@@ -12,10 +12,7 @@ from importlib import resources
 from mail_dock import __version__
 from mail_dock.infrastructure import app_paths
 from mail_dock.infrastructure.importers.readpst_locator import ReadPstLocator
-from mail_dock.infrastructure.security.keyring_store import (
-    KeyringBackendStatus,
-    detect_backend,
-)
+from mail_dock.infrastructure.security import keyring_store
 
 
 @dataclass(frozen=True)
@@ -57,12 +54,10 @@ def _migration_check() -> DiagnosticCheck:
             if item.name.endswith(".sql") and item.is_file()
         )
     except Exception as error:
-        return DiagnosticCheck(
-            "migrations", False, f"Could not enumerate ({type(error).__name__})"
-        )
+        return DiagnosticCheck("migrations", False, f"Could not enumerate ({type(error).__name__})")
     if not migration_files:
         return DiagnosticCheck("migrations", False, "No migration SQL files found")
-    return DiagnosticCheck("migrations", True, f"{len(migration_files)} SQL files available")
+    return DiagnosticCheck("migrations", True, f"Available: {', '.join(migration_files)}")
 
 
 def _fts5_check() -> DiagnosticCheck:
@@ -73,9 +68,7 @@ def _fts5_check() -> DiagnosticCheck:
             "CREATE VIRTUAL TABLE diagnostic_fts USING fts5(value, tokenize='trigram')"
         )
         connection.execute("INSERT INTO diagnostic_fts(value) VALUES ('mail-dock')")
-        connection.execute(
-            "SELECT value FROM diagnostic_fts WHERE diagnostic_fts MATCH 'mail'"
-        )
+        connection.execute("SELECT value FROM diagnostic_fts WHERE diagnostic_fts MATCH 'mail'")
     except sqlite3.Error as error:
         return DiagnosticCheck(
             "sqlite_fts5_trigram", False, f"Unavailable ({type(error).__name__})"
@@ -112,7 +105,7 @@ def _readpst_check() -> DiagnosticCheck:
 
 def _keyring_check() -> DiagnosticCheck:
     try:
-        status = detect_backend()
+        status = keyring_store.detect_backend()
     except Exception as error:
         return DiagnosticCheck(
             "keyring", True, f"Unavailable ({type(error).__name__}); session-only mode"
@@ -126,10 +119,10 @@ def required_keyring_check() -> DiagnosticCheck:
     if os.name != "nt":
         return DiagnosticCheck("required_keyring", True, "Windows backend check not applicable")
     try:
-        status = detect_backend()
+        status = keyring_store.detect_backend()
     except Exception as error:
         return DiagnosticCheck("required_keyring", False, f"Unavailable ({type(error).__name__})")
-    passed = status is KeyringBackendStatus.SUPPORTED
+    passed = status is keyring_store.KeyringBackendStatus.SUPPORTED
     detail = status.value if passed else f"Expected supported Windows backend; found {status.value}"
     return DiagnosticCheck("required_keyring", passed, detail)
 
@@ -142,9 +135,7 @@ def _bundled_licenses_check() -> DiagnosticCheck:
         root / "licenses" / "qtwebengine" / "LICENSE.Chromium",
         root / "licenses" / "qtwebengine" / "src" / "3rdparty" / "chromium" / "LICENSE",
     )
-    missing = [
-        path.relative_to(root).as_posix() for path in required_files if not path.is_file()
-    ]
+    missing = [path.relative_to(root).as_posix() for path in required_files if not path.is_file()]
     if missing:
         return DiagnosticCheck("bundled_licenses", False, f"Missing: {', '.join(missing)}")
     return DiagnosticCheck(

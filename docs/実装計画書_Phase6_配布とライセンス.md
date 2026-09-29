@@ -190,13 +190,13 @@ G（Inno Setup） → H（CI） → I（ドキュメント整合）
 
 ### **3.3 グループC: 自己診断・バージョン情報ダイアログ（*Aに依存*）**
 
-- [ ] `infrastructure/diagnostics.py` に `run_self_check(extra_checks)` を実装する（F-9・F-10の全検査項目。infrastructure 層は PySide6 を import しない）
-- [ ] `presentation/diagnostics_qt.py` を新設し、`PySide6.QtWebEngineCore` の import 可否を `DiagnosticCheck` として定義する（`__main__` と `AboutDialog` が注入）
-- [ ] `__main__.py` に `self-check [--output PATH] [--require-keyring]` サブコマンドを追加する（凍結・非コンソール実行を考慮し `--output` でのファイル出力を主経路とする。`config.load()` に依存させない）
-- [ ] `presentation/views/dialogs/about_dialog.py`（`AboutDialog`）を実装する
-- [ ] `main_window.py` のヘルプメニューに「バージョン情報」「Qtについて」を追加する
-- [ ] `tests/unit/test_diagnostics.py`：各検査項目の成功・失敗パス、秘密情報が出力に含まれないこと
-- [ ] `tests/gui/test_about_dialog.py`：ダイアログ表示・診断ボタンの動作
+- [x] `infrastructure/diagnostics.py` に `run_self_check(extra_checks)` を実装する（F-9・F-10の全検査項目。infrastructure 層は PySide6 を import しない）
+- [x] `presentation/diagnostics_qt.py` を新設し、`PySide6.QtWebEngineCore` の import 可否を `DiagnosticCheck` として定義する（`__main__` と `AboutDialog` が注入）
+- [x] `__main__.py` に `self-check [--output PATH] [--require-keyring]` サブコマンドを追加する（凍結・非コンソール実行を考慮し `--output` でのファイル出力を主経路とする。`config.load()` に依存させない）
+- [x] `presentation/views/dialogs/about_dialog.py`（`AboutDialog`）を実装する
+- [x] `main_window.py` のヘルプメニューに「バージョン情報」「Qtについて」を追加する
+- [x] `tests/unit/test_diagnostics.py`：各検査項目の成功・失敗パス、秘密情報が出力に含まれないこと
+- [x] `tests/gui/test_about_dialog.py`：ダイアログ表示・診断ボタンの動作
 
 ### **3.4 グループD: readpst依存のロック化・対応ソース（*Aと並行可*）**
 

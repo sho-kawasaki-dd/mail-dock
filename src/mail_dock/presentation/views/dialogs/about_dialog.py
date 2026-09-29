@@ -34,7 +34,8 @@ class AboutDialog(QDialog):
         self.resize(560, 460)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(f"mail-dock {__version__}", self))
+        self.version_label = QLabel(f"mail-dock {__version__}", self)
+        layout.addWidget(self.version_label)
         layout.addWidget(
             QLabel(
                 "GPL-3.0-or-later\nこのプログラムは無保証で提供されます。",

@@ -1579,7 +1579,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             if sys.stdout is not None:
                 print(output, file=sys.stdout)
         else:
-            output_path.write_text(output + "\n", encoding="utf-8")
+            try:
+                output_path.write_text(output + "\n", encoding="utf-8")
+            except OSError:
+                LOGGER.error("Could not write self-check output")
+                return 2
         return 0 if report.passed else 1
 
     try:
