@@ -4,16 +4,48 @@ mail-dock uses the following third-party packages. License names and project lin
 
 | Dependency | License | Project |
 | --- | --- | --- |
-| PySide6 / Qt for Python | LGPL-3.0-only, GPL-2.0-only, GPL-3.0-only, or commercial (Qt licensing options) | https://doc.qt.io/qtforpython/ |
-| Qt WebEngine / Chromium (via PySide6) | Qt WebEngine is covered by the applicable Qt LGPL/GPL or commercial license; Chromium and bundled third-party components retain their respective upstream licenses | https://doc.qt.io/qt-6/qtwebengine-licenses.html |
-| keyring | MIT | https://github.com/jaraco/keyring |
-| beautifulsoup4 | MIT | https://www.crummy.com/software/BeautifulSoup/ |
+| beautifulsoup4 | MIT | https://www.crummy.com/software/BeautifulSoup/bs4/ |
 | charset-normalizer | MIT | https://github.com/jawah/charset_normalizer |
-| platformdirs | MIT | https://github.com/platformdirs/platformdirs |
+| jaraco.classes | MIT | https://github.com/jaraco/jaraco.classes |
+| jaraco.context | MIT | https://github.com/jaraco/jaraco.context |
+| jaraco.functools | MIT | https://github.com/jaraco/jaraco.functools |
+| keyring | MIT | https://github.com/jaraco/keyring |
+| more-itertools | MIT | https://github.com/more-itertools/more-itertools |
+| platformdirs | MIT | https://github.com/tox-dev/platformdirs |
+| PySide6 | LGPL-3.0-only, GPL-2.0-only, GPL-3.0-only, or commercial (Qt licensing options) | https://doc.qt.io/qtforpython/ |
+| PySide6_Addons | LGPL-3.0-only, GPL-2.0-only, GPL-3.0-only, or commercial (Qt licensing options) | https://doc.qt.io/qtforpython/ |
+| PySide6_Essentials | LGPL-3.0-only, GPL-2.0-only, GPL-3.0-only, or commercial (Qt licensing options) | https://doc.qt.io/qtforpython/ |
+| pywin32-ctypes | BSD-3-Clause | https://github.com/enthought/pywin32-ctypes |
+| shiboken6 | LGPL-3.0-only, GPL-2.0-only, GPL-3.0-only, or commercial (Qt licensing options) | https://doc.qt.io/qtforpython/ |
+| soupsieve | MIT | https://github.com/facelessuser/soupsieve |
+| typing_extensions | PSF-2.0 | https://github.com/python/typing_extensions |
+| Qt WebEngine / Chromium (via PySide6_Addons) | Qt WebEngine is covered by the applicable Qt LGPL/GPL or commercial license; Chromium and bundled third-party components retain their respective upstream licenses | https://doc.qt.io/qt-6/qtwebengine-licenses.html |
+| CPython 3.13 | PSF-2.0 and additional notices for bundled components | https://docs.python.org/3/license.html |
+| PyInstaller | GPL-2.0-or-later with the bootloader exception | https://pyinstaller.org/ |
+| pyinstaller-hooks-contrib | Apache-2.0 | https://github.com/pyinstaller/pyinstaller-hooks-contrib |
+| altgraph | MIT | https://github.com/ronaldoussoren/altgraph |
+| pefile | MIT | https://github.com/erocet/pefile |
+| Inno Setup | Inno Setup License; installer compiler is a build-time tool, not bundled | https://jrsoftware.org/isinfo.php |
+| MSYS2 zstd | BSD-3-Clause | https://github.com/facebook/zstd |
+| Windows SDK Manifest Tool (mt.exe) | Microsoft Software License Terms; system build tool, not bundled | https://learn.microsoft.com/windows/apps/desktop/modernize/app-manifest |
 | readpst / libpst 0.6.76.r79.gcc600ee-1 | GPL-2.0-or-later | https://github.com/pst-format/libpst |
 | MSYS2 UCRT64 runtime DLLs bundled with readpst | See the corresponding upstream package licenses | https://packages.msys2.org/ |
 
 The application is distributed under GPL-3.0-or-later. The license terms of each dependency apply to that dependency; this file is an inventory, not a replacement for the upstream license texts.
+
+## Python, Qt, and build-tool license materials
+
+The release build collects the exact installed runtime dependency versions and their license files into `build/licenses/python/{name}-{version}/`; `build/licenses/python-packages.json` records the package names, versions, license metadata, project URLs, and copied paths. The inventory is checked with:
+
+```powershell
+uv run python tools/collect_licenses.py --check-inventory THIRD-PARTY-LICENSES.md
+```
+
+The same collector copies the active Python installation's `LICENSE.txt` to `build/licenses/python/Python-LICENSE.txt`, and the PyInstaller bootloader's `COPYING` to `build/licenses/pyinstaller/bootloader-COPYING.txt`. The build also uses PyInstaller Hooks Contrib, altgraph, pefile, Inno Setup, MSYS2 zstd, and the Windows SDK Manifest Tool; these tools are not application runtime dependencies and are not bundled with the installed application.
+
+Qt's applicable LGPL-3.0 and GPL-3.0 license texts are copied from the version-matched Qt source archives into `build/licenses/qt/`. The QtWebEngine third-party notices are copied, with their original directory structure, from the version-matched QtWebEngine source archive into `build/licenses/qtwebengine/`. For the current PySide6/Qt 6.11.1 build, the Chromium source reports base version 140.0.7339.264 and security-patched version 148.0.7778.96. The source archive is `qtwebengine-everywhere-src-6.11.1.tar.xz`, from https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtwebengine-everywhere-src-6.11.1.tar.xz, SHA-256 `679C66CCC6C158FC215E9C58EF160331ECD29974232E345C05161889F8667083`. Collection includes `LICENSE.Chromium`, `CHROMIUM_VERSION`, `LICENSES/`, the Qt WebEngine/PDF licensing qdocs, Chromium's `LICENSE`, all `README.chromium` files and resolvable `License File:` references, and license-named files. References absent from the source archive are reported in the generated build materials rather than silently discarded.
+
+The Qt/PySide6 corresponding source release assets and their hashes are listed in the generated [`build/licenses/QT-SOURCE.md`](build/licenses/QT-SOURCE.md). The application bundles the generated license directory; the About dialog opens it from the installed application. The complete corresponding source archives are supplied separately with each release.
 
 ## Bundled readpst artifacts
 

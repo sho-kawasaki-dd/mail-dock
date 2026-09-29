@@ -213,8 +213,8 @@ G（Inno Setup） → H（CI） → I（ドキュメント整合）
 
 **E1: ライセンス資料収集**
 
-- [ ] `tools/collect_licenses.py` を新設する（Python依存の収集、Python本体/PyInstaller/Qtライセンス全文・採用版QtWebEngineの第三者告知資料の収集、`--check-inventory` オプション。不足時は失敗。告知の収集元はグループ0のPoCで確定したものを使用）
-- [ ] `THIRD-PARTY-LICENSES.md` に Python本体・PyInstaller・Inno Setup・その他ビルド時依存、QtWebEngine告知の収集元版、および同梱 `QT-SOURCE.md` への導線を追記する
+- [x] `tools/collect_licenses.py` を新設する（Python依存の収集、Python本体/PyInstaller/Qtライセンス全文・採用版QtWebEngineの第三者告知資料の収集、`--check-inventory` オプション。不足時は失敗。告知の収集元はグループ0のPoCで確定したものを使用）
+- [x] `THIRD-PARTY-LICENSES.md` に Python本体・PyInstaller・Inno Setup・その他ビルド時依存、QtWebEngine告知の収集元版、および同梱 `QT-SOURCE.md` への導線を追記する
 
 **E2: Qt対応ソース取得（F の PyInstaller ビルド後に実施）**
 
