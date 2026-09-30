@@ -215,6 +215,11 @@ G（Inno Setup） → H（CI） → I（ドキュメント整合）
 
 - [x] `tools/collect_licenses.py` を新設する（Python依存の収集、Python本体/PyInstaller/Qtライセンス全文・採用版QtWebEngineの第三者告知資料の収集、`--check-inventory` オプション。不足時は失敗。告知の収集元はグループ0のPoCで確定したものを使用）
 - [x] `THIRD-PARTY-LICENSES.md` に Python本体・PyInstaller・Inno Setup・その他ビルド時依存、QtWebEngine告知の収集元版、および同梱 `QT-SOURCE.md` への導線を追記する
+- [x] 実アーカイブ（`qtbase-everywhere-src-6.11.1.tar.xz`、`qtwebengine-everywhere-src-6.11.1.tar.xz`）での収集を実行して確認し、不足分を修正する（2026-09-30）
+  - PyInstaller 6.22.3 のwheelでは `COPYING.txt` が `dist-info/licenses/` にあり、パスに `bootloader` を含まないため検出に失敗していた。`bootloader` を含むパスを優先しつつ `COPYING(.txt)` 全般を候補とするよう修正した。
+  - ライセンス名判定が前方一致のみで、Qt収集に `licensewizard.cpp` 等の無関係ファイルが混入していた。`LICENSE` / `LICENCE` / `LICENSES` / `LicenseRef-*` / `COPYING*` / `NOTICE*` などに区切り文字条件付きで一致する正規表現へ絞り込んだ。
+  - QtWebEngine（xz）の抽出をtar内オフセット順に変更した（名前順だと後方シークのたびに先頭から再展開され、実質的に完了しなかった）。実測で約2分13秒。
+  - 結果: Qtテキスト（`LICENSES/GPL-3.0-only.txt`・`LGPL-3.0-only.txt` を含む）とQtWebEngine告知が `build/licenses/` へ集まり、`--inventory THIRD-PARTY-LICENSES.md` も通過。`License File:` 参照が欠けるのは54件（PoC時点は55件）で警告として記録する。
 
 **E2: Qt対応ソース取得（F の PyInstaller ビルド後に実施）**
 
@@ -225,9 +230,11 @@ G（Inno Setup） → H（CI） → I（ドキュメント整合）
 ### **3.6 グループF: PyInstaller（*A・C・D・E1に依存。E2（Qt対応ソース）は本グループのビルド後に実施*）**
 
 - [x] `packaging/pyinstaller/mail-dock.spec` を新設する（onedir、リポジトリルート基準のパス解決、`pathex=["src"]`、`keyring` の `hiddenimports`/`copy_metadata`、`datas` でのパッケージ内 `migrations` とルート直下リソースの配置先厳密化、`vendor/readpst/` の同梱対象を `*.exe`/`*.dll`/`COPYING` 等に限定、バージョンリソース、manifest）
-- [ ] `tools/build_windows.ps1` を新設し、一連のビルド手順をまとめる（`--workpath build/pyinstaller --distpath dist`。E2 をビルド後に呼び出し、二重ビルドは行わない）
+- [x] `tools/build_windows.ps1` を新設し、一連のビルド手順をまとめる（`--workpath build/pyinstaller --distpath dist`。E2 をビルド後に呼び出し、二重ビルドは行わない）
+  - 2026-09-30時点で、依存同期→readpst取得検証→ライセンス収集→PyInstallerビルドまで実行成功を確認済み。E2の `tools/build_qt_sources.ps1` は未実装のため、現状はそのステージで明示的に停止する（E2完了後に最後まで通す）。
 - [x] `tools/verify_release_bundle.ps1` を新設する（`self-check --require-keyring` を含む。F-30）
-- [ ] ローカルビルドで生成したexeが起動し、`self-check --require-keyring` が成功することを確認する（凍結で keyring バックエンドが `SUPPORTED` のままであることを含む）
+- [x] ローカルビルドで生成したexeが起動し、`self-check --require-keyring` が成功することを確認する（凍結で keyring バックエンドが `SUPPORTED` のままであることを含む）
+  - 2026-09-30: `verify_release_bundle.ps1` が成功し、凍結exeの `self-check --require-keyring --output` が全9項目 passed（`keyring` / `required_keyring` は `supported`）。E2未実装のため、`QT-SOURCE.md` は検証用の仮ファイルを `dist` にのみ置いて確認し、確認後に削除した（本物の `QT-SOURCE.md` はE2で生成する）。
 
 ### **3.7 グループG: Inno Setup（*F・E2に依存*）**
 

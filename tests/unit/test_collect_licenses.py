@@ -8,10 +8,12 @@ from pathlib import Path
 import pytest
 
 from tools.collect_licenses import (
+    _LICENSE_NAME,
     CollectionError,
     _check_inventory,
     _collect_qtwebengine,
     _copy_python_licenses,
+    _find_pyinstaller_copying,
     _marker_environment,
     _parse_args,
     _requirement_applies,
@@ -55,6 +57,32 @@ def test_collect_python_licenses_copies_every_runtime_package(tmp_path: Path) ->
     manifest.write_text(json.dumps({"packages": records}), encoding="utf-8")
     inventory = Path(__file__).resolve().parents[2] / "THIRD-PARTY-LICENSES.md"
     _check_inventory(manifest, inventory)
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("LICENSE", True),
+        ("LICENCE.md", True),
+        ("LICENSE-SLJIT", True),
+        ("COPYING-CMAKE-SCRIPTS", True),
+        ("LICENSES", True),
+        ("licensewizard.cpp", False),
+        ("licenseRule.json", False),
+        ("licenseheader.h.in", False),
+    ],
+)
+def test_license_name_pattern_excludes_unrelated_files(name: str, expected: bool) -> None:
+    assert bool(_LICENSE_NAME.match(name)) is expected
+
+
+def test_pyinstaller_copying_is_found_in_the_installed_distribution() -> None:
+    pytest.importorskip("PyInstaller")
+
+    copying = _find_pyinstaller_copying(None)
+
+    assert copying.is_file()
+    assert "pyinstaller" in copying.read_text(encoding="utf-8", errors="replace").lower()
 
 
 def test_collect_qtwebengine_preserves_notices_and_resolves_readme_references(

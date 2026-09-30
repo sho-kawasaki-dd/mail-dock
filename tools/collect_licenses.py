@@ -18,7 +18,9 @@ from importlib import metadata
 from pathlib import Path, PurePosixPath
 from typing import Any, TypedDict
 
-_LICENSE_NAME = re.compile(r"(?i)^(?:license|licence|copying|copyright|notice|unlicense)")
+_LICENSE_NAME = re.compile(
+    r"(?i)^(?:licen[cs]es?|licenseref|copying|copyright|notice|unlicense)(?:[-._].*)?$"
+)
 _PACKAGE_NAME = re.compile(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
 
@@ -241,12 +243,14 @@ def _find_pyinstaller_copying(explicit_path: Path | None) -> Path:
         raise CollectionError(
             "PyInstaller bootloader COPYING was not found; pass --pyinstaller-bootloader-copying"
         ) from error
-    candidates = [
-        Path(str(distribution.locate_file(entry)))
-        for entry in distribution.files or ()
-        if PurePosixPath(str(entry)).name.lower() in {"copying", "copying.txt"}
-        and "bootloader" in str(entry).lower()
-    ]
+    candidates = sorted(
+        (
+            Path(str(distribution.locate_file(entry)))
+            for entry in distribution.files or ()
+            if PurePosixPath(str(entry)).name.lower() in {"copying", "copying.txt"}
+        ),
+        key=lambda path: "bootloader" not in path.as_posix().lower(),
+    )
     for candidate in candidates:
         if candidate.is_file():
             return candidate
@@ -386,7 +390,7 @@ def _collect_qtwebengine(
         with tarfile.open(source, mode="r:*") as archive:
             members = _archive_members(archive)
             selected, missing = _webengine_license_members(archive, members)
-            for path in sorted(selected, key=lambda item: item.as_posix().lower()):
+            for path in sorted(selected, key=lambda item: members[item].offset_data):
                 member = members[path]
                 root_index = next(
                     index

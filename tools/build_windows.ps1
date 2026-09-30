@@ -37,6 +37,9 @@ try {
     if (-not [string]::IsNullOrWhiteSpace($ZstdPath)) { $verifyReadpstArguments += @("-ZstdPath", $ZstdPath) }
     Invoke-Checked (Join-Path $PSHOME "pwsh.exe") $verifyReadpstArguments
 
+    $licenseOutput = Join-Path $repositoryRoot "build\licenses"
+    if (Test-Path -LiteralPath $licenseOutput) { Remove-Item -LiteralPath $licenseOutput -Recurse -Force }
+
     $licenseArguments = @(
         "run", "python", "tools/collect_licenses.py",
         "--output-dir", "build/licenses",
