@@ -83,7 +83,11 @@ try {
         }
         $installerScript = Join-Path $repositoryRoot "packaging\inno\mail-dock.iss"
         if (-not (Test-Path -LiteralPath $installerScript -PathType Leaf)) { throw "Inno Setup script is not available yet: $installerScript" }
-        Invoke-Checked $InnoSetupCompiler @("/Qp", $installerScript, "/O$repositoryRoot\dist")
+        $appVersion = & uv run python -c "from mail_dock import __version__; print(__version__)"
+        if ($LASTEXITCODE -ne 0) { throw "Could not read the application version from mail_dock.__version__." }
+        $appVersion = $appVersion.Trim()
+        if ($appVersion -notmatch '^\d+\.\d+\.\d+$') { throw "Unsupported application version: $appVersion" }
+        Invoke-Checked $InnoSetupCompiler @("/Qp", "/DAppVersion=$appVersion", $installerScript, "/O$repositoryRoot\dist")
     }
 }
 finally {

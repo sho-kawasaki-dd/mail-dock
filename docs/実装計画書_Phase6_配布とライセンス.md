@@ -238,8 +238,8 @@ G（Inno Setup） → H（CI） → I（ドキュメント整合）
 
 ### **3.7 グループG: Inno Setup（*F・E2に依存*）**
 
-- [ ] `packaging/inno/mail-dock.iss` を新設する（権限設定、`[InstallDelete]`、ショートカット、多言語。Inno Setup 6.3 以上を要件とする）
-- [ ] アンインストール時の確認ダイアログとレジストリ・所有が確認できた設定ファイル／ログだけを削除する `[Code]` セクションを実装する（ディレクトリ再帰削除禁止、F-34 の判定順：全ユーザー→サイレント→`config.json`（UTF-8・JSONエスケープ解除）の候補パス照合→`.maildock_root` / `metadata.db` / `manifests` 存在確認→`FILE_ATTRIBUTE_REPARSE_POINT` 検出。いずれかで判定不能なら中止）
+- [x] `packaging/inno/mail-dock.iss` を新設する（権限設定、`[InstallDelete]`、ショートカット、多言語。Inno Setup 6.3 以上を要件とする）
+- [x] アンインストール時の確認ダイアログとレジストリ・所有が確認できた設定ファイル／ログだけを削除する `[Code]` セクションを実装する（ディレクトリ再帰削除禁止、F-34 の判定順：全ユーザー→サイレント→`config.json`（UTF-8・JSONエスケープ解除）の候補パス照合→`.maildock_root` / `metadata.db` / `manifests` 存在確認→`FILE_ATTRIBUTE_REPARSE_POINT` 検出。いずれかで判定不能なら中止）
 - [ ] ローカルでインストール／上書きインストール／アンインストールを手動確認し、設定ディレクトリ内にストレージルートがある場合もメールデータが残ることを確認する
 
 ### **3.8 グループH: CI・リリースワークフロー（*F・E2・Gに依存*）**
