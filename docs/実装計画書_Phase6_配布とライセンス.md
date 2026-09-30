@@ -224,9 +224,9 @@ G（Inno Setup） → H（CI） → I（ドキュメント整合）
 
 ### **3.6 グループF: PyInstaller（*A・C・D・E1に依存。E2（Qt対応ソース）は本グループのビルド後に実施*）**
 
-- [ ] `packaging/pyinstaller/mail-dock.spec` を新設する（onedir、リポジトリルート基準のパス解決、`pathex=["src"]`、`keyring` の `hiddenimports`/`copy_metadata`、`datas` でのパッケージ内 `migrations` とルート直下リソースの配置先厳密化、`vendor/readpst/` の同梱対象を `*.exe`/`*.dll`/`COPYING` 等に限定、バージョンリソース、manifest）
+- [x] `packaging/pyinstaller/mail-dock.spec` を新設する（onedir、リポジトリルート基準のパス解決、`pathex=["src"]`、`keyring` の `hiddenimports`/`copy_metadata`、`datas` でのパッケージ内 `migrations` とルート直下リソースの配置先厳密化、`vendor/readpst/` の同梱対象を `*.exe`/`*.dll`/`COPYING` 等に限定、バージョンリソース、manifest）
 - [ ] `tools/build_windows.ps1` を新設し、一連のビルド手順をまとめる（`--workpath build/pyinstaller --distpath dist`。E2 をビルド後に呼び出し、二重ビルドは行わない）
-- [ ] `tools/verify_release_bundle.ps1` を新設する（`self-check --require-keyring` を含む。F-30）
+- [x] `tools/verify_release_bundle.ps1` を新設する（`self-check --require-keyring` を含む。F-30）
 - [ ] ローカルビルドで生成したexeが起動し、`self-check --require-keyring` が成功することを確認する（凍結で keyring バックエンドが `SUPPORTED` のままであることを含む）
 
 ### **3.7 グループG: Inno Setup（*F・E2に依存*）**
