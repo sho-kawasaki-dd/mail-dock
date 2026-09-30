@@ -223,9 +223,9 @@ G（Inno Setup） → H（CI） → I（ドキュメント整合）
 
 **E2: Qt対応ソース取得（F の PyInstaller ビルド後に実施）**
 
-- [ ] `packaging/qt/qt-module-map.json`（DLL名→Qtモジュール名）と `packaging/qt/qt-source.lock.json`（版ごとの URL・ファイル名・SHA-256）を新設する
-- [ ] Qt対応ソース取得ロジック（収集DLLからモジュール決定→対応表にないDLLは失敗→取得→ロックとSHA-256照合→モジュール別または一括zip化、2GB/リソース制限対策、`uv.lock` の PySide6 版との一致検査）を実装する
-- [ ] zipのハッシュ確定後に `build/licenses/QT-SOURCE.md` を生成し、`dist/mail-dock/_internal/licenses/` へ後置きするロジックを実装する
+- [x] `packaging/qt/qt-module-map.json`（DLL名→Qtモジュール名）と `packaging/qt/qt-source.lock.json`（版ごとの URL・ファイル名・SHA-256）を新設する
+- [x] Qt対応ソース取得ロジック（収集DLLからモジュール決定→対応表にないDLLは失敗→取得→ロックとSHA-256照合→モジュール別または一括zip化、2GB/リソース制限対策、`uv.lock` の PySide6 版との一致検査）を実装する
+- [x] zipのハッシュ確定後に `build/licenses/QT-SOURCE.md` を生成し、`dist/mail-dock/_internal/licenses/` へ後置きするロジックを実装する
 
 ### **3.6 グループF: PyInstaller（*A・C・D・E1に依存。E2（Qt対応ソース）は本グループのビルド後に実施*）**
 

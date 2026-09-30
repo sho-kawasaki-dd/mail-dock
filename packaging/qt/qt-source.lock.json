@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "qt_version": "6.11.1",
+  "pyside_version": "6.11.1",
+  "pyside_setup": {
+    "filename": "pyside-setup-everywhere-src-6.11.1.tar.xz",
+    "url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.11.1-src/pyside-setup-everywhere-src-6.11.1.tar.xz",
+    "sha256": "6FFD9835BB0DD2C56F061D62F1616BB1707CFC0202B80E3165D6BE087F3965E2"
+  },
+  "modules": {
+    "qt3d": { "filename": "qt3d-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qt3d-everywhere-src-6.11.1.tar.xz", "sha256": "A66D8C8E049D1EE7A7687B34940F3555D0D7084858B6DC78D1E1CB7DF40A0107" },
+    "qt5compat": { "filename": "qt5compat-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qt5compat-everywhere-src-6.11.1.tar.xz", "sha256": "CFCB9FDAA051AAD54B0E61B24AC5693B4887A86E07609F665FEA67328A6F161B" },
+    "qtbase": { "filename": "qtbase-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtbase-everywhere-src-6.11.1.tar.xz", "sha256": "D9594A31228AA23AD6B531719A29B45F0F3989FE6C136D45767EA179F233C1AC" },
+    "qtcharts": { "filename": "qtcharts-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtcharts-everywhere-src-6.11.1.tar.xz", "sha256": "3FE3ED318C2A86D1417C5C29CF7494275E8FD4B537CD37453F5599C57365515C" },
+    "qtdeclarative": { "filename": "qtdeclarative-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtdeclarative-everywhere-src-6.11.1.tar.xz", "sha256": "52E670F670B0304F534B24F98C47CEB8A41BB710464414EBC9527EC71CC86AA4" },
+    "qtdatavis3d": { "filename": "qtdatavis3d-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtdatavis3d-everywhere-src-6.11.1.tar.xz", "sha256": "1E1A7B9C0A947731655334F5D79252D40CDAF58C1801074EA5E9E0821D6693AC" },
+    "qtgraphs": { "filename": "qtgraphs-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtgraphs-everywhere-src-6.11.1.tar.xz", "sha256": "84B1138AB68A8E2956439895A4B85EB68DDA48AC169DA673F67191873B1E0462" },
+    "qtimageformats": { "filename": "qtimageformats-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtimageformats-everywhere-src-6.11.1.tar.xz", "sha256": "B2BF6C6845AC175ED7F819145483BA4676F617AAA6A5012C8EFEE63C8BBAC413" },
+    "qtlocation": { "filename": "qtlocation-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtlocation-everywhere-src-6.11.1.tar.xz", "sha256": "3791CE77299E6F600A593D0FBFA5BD32FBCFC2D16104782B84ACC489E382E41B" },
+    "qtmultimedia": { "filename": "qtmultimedia-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtmultimedia-everywhere-src-6.11.1.tar.xz", "sha256": "390F8E52DDEE3ACA5C4DE7EEAD900C84C4FA61FF6D1F0EBEA9C7543365C09B0A" },
+    "qtpositioning": { "filename": "qtpositioning-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtpositioning-everywhere-src-6.11.1.tar.xz", "sha256": "D5E6B91801AE286E7630016CAEA3BDC5E1978B4291D6741D0D64C125650F78F5" },
+    "qtquick3d": { "filename": "qtquick3d-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtquick3d-everywhere-src-6.11.1.tar.xz", "sha256": "C76B85DE3F8AA2A4BEE64987ACFEF560675C1B378B92076C7C6264613E5B456F" },
+    "qtquicktimeline": { "filename": "qtquicktimeline-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtquicktimeline-everywhere-src-6.11.1.tar.xz", "sha256": "AF53F643FD9E4045E1B9BA919998E5C048CA877452C08036C9C8C5EE07EA8C27" },
+    "qtremoteobjects": { "filename": "qtremoteobjects-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtremoteobjects-everywhere-src-6.11.1.tar.xz", "sha256": "40629895C69531A687A9C0258316CEE3F04C2D18B2BF2AD36DC83E76A58F111A" },
+    "qtscxml": { "filename": "qtscxml-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtscxml-everywhere-src-6.11.1.tar.xz", "sha256": "8E495245E5D1FE75DE612C8A07E4043635407A1979BB1DD588F1751D1390203F" },
+    "qtsensors": { "filename": "qtsensors-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtsensors-everywhere-src-6.11.1.tar.xz", "sha256": "23617062DA7BE526D023DEC7F9B76231001A1098A7E5F94C646F2E4F87CFCF8F" },
+    "qtserialport": { "filename": "qtserialport-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtserialport-everywhere-src-6.11.1.tar.xz", "sha256": "9AF31A898FFD9A7E4FAF6FED845D29E783C716885789055CBE319F3E072D3974" },
+    "qtshadertools": { "filename": "qtshadertools-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtshadertools-everywhere-src-6.11.1.tar.xz", "sha256": "2075052F9B23BCF9DE045BBD180037084942F82CCE870AAB14A1454902C982FC" },
+    "qtspeech": { "filename": "qtspeech-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtspeech-everywhere-src-6.11.1.tar.xz", "sha256": "C035C318012025875A653245701A23D3807E8E46B8BF7987877842219C273F14" },
+    "qtsvg": { "filename": "qtsvg-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtsvg-everywhere-src-6.11.1.tar.xz", "sha256": "7F3CF02F4824BF03C2C5859EA6DB173BF1482A1DAF24E6CDF7BC78CFA26A8A94" },
+    "qtvirtualkeyboard": { "filename": "qtvirtualkeyboard-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtvirtualkeyboard-everywhere-src-6.11.1.tar.xz", "sha256": "A1C6967B326243B2CA8D50BC7B7F7852C3975D9AA6CE4B186EBDF35BB1007E1C" },
+    "qtwebchannel": { "filename": "qtwebchannel-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtwebchannel-everywhere-src-6.11.1.tar.xz", "sha256": "69FBB50B71D6E6596C2D6863EE9A9C984A4D01378EE2B7B4163BB467A0158D82" },
+    "qtwebengine": { "filename": "qtwebengine-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtwebengine-everywhere-src-6.11.1.tar.xz", "sha256": "679C66CCC6C158FC215E9C58EF160331ECD29974232E345C05161889F8667083" },
+    "qtwebsockets": { "filename": "qtwebsockets-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtwebsockets-everywhere-src-6.11.1.tar.xz", "sha256": "243E3AA11924C8C5C1645E892F62D013CAA3766C57512CA926D5B58146646FBF" },
+    "qtwebview": { "filename": "qtwebview-everywhere-src-6.11.1.tar.xz", "url": "https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtwebview-everywhere-src-6.11.1.tar.xz", "sha256": "8D62C8EF70D58260E9B3E8B5FC1A8BC48495308A4437003A394483757427133D" }
+  }
+}
