@@ -18,6 +18,7 @@ from PyInstaller.utils.win32.versioninfo import (
 ROOT = Path(SPECPATH).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from mail_dock import __version__
+from mail_dock.infrastructure.diagnostics import DYNAMIC_MODULES
 
 
 def version_tuple(version: str) -> tuple[int, int, int, int]:
@@ -96,7 +97,7 @@ a = Analysis(
     pathex=[str(ROOT / "src")],
     binaries=[],
     datas=datas,
-    hiddenimports=["keyring.backends.Windows"],
+    hiddenimports=["keyring.backends.Windows", *DYNAMIC_MODULES],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

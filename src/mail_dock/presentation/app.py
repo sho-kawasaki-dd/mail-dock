@@ -9,6 +9,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from types import TracebackType
 from typing import Any, cast
 
 from PySide6.QtCore import QCoreApplication, QObject, Qt, QThread, Signal, Slot
@@ -134,10 +135,18 @@ class _StartupVerificationCompletion(QObject):
 
     @Slot()
     def verified(self) -> None:
-        if self._window_factory is not None:
-            window = self._window_factory(self._context)
-        else:
-            window = self._context.build_main_window()
+        try:
+            if self._window_factory is not None:
+                window = self._window_factory(self._context)
+            else:
+                window = self._context.build_main_window()
+        except BaseException as error:
+            # An uncaught slot exception would leave app.exec() running with no window.
+            LOGGER.exception("Main window creation failed")
+            self._result["error"] = error
+            _show_error(error)
+            self._app.quit()
+            return
         self._result["window"] = window
         try:
             _run_startup_purge(self._context, window)
@@ -907,6 +916,14 @@ class _GuiRuntime:
         self._release_current()
 
 
+def _log_uncaught_exception(
+    exc_type: type[BaseException],
+    exc_value: BaseException,
+    exc_traceback: TracebackType | None,
+) -> None:
+    LOGGER.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+
 def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -> int:
     """Run the GUI and return its process exit code.
 
@@ -917,6 +934,8 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
 
     register_schemes()
     app = QApplication.instance() or QApplication(sys.argv)
+    previous_excepthook = sys.excepthook
+    sys.excepthook = _log_uncaught_exception
     session: StorageSession | None = None
     context: AppContext | None = None
     window: Any = None
@@ -1031,6 +1050,7 @@ def run_gui(settings: config.AppConfig, *, requested_root: Path | None = None) -
         _show_error(error)
         return _exit_code(error) if isinstance(error, MailDockError) else 1
     finally:
+        sys.excepthook = previous_excepthook
         if runtime is not None:
             runtime.close()
             session = None

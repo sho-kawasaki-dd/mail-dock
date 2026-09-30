@@ -101,3 +101,31 @@ def test_main_window_is_built_only_after_verification_finishes(
     qtbot.waitUntil(lambda: bool(built), timeout=2_000)
     assert result["window"] is window
     assert window.shown
+
+
+def test_main_window_creation_failure_reports_error_and_quits(
+    tmp_path: Path,
+    qtbot: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _Session("quick", tmp_path)
+    application = QApplication.instance()
+    assert application is not None
+    shown: list[BaseException] = []
+    quits: list[bool] = []
+    monkeypatch.setattr(app, "_verify_database", lambda _connection: None)
+    monkeypatch.setattr(app, "_show_error", shown.append)
+    monkeypatch.setattr(application, "quit", lambda: quits.append(True))
+    context = type("Context", (), {})()
+    context.settings = session.settings
+
+    def build_main_window() -> None:
+        raise ModuleNotFoundError("missing bundled module")
+
+    context.build_main_window = build_main_window
+    _thread, result = app._start_verification(application, cast(Any, session), cast(Any, context))
+
+    qtbot.waitUntil(lambda: bool(quits), timeout=2_000)
+    assert result["window"] is None
+    assert isinstance(result["error"], ModuleNotFoundError)
+    assert shown == [result["error"]]

@@ -222,3 +222,15 @@ def test_self_check_cli_returns_failure_for_failed_check(monkeypatch: Any, tmp_p
     result = cli.main(["self-check", "--output", str(output_path)])
 
     assert result == 1
+
+
+def test_self_check_reports_missing_dynamic_module(monkeypatch: Any) -> None:
+    def fail_import(name: str) -> object:
+        raise ModuleNotFoundError(name)
+
+    monkeypatch.setattr(diagnostics, "import_module", fail_import)
+
+    check = diagnostics._dynamic_modules_check()
+
+    assert not check.passed
+    assert "html_sanitizer" in check.detail

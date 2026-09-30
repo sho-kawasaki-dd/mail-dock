@@ -7,7 +7,7 @@ import os
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
-from importlib import resources
+from importlib import import_module, resources
 
 from mail_dock import __version__
 from mail_dock.infrastructure import app_paths
@@ -95,6 +95,26 @@ def _codec_check() -> DiagnosticCheck:
     return DiagnosticCheck("mail_codecs", True, f"Available: {', '.join(codecs_to_check)}")
 
 
+# Modules loaded by name at runtime; PyInstaller cannot discover them statically.
+DYNAMIC_MODULES = (
+    "mail_dock.infrastructure.parsing.eml_render",
+    "mail_dock.infrastructure.parsing.html_sanitizer",
+    "mail_dock.usecases.open_message",
+)
+
+
+def _dynamic_modules_check() -> DiagnosticCheck:
+    missing: list[str] = []
+    for name in DYNAMIC_MODULES:
+        try:
+            import_module(name)
+        except Exception:
+            missing.append(name)
+    if missing:
+        return DiagnosticCheck("dynamic_modules", False, f"Unavailable: {', '.join(missing)}")
+    return DiagnosticCheck("dynamic_modules", True, "Dynamically loaded modules are importable")
+
+
 def _readpst_check() -> DiagnosticCheck:
     try:
         version = ReadPstLocator().get_version()
@@ -153,6 +173,7 @@ def run_self_check(
         _migration_check(),
         _fts5_check(),
         _codec_check(),
+        _dynamic_modules_check(),
         _readpst_check(),
         _keyring_check(),
     ]
