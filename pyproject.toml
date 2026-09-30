@@ -53,6 +53,7 @@ select = ["E", "F", "I", "N", "UP", "B", "SIM", "PTH", "RUF"]
 strict = true
 python_version = "3.13"
 files = ["src", "tests"]
+exclude = ["^(build|dist|packaging|tools|vendor)/"]
 
 [[tool.mypy.overrides]]
 module = ["mail_dock.presentation.*", "PySide6.*"]

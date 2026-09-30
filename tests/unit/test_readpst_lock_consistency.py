@@ -1,7 +1,7 @@
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from mail_dock.infrastructure.importers.readpst_locator import _WINDOWS_READPST_DLLS
 
@@ -10,7 +10,7 @@ LOCK_PATH = ROOT / "packaging" / "readpst" / "msys2-packages.lock.json"
 
 
 def _load_lock() -> dict[str, Any]:
-    return json.loads(LOCK_PATH.read_text(encoding="utf-8"))
+    return cast(dict[str, Any], json.loads(LOCK_PATH.read_text(encoding="utf-8")))
 
 
 def test_locked_readpst_dlls_match_runtime_locator() -> None:

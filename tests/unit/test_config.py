@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from mail_dock import config as config_module
+import mail_dock.config as config_module
 from mail_dock.domain.errors import ConfigError, ConfigVersionTooNewError
 
 
