@@ -253,10 +253,10 @@ G（Inno Setup） → H（CI） → I（ドキュメント整合）
 
 ### **3.9 グループI: ドキュメント整合（*各グループと並行*）**
 
-- [ ] README にインストール手順・SmartScreen警告の説明・アンインストールの挙動・ソースからのビルド手順・対応ソース入手方法・「CLIは開発環境のみ」の注記を追加する
-- [ ] 開発計画書 5.9・6章・8章にPhase 6の実績・決定事項を追記する
-- [ ] `.github/copilot-instructions.md` にビルドコマンド（`tools/build_windows.ps1` 等）を追記する
-- [ ] `ruff check .` / `mypy .` / `pytest -m "not docker and not gui and not pst"` を実行し、全テスト通過を確認する
+- [x] README にインストール手順・SmartScreen警告の説明・アンインストールの挙動・ソースからのビルド手順・対応ソース入手方法・「CLIは開発環境のみ」の注記を追加する
+- [x] 開発計画書 5.9・6章・8章にPhase 6の実績・決定事項を追記する
+- [x] `.github/copilot-instructions.md` にビルドコマンド（`tools/build_windows.ps1` 等）を追記する
+- [x] `ruff check .` / `mypy .` / `pytest -m "not docker and not gui and not pst"` を実行し、全テスト通過を確認する（2026-10-01: ruff・mypy 問題なし、727 passed / 4 skipped）
 
 ---
 

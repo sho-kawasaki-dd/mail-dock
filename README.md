@@ -69,6 +69,36 @@ Under **API permissions**, add the delegated permission `IMAP.AccessAsUser.All` 
 
 Only the signed-in user's mailbox is supported. Shared mailboxes and delegated access are out of scope; do not enter another mailbox address as a substitute for the authenticating user's account.
 
+## Installing on Windows
+
+Download `mail-dock-{version}-setup.exe` from the project's GitHub Releases and run it. The installer is per-user by default (`%LOCALAPPDATA%\Programs\mail-dock`, no administrator rights needed); choose the all-users option in the privileges dialog, or pass `/ALLUSERS`, to install under `Program Files`. The installer never accesses the network.
+
+The installer and executable are **not code-signed**, so Windows SmartScreen may show an "unknown publisher" warning. Choose "More info" and then "Run anyway" after verifying the file against `SHA256SUMS.txt` from the same release.
+
+The distributed `mail-dock.exe` is the GUI only. The command-line subcommands (`sync`, `verify`, `reindex`, ...) are available only in a development environment through `uv run mail-dock ...`; the installed executable accepts just `gui` (default) and `self-check`. `mail-dock.exe self-check --output result.json` runs a read-only diagnostic of the installed environment, and the same check is available from Help > About.
+
+### Uninstalling
+
+Uninstalling removes the program files. For a per-user install, the uninstaller asks whether to also delete mail-dock's settings file, application log, and its `HKCU\Software\mail-dock\mail-dock` registry key; the default is to keep them. Mail data in the storage root (EML files, `metadata.db`, manifests) and credentials saved in the Windows Credential Manager are never deleted. If the settings directory cannot be verified as safe (for example, it contains a storage root), nothing is deleted. A silent or all-users uninstall leaves every user's settings in place.
+
+## Building from source
+
+Building the installer requires Windows, Python 3.13, uv, MSYS2 (UCRT64 with `zstd`), the Windows SDK (`mt.exe`), and Inno Setup 6.3 or later. Download the locked Qt `qtbase` and `qtwebengine` source archives listed in `packaging/qt/qt-source.lock.json`, then run:
+
+```powershell
+pwsh -NoProfile -File .\tools\build_windows.ps1 `
+  -QtLicenseSource <path-to-qtbase-everywhere-src-*.tar.xz> `
+  -QtWebEngineSource <path-to-qtwebengine-everywhere-src-*.tar.xz> `
+  -QtWebEngineSha256 <sha256-from-the-lock-file> `
+  -CompileInstaller
+```
+
+The script fetches readpst from the pinned MSYS2 packages, collects licenses, builds the PyInstaller onedir image into `dist/mail-dock/`, fetches the Qt corresponding source, verifies the bundle (including `self-check --require-keyring`), and compiles the installer into `dist/`. Pushing a `v{version}` tag (which must equal `mail_dock.__version__`) runs the release workflow and creates a draft GitHub release.
+
+### Corresponding source
+
+mail-dock is GPL-3.0-or-later. Every release provides, next to the installer, `mail-dock-{version}-src.tar.gz` (this repository), `mail-dock-{version}-readpst-corresponding-source.zip` (readpst/libpst and the bundled MSYS2 runtime DLLs), and `mail-dock-{version}-qt-corresponding-source.zip` (Qt and PySide6, listed with hashes in the bundled `QT-SOURCE.md`). The installed `licenses` folder and `THIRD-PARTY-LICENSES.md` contain the license texts and notices.
+
 ## Development setup
 
 Requirements: Python 3.13, [uv](https://docs.astral.sh/uv/), and Git. From the repository root:
@@ -109,8 +139,8 @@ before and after the Windows manifest resource patch.
 The GPL-2.0-or-later notice is kept in `vendor/readpst/COPYING`. Do not replace
 the source archive with a URL-only reference when preparing a release: the
 release workflow checks that the converter binaries, GPL notice, corresponding
-source archive, provenance manifest, and checksums are all present before
-creating the readpst artifact.
+source archive, provenance manifest, and checksums are all present, and fails
+the release if any required asset is missing.
 
 ## GUI
 

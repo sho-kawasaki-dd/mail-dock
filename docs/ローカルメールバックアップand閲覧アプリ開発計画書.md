@@ -1434,6 +1434,8 @@ mail-dock本体は **GPL-3.0-or-later** で公開する。同梱する `readpst`
 
 > ★ リリースワークフローに「**GPL成果物（バイナリ＋COPYING＋ソース）が揃っていなければリリースを失敗させるチェック**」を入れる。人間の手順書に任せると必ず忘れる。
 
+**実績（Phase 6）:** PyInstaller onedir（windowed）＋Inno Setup（6.3以上）で配布する。`.github/workflows/release.yml` は `ci`（ci.yml再利用）→`verify`（タグと `__version__` の照合）→`build-windows`→`smoke-clean`（PATHを `C:\Windows\System32;C:\Windows` に限定した別ランナーで、サイレントインストール・`readpst -V`・`self-check --require-keyring`・アンインストール後の設定残存を確認）→`publish`（必須アセット充足確認後にDraft Release作成。`workflow_dispatch` の `dry_run` 既定は確認のみ）の構成とする。ビルド手順・運用の詳細は [実装計画書_Phase6_配布とライセンス.md](./実装計画書_Phase6_配布とライセンス.md) を参照する。
+
 ### **5.10 テスト方針**
 
 | 層 | 手段 |
@@ -1494,7 +1496,7 @@ mail-dock本体は **GPL-3.0-or-later** で公開する。同梱する `readpst`
 | **Phase 5.2a: Gmail OAuth2** | 完了 | IMAP + XOAUTH2、標準ライブラリによるAuthorization Code + PKCE、秘密情報のkeyring保管、Gmailメタデータ取得。単一フォルダ扱いの移行期間を含む。 |
 | **Phase 5.2b: Gmailラベル** | 完了 | canonical `messages` と `message_folders` / identity aliases へ移行し、複数ラベル所属、保守的なMOVE統合、snapshot/reindexに対応。 |
 | **Phase 5.3: Microsoft 365 / Outlook.com** | 完了 | 許可リスト付きOAuth2プロバイダ定義とテナント設定を使い、同じIMAP + XOAUTH2基盤に対応。共有メールボックス・委任アクセスは対象外。 |
-| **Phase 6: 配布とライセンス** | 未着手 | PyInstaller（onedir・windowed）によるビルド、凍結実行時の互換性修正（`__file__`相対参照・子プロセス起動）、Inno Setupインストーラー、readpst依存のMSYS2ロックファイル化と対応ソース添付、Qt/PySide6の対応ソース添付、`self-check`診断コマンドとバージョン情報ダイアログ、GPL成果物の充足を検査するリリースCIを実装する。詳細は [実装計画書_Phase6_配布とライセンス.md](./実装計画書_Phase6_配布とライセンス.md) を参照する。 |
+| **Phase 6: 配布とライセンス** | 実装済み（GitHub Actions上でのリリースワークフロー試験実行は未確認） | PyInstaller（onedir・windowed）によるビルド、凍結実行時の互換性修正（`__file__`相対参照・子プロセス起動）、Inno Setupインストーラー、readpst依存のMSYS2ロックファイル化と対応ソース添付、Qt/PySide6の対応ソース添付、`self-check`診断コマンドとバージョン情報ダイアログ、GPL成果物の充足を検査するリリースCIを実装する。詳細は [実装計画書_Phase6_配布とライセンス.md](./実装計画書_Phase6_配布とライセンス.md) を参照する。 |
 
 詳細な要件・決定事項・検証履歴は [実装計画書_Phase5_マルチプロトコル対応.md](./実装計画書_Phase5_マルチプロトコル対応.md) を参照する。
 
@@ -1593,3 +1595,7 @@ mail-dock本体は **GPL-3.0-or-later** で公開する。同梱する `readpst`
 | **UIの切り替え** | 左ペインを「メールアカウント」と「PSTアーカイブ」の2ルートに分ける。横断表示はルート内に限定 |
 | **PST機能の開発順序** | Phase 4 の後に Phase 4.5 として実施。冒頭に readpst の実PST PoC を置く |
 | **公開形態とライセンス** | **GitHubでGPL-3.0-or-laterとして公開**する。readpstはGPL-2.0-or-laterの独立成果物として、完全な対応ソース、MSYS2ビルド情報・パッチ、COPYING、依存DLL情報を同梱する |
+| **配布物の構成（Phase 6）** | 配布exeはGUI用windowedの `mail-dock.exe` 1本のみ。CLIは開発環境限定で、凍結ビルドは `gui` / `self-check` 以外を終了コード2で拒否する。PyInstaller onedir + Inno Setup（既定はユーザー単位インストール、全ユーザーも選択可）。初回版は 0.1.0、バージョンは `mail_dock.__version__` に単一化し、タグ `v{version}` との一致をCIで検査する。コード署名・アイコン・自動更新はスコープ外 |
+| **対応ソース提供（Phase 6）** | readpstと同梱MSYS2 DLLは `packaging/readpst/msys2-packages.lock.json` でSHA-256固定し、`readpst-msys2-mirror` Releaseへミラーする。Qt/PySide6は `packaging/qt/qt-source.lock.json` で固定したモジュール別ソースを、収集DLLから決定して添付する。Release資産は setup.exe / src.tar.gz / readpst対応ソースzip / Qt対応ソースzip / `SHA256SUMS.txt` で、欠ければpublishジョブが失敗する |
+| **アンインストール方針（Phase 6）** | 既定は設定・ログを残す。削除を選んでも所有確認できた `config.json`・`logs/app.log` と `HKCU\Software\mail-dock\mail-dock` のみで、再帰削除はしない。ストレージルートと keyring の資格情報は一切削除しない |
+| **自己診断（Phase 6）** | `self-check [--output PATH] [--require-keyring]` は設定・ストレージ・秘密情報に触れない読み取り専用診断。リリースのスモークテストは `--require-keyring` を必須とし、同じ診断をバージョン情報ダイアログからも実行できる |

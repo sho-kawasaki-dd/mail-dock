@@ -64,6 +64,8 @@ presentation/   ← PySide6固有（View/ViewModel/QThreadワーカー）
 - 依存関係・テストツールは開発計画書 2.1節の確定依存を `pyproject.toml` に反映する（PySide6, keyring, beautifulsoup4, charset-normalizer, platformdirs / dev: pytest, pytest-qt, pytest-cov, ruff, mypy）。
 - Lint/型チェック/テスト: `ruff check .`, `mypy .`, `pytest`。PST実機結合テストは `pst` マーカーで管理し、通常の検証は `pytest -m "not docker and not gui and not pst"` で実行する。
 - IMAP結合テストは Docker上の Dovecot/GreenMail を使用する想定（5.10節）。ただしDockerを用いたテストはWSL上で実行する。
+- Windows配布物のビルド: `pwsh -NoProfile -File .\tools\build_windows.ps1 -QtLicenseSource <qtbase.tar.xz> -QtWebEngineSource <qtwebengine.tar.xz> -QtWebEngineSha256 <sha> -CompileInstaller`（readpst取得→ライセンス収集→PyInstaller→Qt対応ソース→検証→Inno Setup）。個別には `tools/fetch_readpst.ps1` / `tools/verify_readpst_bundle.ps1` / `tools/verify_release_bundle.ps1` / `tools/collect_licenses.py` / `tools/build_qt_sources.ps1`。リリースは `v{version}` タグ（`mail_dock.__version__` と一致必須）で `.github/workflows/release.yml` が起動する。
+- 凍結ビルド（PyInstaller）の配布exeはGUI専用。`gui` / `self-check` 以外のCLIは開発環境（`uv run mail-dock ...`）のみ。`__file__` 相対でリソースを参照せず `infrastructure/app_paths.py` の `bundle_root()` を使う。
 
 ## リポジトリ構成
 
