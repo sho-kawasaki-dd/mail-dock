@@ -351,27 +351,27 @@ G（Inno Setup） → H（CI） → I（ドキュメント整合）
 各項目の完了を確認したうえで、対応するタスクのチェックボックスを埋めること。
 
 - [ ] V-1（ブロッカー）. `readpst_locator` / `_open_encryption_guide` / `capabilities` の凍結対応を単体テストで確認し、PyInstallerビルドしたexeで実際に排他ロックプローブが実測最大値で `_LOCK_PROBE_TIMEOUT_SECONDS` の50%以下に完了し `OK` と判定されること。子プロセス起動時にウィンドウのチラつきがないこと。ロック取得成功 (`0`)・競合 (`1`)・不正パス／import失敗／例外等 (`2以上`)・タイムアウトを注入し、`1` 以外をロック成功と誤判定しないこと
-- [ ] V-2. 凍結ビルドの `mail-dock.exe sync`、未知のコマンド、不正オプションが終了コード2を返して `app.log` に理由を記録し、設定読込や禁止コマンドの実行を行わないこと。ログに生の引数・秘密情報を残さず、非凍結CLIは従来どおり動くこと
-- [ ] V-3. `self-check` が非凍結・凍結の両方で実行でき、秘密情報を含まないJSONを出力すること。凍結バイナリにおいて `--output` 経由で正常にJSONファイルが出力され、コンソール未接続でも異常終了しないこと。readpst未検出時や同梱ライセンス資料欠落時に失敗（終了コード1）すること。凍結exeで `--require-keyring` 付きの `self-check` が成功し、keyring バックエンドが `SUPPORTED` であること
-- [ ] V-4. バージョン情報ダイアログからライセンス表示・診断実行ができること
+- [x] V-2. 凍結ビルドの `mail-dock.exe sync`、未知のコマンド、不正オプションが終了コード2を返して `app.log` に理由を記録し、設定読込や禁止コマンドの実行を行わないこと。ログに生の引数・秘密情報を残さず、非凍結CLIは従来どおり動くこと
+- [x] V-3. `self-check` が非凍結・凍結の両方で実行でき、秘密情報を含まないJSONを出力すること。凍結バイナリにおいて `--output` 経由で正常にJSONファイルが出力され、コンソール未接続でも異常終了しないこと。readpst未検出時や同梱ライセンス資料欠落時に失敗（終了コード1）すること。凍結exeで `--require-keyring` 付きの `self-check` が成功し、keyring バックエンドが `SUPPORTED` であること
+- [x] V-4. バージョン情報ダイアログからライセンス表示・診断実行ができること
 - [ ] V-5. `tools/fetch_readpst.ps1` がロックファイル駆動で取得・検証でき、公式URLを一時的に無効化してもミラーから同一ハッシュで取得できること。各 `.src.tar.zst` に上流の実ソースがあるかを検査し、不足分を固定ハッシュの別途取得ソースで補い、対応ソースzipから実ソース・PKGBUILD・パッチ・ビルド手順・バイナリ対応情報を確認できること
-- [ ] V-6. ロックファイルのDLL集合と `_WINDOWS_READPST_DLLS` の一致テストが機能すること（意図的に不一致を作り検出できることを確認）
-- [ ] V-7. `tools/collect_licenses.py --check-inventory THIRD-PARTY-LICENSES.md` が、未記載の依存を検出して失敗すること
+- [x] V-6. ロックファイルのDLL集合と `_WINDOWS_READPST_DLLS` の一致テストが機能すること（意図的に不一致を作り検出できることを確認）
+- [x] V-7. `tools/collect_licenses.py --check-inventory THIRD-PARTY-LICENSES.md` が、未記載の依存を検出して失敗すること
 - [ ] V-8. Qt対応ソースの取得・アーカイブ化・ハッシュ記録が実行でき、`build/licenses/QT-SOURCE.md` が確定済みアーカイブのハッシュを記載してインストーラーに同梱されること。採用版QtWebEngineのChromium・第三者告知も同梱され、告知または `QT-SOURCE.md` を欠落させるとビルド・検証が失敗すること
 - [ ] V-9. `tools/build_windows.ps1` によるローカルビルドでインストーラーが生成され、インストール・起動・HTMLメール表示（QtWebEngineProcess）・PST取込（readpst）・ストレージルート選択時のセルフテスト`OK`判定・上書きインストール・アンインストール（設定削除の確認ダイアログを含む）を手動確認できること。設定ディレクトリ内にストレージルートを配置した場合、`.maildock_root` や `metadata.db` が存在する場合、およびジャンクション等で安全を判定できない場合はファイル削除を中止し、通常の設定削除でもメールデータが残ること
 - [ ] V-10. `release.yml` を `workflow_dispatch`（`dry_run=true`）で実行し、`verify`→`build-windows`→`smoke-clean`→`publish`（必須アセット充足確認まで。Releaseは作成しない）が成功すること。タグ実行では Draft Release が作成されること。必須アセットやreadpst対応ソースzipの実ソース・パッチ等を1つ欠落させると `publish` が失敗すること
 - [ ] V-11. `smoke-clean` ジョブが、MSYS2を経由しないPATH制限環境で `readpst.exe -V` と `self-check --require-keyring` に成功し、サイレントアンインストール後に設定ディレクトリのみが残ることを確認すること
-- [ ] V-12. `uv run ruff format --check .` / `uv run ruff check .` / `uv run mypy` / `uv run pytest -m "not docker and not gui and not pst"` が成功すること
+- [x] V-12. `uv run ruff format --check .` / `uv run ruff check .` / `uv run mypy` / `uv run pytest -m "not docker and not gui and not pst"` が成功すること
 - [ ] V-13. 配布サイズ・起動時間を実測し、本書に記録すること（N-6, Phase 3引き継ぎ）
 
 ## **6.1 実測記録（グループF・G完了後に記入）**
 
 | 項目 | 実測値 |
 | :---- | :---- |
-| インストーラーサイズ | 未計測 |
-| インストール後のディスク使用量 | 未計測 |
-| 初回起動時間 | 未計測 |
-| `self-check` 所要時間 | 未計測 |
+| インストーラーサイズ | 148.1 MB（2026-10-01、`mail-dock-0.1.0-setup.exe`） |
+| インストール後のディスク使用量 | 約590 MB（`dist/mail-dock` の実測。インストーラー展開後の実測は未計測） |
+| 初回起動時間 | 未計測（GUIの起動時間は手動計測が必要） |
+| `self-check` 所要時間 | 0.63〜0.75秒（凍結exe、5回、Defender有効） |
 
 ---
 
