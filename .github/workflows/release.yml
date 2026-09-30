@@ -5,16 +5,62 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "必須アセットの充足確認のみ行い、Releaseを作成しない"
+        type: boolean
+        default: true
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  INNO_SETUP_VERSION: "6.4.3"
 
 jobs:
-  readpst:
-    runs-on: windows-latest
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  # reusable workflow のジョブはstepを持てないため、CI呼び出しとタグ照合を分ける。
+  verify:
+    needs: ci
+    runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+      - name: Verify release tag matches mail_dock.__version__
+        if: ${{ github.event_name == 'push' }}
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          PYTHONPATH: src
+        run: uv run --no-project python tools/verify_version.py "$RELEASE_TAG"
+
+  build-windows:
+    needs: verify
+    runs-on: windows-latest
+    timeout-minutes: 120
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Read application version
+        id: version
+        shell: pwsh
+        run: |
+          $match = [regex]::Match((Get-Content -LiteralPath src\mail_dock\__init__.py -Raw), '__version__\s*=\s*["'']([^"'']+)["'']')
+          if (-not $match.Success) { throw "Could not read mail_dock.__version__." }
+          $version = $match.Groups[1].Value
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Unsupported application version: $version" }
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
 
       - name: Install MSYS2 zstd
         uses: msys2/setup-msys2@v2
@@ -23,38 +69,252 @@ jobs:
           update: true
           install: zstd
 
-      - name: Fetch and patch readpst
-        shell: pwsh
-        run: pwsh -NoProfile -File .\tools\fetch_readpst.ps1 -Msys2Root C:\msys64
-
-      - name: Smoke test bundled converter
+      - name: Install Inno Setup
         shell: pwsh
         run: |
-          $readpst = (Resolve-Path .\vendor\readpst\readpst.exe).Path
+          choco install innosetup --version=$env:INNO_SETUP_VERSION --no-progress -y
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed with exit code $LASTEXITCODE" }
+          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path -LiteralPath $iscc -PathType Leaf)) { throw "ISCC.exe was not found at $iscc" }
+          "INNO_SETUP_COMPILER=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Fetch locked Qt license sources
+        shell: pwsh
+        run: |
+          $ProgressPreference = "SilentlyContinue"
+          $lock = Get-Content -LiteralPath packaging\qt\qt-source.lock.json -Raw | ConvertFrom-Json
+          $qtRoot = Join-Path $PWD "build\sources\qt"
+          New-Item -ItemType Directory -Force -Path $qtRoot | Out-Null
+          foreach ($name in @("qtbase", "qtwebengine")) {
+            $source = $lock.modules.$name
+            if ($null -eq $source) { throw "Qt source lock has no entry for $name." }
+            $destination = Join-Path $qtRoot $source.filename
+            $temporary = "$destination.download"
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+              try {
+                Invoke-WebRequest -Uri $source.url -OutFile $temporary
+                break
+              } catch {
+                if ($attempt -eq 3) { throw }
+              }
+            }
+            $actual = (Get-FileHash -LiteralPath $temporary -Algorithm SHA256).Hash
+            if ($actual -ine $source.sha256) { throw "SHA-256 mismatch for $($source.filename): $actual" }
+            Move-Item -LiteralPath $temporary -Destination $destination -Force
+          }
+
+      - name: Build release bundle and installer
+        shell: pwsh
+        run: |
+          $lock = Get-Content -LiteralPath packaging\qt\qt-source.lock.json -Raw | ConvertFrom-Json
+          $qtRoot = Join-Path $PWD "build\sources\qt"
+          & pwsh -NoProfile -File .\tools\build_windows.ps1 `
+            -Msys2Root C:\msys64 `
+            -ZstdPath C:\msys64\usr\bin\zstd.exe `
+            -QtLicenseSource (Join-Path $qtRoot $lock.modules.qtbase.filename) `
+            -QtWebEngineSource (Join-Path $qtRoot $lock.modules.qtwebengine.filename) `
+            -QtWebEngineSha256 $lock.modules.qtwebengine.sha256 `
+            -CompileInstaller `
+            -InnoSetupCompiler $env:INNO_SETUP_COMPILER
+          if ($LASTEXITCODE -ne 0) { throw "build_windows.ps1 failed with exit code $LASTEXITCODE" }
+
+      - name: Collect release assets
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $installerDir = "release-assets\installer"
+          $sourceDir = "release-assets\sources"
+          New-Item -ItemType Directory -Force -Path $installerDir, $sourceDir | Out-Null
+          $assets = @(
+            @{ From = "dist\mail-dock-$env:APP_VERSION-setup.exe"; To = "$installerDir\mail-dock-$env:APP_VERSION-setup.exe" },
+            @{ From = "build\sources\msys2\mail-dock-readpst-corresponding-source.zip"; To = "$sourceDir\mail-dock-$env:APP_VERSION-readpst-corresponding-source.zip" },
+            @{ From = "build\sources\qt\mail-dock-$env:APP_VERSION-qt-corresponding-source.zip"; To = "$sourceDir\mail-dock-$env:APP_VERSION-qt-corresponding-source.zip" }
+          )
+          foreach ($asset in $assets) {
+            if (-not (Test-Path -LiteralPath $asset.From -PathType Leaf)) { throw "Expected build output is missing: $($asset.From)" }
+            Copy-Item -LiteralPath $asset.From -Destination $asset.To
+          }
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-installer
+          path: release-assets/installer/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: Upload corresponding sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-sources
+          path: release-assets/sources/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  smoke-clean:
+    needs: build-windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download installer
+        uses: actions/download-artifact@v4
+        with:
+          name: release-installer
+          path: installer
+
+      - name: Install, self-check, and uninstall on a restricted PATH
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ needs.build-windows.outputs.version }}
+        run: |
+          $installer = (Resolve-Path "installer\mail-dock-$env:APP_VERSION-setup.exe").Path
+          $installLog = Join-Path $env:RUNNER_TEMP "install.log"
+          $reportPath = Join-Path $env:RUNNER_TEMP "self-check.json"
+          $appDir = Join-Path $env:LOCALAPPDATA "Programs\mail-dock"
+          $configDir = Join-Path $env:LOCALAPPDATA "mail-dock"
+
+          # MSYS2を経由せず、同梱物だけで動くことを確認するためPATHを絞る。
+          $env:PATH = "C:\Windows\System32;C:\Windows"
+          foreach ($tool in @("zstd", "ldd", "pacman", "readpst")) {
+            if (Get-Command $tool -ErrorAction SilentlyContinue) { throw "$tool is still reachable on the restricted PATH." }
+          }
+
+          $install = Start-Process -FilePath $installer -Wait -PassThru `
+            -ArgumentList @("/VERYSILENT", "/CURRENTUSER", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=`"$installLog`"")
+          if ($install.ExitCode -ne 0) { throw "Installer failed with exit code $($install.ExitCode)." }
+
+          $exe = Join-Path $appDir "mail-dock.exe"
+          $readpst = Join-Path $appDir "_internal\vendor\readpst\readpst.exe"
+          foreach ($path in @($exe, $readpst)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Installed file is missing: $path" }
+          }
+
           & $readpst -V
           if ($LASTEXITCODE -ne 0) { throw "readpst -V failed with exit code $LASTEXITCODE" }
 
-      - name: Verify GPL release materials and checksums
-        shell: pwsh
-        run: pwsh -NoProfile -File .\tools\verify_readpst_bundle.ps1 -ZstdPath C:\msys64\usr\bin\zstd.exe
+          $selfCheck = Start-Process -FilePath $exe -Wait -PassThru `
+            -ArgumentList @("self-check", "--require-keyring", "--output", "`"$reportPath`"")
+          if ($selfCheck.ExitCode -ne 0) {
+            $appLog = Join-Path $configDir "logs\app.log"
+            if (Test-Path -LiteralPath $appLog) { Get-Content -LiteralPath $appLog -Tail 50 }
+            throw "self-check failed with exit code $($selfCheck.ExitCode)."
+          }
+          if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) { throw "self-check did not write its JSON report." }
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+          if (-not $report.passed) { throw "self-check report is unsuccessful." }
+          $report.checks | ForEach-Object { Write-Host ("{0}: passed={1}" -f $_.name, $_.passed) }
 
-      - name: Prepare readpst corresponding source release asset
-        id: package
-        shell: pwsh
-        run: |
-          $version = "${{ github.ref_name }}".TrimStart('v')
-          $archive = Join-Path $env:RUNNER_TEMP "mail-dock-$version-readpst-corresponding-source.zip"
-          Copy-Item .\build\sources\msys2\mail-dock-readpst-corresponding-source.zip $archive
-          "archive=$archive" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          # アンインストーラーが設定ディレクトリを再帰削除しないことの番兵。
+          if (-not (Test-Path -LiteralPath $configDir -PathType Container)) { throw "The settings directory was not created: $configDir" }
+          $sentinel = Join-Path $configDir "smoke-sentinel.txt"
+          Set-Content -LiteralPath $sentinel -Value "keep"
 
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+          $uninstaller = Join-Path $appDir "unins000.exe"
+          if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw "Uninstaller is missing." }
+          $uninstall = Start-Process -FilePath $uninstaller -Wait -PassThru `
+            -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
+          if ($uninstall.ExitCode -ne 0) { throw "Uninstaller failed with exit code $($uninstall.ExitCode)." }
+
+          # 二段階目のアンインストーラープロセス完了を待つ。
+          $deadline = (Get-Date).AddSeconds(60)
+          while ((Test-Path -LiteralPath $exe) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
+          if (Test-Path -LiteralPath $exe) { throw "The application executable remains after uninstall." }
+          if (Test-Path -LiteralPath (Join-Path $appDir "_internal")) { throw "The _internal directory remains after uninstall." }
+          if (-not (Test-Path -LiteralPath $sentinel -PathType Leaf)) { throw "The settings directory was modified by the silent uninstall." }
+
+  publish:
+    needs: [verify, build-windows, smoke-clean]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      APP_VERSION: ${{ needs.build-windows.outputs.version }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download release assets
+        uses: actions/download-artifact@v4
         with:
-          name: mail-dock-readpst-corresponding-source-${{ github.ref_name }}
-          path: ${{ steps.package.outputs.archive }}
+          pattern: release-*
+          path: release
+          merge-multiple: true
 
-      - name: Publish GitHub release asset
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Create source archive
+        run: |
+          git archive --format=tar.gz --prefix="mail-dock-${APP_VERSION}/" \
+            -o "release/mail-dock-${APP_VERSION}-src.tar.gz" HEAD
+
+      - name: Verify required assets
+        working-directory: release
+        run: |
+          set -euo pipefail
+          # GitHub Releaseの単一アセット上限は2GiB。
+          max_bytes=2147483648
+          missing=0
+          required=(
+            "mail-dock-${APP_VERSION}-setup.exe"
+            "mail-dock-${APP_VERSION}-src.tar.gz"
+            "mail-dock-${APP_VERSION}-readpst-corresponding-source.zip"
+          )
+          for name in "${required[@]}"; do
+            if [[ ! -s "$name" ]]; then
+              echo "::error::Required release asset is missing or empty: $name"
+              missing=1
+            fi
+          done
+          # Qt対応ソースは単一zip、またはモジュール別zip群のいずれかを許容する。
+          shopt -s nullglob
+          qt_assets=("mail-dock-${APP_VERSION}-qt-corresponding-source.zip" mail-dock-"${APP_VERSION}"-qt-corresponding-source-*.zip)
+          qt_found=0
+          for name in "${qt_assets[@]}"; do
+            if [[ -s "$name" ]]; then qt_found=1; fi
+          done
+          if [[ "$qt_found" -eq 0 ]]; then
+            echo "::error::Qt corresponding-source archive is missing."
+            missing=1
+          fi
+          for name in *; do
+            size=$(stat -c %s "$name")
+            if [[ "$size" -ge "$max_bytes" ]]; then
+              echo "::error::Release asset exceeds the 2 GiB limit: $name"
+              missing=1
+            fi
+          done
+          if [[ "$missing" -ne 0 ]]; then exit 1; fi
+          echo "All required release assets are present."
+
+      - name: Generate SHA256SUMS.txt
+        working-directory: release
+        run: |
+          set -euo pipefail
+          find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' | sort \
+            | xargs -d '\n' sha256sum -- > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Decide whether to create the release
+        id: mode
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [[ "$EVENT_NAME" == "push" || "$DRY_RUN" == "false" ]]; then
+            echo "create=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "create=false" >> "$GITHUB_OUTPUT"
+            echo "Dry run: release assets verified; no release will be created."
+          fi
+
+      - name: Create draft GitHub release
+        if: ${{ steps.mode.outputs.create == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ steps.package.outputs.archive }}
+          tag_name: v${{ needs.build-windows.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          draft: true
+          fail_on_unmatched_files: true
+          files: release/*

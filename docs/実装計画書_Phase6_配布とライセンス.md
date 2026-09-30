@@ -240,15 +240,16 @@ G（Inno Setup） → H（CI） → I（ドキュメント整合）
 
 - [x] `packaging/inno/mail-dock.iss` を新設する（権限設定、`[InstallDelete]`、ショートカット、多言語。Inno Setup 6.3 以上を要件とする）
 - [x] アンインストール時の確認ダイアログとレジストリ・所有が確認できた設定ファイル／ログだけを削除する `[Code]` セクションを実装する（ディレクトリ再帰削除禁止、F-34 の判定順：全ユーザー→サイレント→`config.json`（UTF-8・JSONエスケープ解除）の候補パス照合→`.maildock_root` / `metadata.db` / `manifests` 存在確認→`FILE_ATTRIBUTE_REPARSE_POINT` 検出。いずれかで判定不能なら中止）
-- [ ] ローカルでインストール／上書きインストール／アンインストールを手動確認し、設定ディレクトリ内にストレージルートがある場合もメールデータが残ることを確認する
+- [x] ローカルでインストール／上書きインストール／アンインストールを手動確認し、設定ディレクトリ内にストレージルートがある場合もメールデータが残ることを確認する
 
 ### **3.8 グループH: CI・リリースワークフロー（*F・E2・Gに依存*）**
 
-- [ ] `.github/workflows/ci.yml` に `workflow_call` を追加する（`concurrency.group` の衝突回避を含む）
-- [ ] `.github/workflows/release.yml` を `verify`/`build-windows`/`smoke-clean`/`publish` の4ジョブへ作り直す（`workflow_dispatch` の `dry_run` 入力、タグ実行時のみのバージョン照合、Inno Setup の版固定インストールを含む）
-- [ ] `smoke-clean` ジョブでPATHを絞ったクリーン環境スモークテストを実装する
-- [ ] `publish` ジョブの必須アセット充足チェックを実装する（Qt対応ソースの分割対応を含む）
-- [ ] `workflow_dispatch`（`dry_run=true`）での試験実行と、必須アセットを1つ欠落させた失敗ケースを確認する
+- [x] `.github/workflows/ci.yml` に `workflow_call` を追加する（`concurrency.group` の衝突回避を含む）
+- [x] `.github/workflows/release.yml` を `verify`/`build-windows`/`smoke-clean`/`publish` の4ジョブへ作り直す（`workflow_dispatch` の `dry_run` 入力、タグ実行時のみのバージョン照合、Inno Setup の版固定インストールを含む）
+  - reusable workflow を呼ぶジョブは `steps` を持てないため、CI呼び出し専用の `ci` ジョブを `verify`（タグ照合）の前段に置いた（実質5ジョブ）。Inno Setupは `choco install innosetup --version=6.4.3` で固定。
+- [x] `smoke-clean` ジョブでPATHを絞ったクリーン環境スモークテストを実装する
+- [x] `publish` ジョブの必須アセット充足チェックを実装する（Qt対応ソースの分割対応を含む）
+- [ ] `workflow_dispatch`（`dry_run=true`）での試験実行と、必須アセットを1つ欠落させた失敗ケースを確認する（GitHub Actions上での実行が必要）
 
 ### **3.9 グループI: ドキュメント整合（*各グループと並行*）**
 
