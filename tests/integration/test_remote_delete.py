@@ -16,8 +16,9 @@ import pytest
 
 from mail_dock.domain.ports import BaseManifestReader, JSONValue
 from mail_dock.domain.storage_state import StorageState, StorageStateMachine
+from mail_dock.infrastructure.storage.eml_storage import EmlStorage
 from mail_dock.infrastructure.storage.manifest import ManifestReader, ManifestWriter
-from mail_dock.usecases.delete_remote import reconcile_uncertain_deletes
+from mail_dock.usecases.delete_remote import dry_run, execute, reconcile_uncertain_deletes
 from tests.support.imap_integration import (
     append_message,
     create_mailbox,
@@ -85,6 +86,95 @@ def _add_message(
             }
         )
     )
+
+
+@pytest.mark.docker
+def test_exclude_flagged_preserves_starred_message_on_real_server(tmp_path: Path) -> None:
+    settings = service("dovecot")
+    mailbox = unique_mailbox("DeleteFlagged")
+    with imap_client(settings) as client:
+        create_mailbox(client, mailbox)
+        append_message(client, mailbox, subject="must remain starred")
+
+    fetcher = make_fetcher(settings)
+    repository, connection = open_repository(tmp_path)
+    account_id = f"integration-flagged-{mailbox}"
+    storage_root = tmp_path / "storage"
+    manifest_dir = storage_root / "manifests" / "imap" / account_id
+    manifest_dir.mkdir(parents=True)
+    manifest = ManifestWriter(storage_root, account_id)
+    storage = EmlStorage(storage_root)
+    state = StorageStateMachine(StorageState.ATTACHED)
+    fetcher.connect()
+    try:
+        uidvalidity = fetcher.select_folder(mailbox)
+        uid = next(iter(fetcher.list_existing_uids(mailbox)))
+        with imap_client(settings) as client:
+            status, data = client.select(mailbox)
+            assert status == "OK", data
+            status, data = client.uid("STORE", str(uid), "+FLAGS.SILENT", r"(\Flagged)")
+            assert status == "OK", data
+
+        raw = fetcher.download_eml_bytes(mailbox, uid)
+        stored = storage.save(account_id, None, raw)
+        repository.upsert_account(
+            {"id": account_id, "provider_type": "imap", "host": settings.host}
+        )
+        folder_id = repository.upsert_folder(
+            {
+                "account_id": account_id,
+                "raw_name": mailbox,
+                "display_name": mailbox,
+                "uidvalidity": uidvalidity,
+                "is_sync_target": 1,
+            }
+        )
+        message_id = repository.add_message(
+            {
+                "account_id": account_id,
+                "folder_id": folder_id,
+                "uid": uid,
+                "uidvalidity": uidvalidity,
+                "source_item_key": f"{uidvalidity}:{uid}",
+                "remote_state": "present",
+                "imap_flags": None,
+                "local_state": "active",
+                "relative_path": stored.relative_path,
+                "file_hash": stored.file_hash,
+                "size_bytes": stored.size_bytes,
+            },
+            {"subject": "must remain starred", "body_text": "integration"},
+        )
+        plan = dry_run(
+            repository,
+            storage,
+            message_ids=(message_id,),
+            storage_state=state,
+            folder_id=folder_id,
+            exclude_flagged=True,
+        )
+
+        result = execute(
+            fetcher,
+            repository,
+            storage,
+            manifest,
+            plan=plan,
+            mode="trash",
+            storage_state=state,
+            exclude_flagged=True,
+        )
+
+        assert result.errors == ((message_id, "flagged_on_server"),)
+        assert result.completed_ids == ()
+        assert uid in fetcher.list_existing_uids(mailbox)
+        assert list(ManifestReader(storage_root, account_id).read_events_since_checkpoint()) == []
+    finally:
+        fetcher.disconnect()
+        manifest.close()
+        connection.close()
+        with imap_client(settings) as client:
+            client.delete(mailbox)
 
 
 @pytest.mark.docker

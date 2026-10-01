@@ -147,49 +147,49 @@
 
 ### **Group D: テスト**
 
-- [ ] `tests/unit/test_delete_remote.py` に追加する
-  - [ ] `has_imap_flag` の判定（トークン境界、大文字小文字、`None`）
-  - [ ] `dry_run(exclude_flagged=True)` でスター付きが `flagged` 除外になる／`False` では従来どおり対象になる／除外分では `storage.read_verified` が呼ばれない
-  - [ ] `dry_run` が `exclude_flagged` / `scope` を結果に焼き込む
-  - [ ] 一覧取得後にスターを解除しても、`scope.flagged_message_ids` は `flagged` のままで候補へ戻らず、EML検証も呼ばれない（上限件数の候補＋スター1件で上限超過が起きない）
-  - [ ] `scope.non_deletable_message_ids` は状態が `present` に戻っても除外確定を維持し、候補側の後続状態変化は追加除外する。除外設定OFFの新導線でも状態除外を適用し、手動選択の状態判定は変えない
-  - [ ] 追加除外で空き枠ができても補充せず、候補IDは `scope.message_ids` の部分集合になる
-  - [ ] `execute(exclude_flagged=True)` でサーバー側でスターが付いたメールがスキップされ、`remote_delete_intent` が記録されない
-  - [ ] 再確認で応答欠落したUIDが `flag_unverified` でスキップされる
-  - [ ] `select_folder` の戻り値が候補の `uidvalidity` と異なるフォルダは全候補が `uidvalidity_mismatch` でスキップされ、`iter_flags` も `intent` も発生しない
-  - [ ] 先行SELECTは一致しても `iter_flags` 内部SELECTで世代が変われば当該フォルダの全候補が `uidvalidity_mismatch` となり、FETCH・削除コマンド・`intent` が発生しない
-  - [ ] フラグ確認後、削除用SELECTで世代が変わった場合は `uidvalidity_mismatch` となり、MOVE・COPY・STORE・EXPUNGEを発行しない。永続化済み `intent` は残るが `completed` / `uncertain` / 成功監査ログはなく、後続の同フォルダ候補の `intent` も増えない
-  - [ ] 複数フォルダに分かれた候補で `iter_flags` がフォルダごとに1回ずつ呼ばれ、最後のフォルダの確認完了より前に削除コマンド・`intent` が発生しない
-  - [ ] 再確認中の `TransientError` は再送出され、`intent` / `uncertain` が1件も書かれない
-  - [ ] 1番目のフォルダの再確認成功後、2番目で `TransientError` / `StorageDetachedError` が発生しても、当該 `execute` の削除コマンド・`intent`・`uncertain` はすべて0件になる
-  - [ ] 再確認中の `PermanentError` はそのフォルダの全候補を `flag_unverified` にし、他フォルダは処理が続く
-  - [ ] UIDのみ・FLAGS欠落・不正FLAGS形式による `PermanentError` でも当該フォルダの全候補を `flag_unverified` にし、欠落応答を空フラグとして保存せず `intent` も記録しない
-  - [ ] 再確認したフラグがDBへ反映される（`folder_id is None` の候補は反映されない）
-  - [ ] `exclude_flagged=False` ではフラグ再確認用の `select_folder` / `iter_flags` の呼出しを追加しない（既存の削除内部のフォルダ選択は対象外。手動選択経路の非回帰）
-  - [ ] `select_delete_scope` の状態除外優先・3集合の非重複・古い順（`None` 日付が最古扱い・同値は `id` 昇順）・上限切り詰め・各件数・`truncated`
-  - [ ] 選定時の `limit` が `scope.delete_batch_limit` に保持され、非正の上限を拒否する
-  - [ ] `deleted` / `uncertain` / `moved` が上限を消費せず、削除済み・移動済みが一覧に残っていても、連続2回の対象選定・実行で残りの候補へ進む
-  - [ ] EML欠落等の検証除外があっても、2.3節の件数合計が一致する
-- [ ] `tests/support/fake_fetcher.py` / `in_memory_repository.py` が `expected_uidvalidity` / `select_folder` / `iter_flags` / `update_flags` を必要な範囲で模擬できることを確認・補う。事前SELECT・FETCH用SELECT・削除用SELECTそれぞれの世代変更を再現できるようにする
-- [ ] 既存の `GenericImapFetcher` / `imap_common` 単体テストへ、`FLAGS ()` とFLAGS欠落・不正形式の区別、実際のSELECTでの世代不一致時に後続コマンドを送らないケースを追加する。usecaseのフェイクだけでなくフェッチャー実装も検証し、FLAGS-only以外の解析の非回帰を確認する
-  - [ ] 要求外UIDの応答にFLAGSがなくても無視され、要求UIDの検証結果・DB更新・削除可否へ影響しないことを確認する
-- [ ] 既存の `SyncWorker` テストで `scope` ありの固定上限・除外設定が `execute` へ渡り、現在設定・既存上限引数で上書きされないことを確認する。手動選択は既存引数を使う
-- [ ] `tests/gui/test_query_worker.py` と既存の要求状態テストに、`"delete/list"` の登録・独立した要求管理・エクスポートの既定チャネル維持を追加する
-- [ ] `tests/gui/test_delete_remote_dialog.py` にオプションダイアログ（既定ON、OFF時警告、条件と設定上限のみ表示）と、ドライランの scope 表示（あり／なし）を追加する
-  - [ ] EML検証・追加スター除外で候補が減った場合も、最終除外数・`result.candidate_count`・手入力確認件数が一致する
-  - [ ] 候補1,000件・除外100,000件で表モデルが全行を保持しつつ全セルを事前生成せず、列幅計算も有界であることを確認する。先頭・末尾行の表示とCSV全件保存を検証する
-- [ ] `tests/gui/test_main_window.py` に新アクションの導線と状態管理を追加する
-  - [ ] 有効・無効条件（PST、ローカルゴミ箱、0件、アカウントノード、ストレージ切断、実行中）と、承認後に既存ドライランへ進む流れ
-  - [ ] Gmailラベル解除で行選択なしでも利用でき、選択フォルダのアカウントで判定される
-  - [ ] 一覧取得中にフォルダAからBへ切り替え、検索条件を変更しても、開始時のフォルダ・条件・除外設定が使われる。Gmailの複数所属メールでもBの所属を対象にしない
-  - [ ] 一覧取得中およびドライラン後に `delete_batch_limit` を増減しても、オプションに表示・承認した上限が選定・実行へ引き継がれる。次の新操作は変更後の上限を使い、手動選択は従来の上限処理を維持する
-  - [ ] 削除一覧取得中は手動削除・エクスポート・別の一覧削除を開始できず、エクスポート一覧取得中も新削除を開始できない
-  - [ ] キャンセル・失敗・0件・正常引渡しでトークンと不変データが解放され、ステータス・キャンセルボタンが更新される。次の手動選択削除へ除外設定が残らない
-  - [ ] 古い `request_id` の結果・失敗・キャンセルが現在の要求に干渉せず、エクスポートのハンドラとも競合しない
-  - [ ] 「ワーカーが成功結果を送信済み → GUIでキャンセル → 同じ `request_id` の成功結果を受信」の順を再現し、ドライラン・削除を開始せずトークン・不変データを解放する。後続の重複成功・失敗・キャンセル通知が新要求へ干渉しない
-  - [ ] 一覧取得中は `has_active_operations()` が真になり、キャンセル後は処理が停止して削除されない
-- [ ] `tests/integration/test_remote_delete.py` に、スター付きメールが実サーバー相当（Dovecot、WSL上で実行）で削除されないことを検証するケースを追加する
-- [ ] `pytest -m "not docker and not gui and not pst"` と GUIテストを実行し、既存の手動削除テストが変更なく通ることを確認する
+- [x] `tests/unit/test_delete_remote.py` に追加する
+  - [x] `has_imap_flag` の判定（トークン境界、大文字小文字、`None`）
+  - [x] `dry_run(exclude_flagged=True)` でスター付きが `flagged` 除外になる／`False` では従来どおり対象になる／除外分では `storage.read_verified` が呼ばれない
+  - [x] `dry_run` が `exclude_flagged` / `scope` を結果に焼き込む
+  - [x] 一覧取得後にスターを解除しても、`scope.flagged_message_ids` は `flagged` のままで候補へ戻らず、EML検証も呼ばれない（上限件数の候補＋スター1件で上限超過が起きない）
+  - [x] `scope.non_deletable_message_ids` は状態が `present` に戻っても除外確定を維持し、候補側の後続状態変化は追加除外する。除外設定OFFの新導線でも状態除外を適用し、手動選択の状態判定は変えない
+  - [x] 追加除外で空き枠ができても補充せず、候補IDは `scope.message_ids` の部分集合になる
+  - [x] `execute(exclude_flagged=True)` でサーバー側でスターが付いたメールがスキップされ、`remote_delete_intent` が記録されない
+  - [x] 再確認で応答欠落したUIDが `flag_unverified` でスキップされる
+  - [x] `select_folder` の戻り値が候補の `uidvalidity` と異なるフォルダは全候補が `uidvalidity_mismatch` でスキップされ、`iter_flags` も `intent` も発生しない
+  - [x] 先行SELECTは一致しても `iter_flags` 内部SELECTで世代が変われば当該フォルダの全候補が `uidvalidity_mismatch` となり、FETCH・削除コマンド・`intent` が発生しない
+  - [x] フラグ確認後、削除用SELECTで世代が変わった場合は `uidvalidity_mismatch` となり、MOVE・COPY・STORE・EXPUNGEを発行しない。永続化済み `intent` は残るが `completed` / `uncertain` / 成功監査ログはなく、後続の同フォルダ候補の `intent` も増えない
+  - [x] 複数フォルダに分かれた候補で `iter_flags` がフォルダごとに1回ずつ呼ばれ、最後のフォルダの確認完了より前に削除コマンド・`intent` が発生しない
+  - [x] 再確認中の `TransientError` は再送出され、`intent` / `uncertain` が1件も書かれない
+  - [x] 1番目のフォルダの再確認成功後、2番目で `TransientError` / `StorageDetachedError` が発生しても、当該 `execute` の削除コマンド・`intent`・`uncertain` はすべて0件になる
+  - [x] 再確認中の `PermanentError` はそのフォルダの全候補を `flag_unverified` にし、他フォルダは処理が続く
+  - [x] UIDのみ・FLAGS欠落・不正FLAGS形式による `PermanentError` でも当該フォルダの全候補を `flag_unverified` にし、欠落応答を空フラグとして保存せず `intent` も記録しない
+  - [x] 再確認したフラグがDBへ反映される（`folder_id is None` の候補は反映されない）
+  - [x] `exclude_flagged=False` ではフラグ再確認用の `select_folder` / `iter_flags` の呼出しを追加しない（既存の削除内部のフォルダ選択は対象外。手動選択経路の非回帰）
+  - [x] `select_delete_scope` の状態除外優先・3集合の非重複・古い順（`None` 日付が最古扱い・同値は `id` 昇順）・上限切り詰め・各件数・`truncated`
+  - [x] 選定時の `limit` が `scope.delete_batch_limit` に保持され、非正の上限を拒否する
+  - [x] `deleted` / `uncertain` / `moved` が上限を消費せず、削除済み・移動済みが一覧に残っていても、連続2回の対象選定・実行で残りの候補へ進む
+  - [x] EML欠落等の検証除外があっても、2.3節の件数合計が一致する
+- [x] `tests/support/fake_fetcher.py` / `in_memory_repository.py` が `expected_uidvalidity` / `select_folder` / `iter_flags` / `update_flags` を必要な範囲で模擬できることを確認・補う。事前SELECT・FETCH用SELECT・削除用SELECTそれぞれの世代変更を再現できるようにする
+- [x] 既存の `GenericImapFetcher` / `imap_common` 単体テストへ、`FLAGS ()` とFLAGS欠落・不正形式の区別、実際のSELECTでの世代不一致時に後続コマンドを送らないケースを追加する。usecaseのフェイクだけでなくフェッチャー実装も検証し、FLAGS-only以外の解析の非回帰を確認する
+  - [x] 要求外UIDの応答にFLAGSがなくても無視され、要求UIDの検証結果・DB更新・削除可否へ影響しないことを確認する
+- [x] 既存の `SyncWorker` テストで `scope` ありの固定上限・除外設定が `execute` へ渡り、現在設定・既存上限引数で上書きされないことを確認する。手動選択は既存引数を使う
+- [x] `tests/gui/test_query_worker.py` と既存の要求状態テストに、`"delete/list"` の登録・独立した要求管理・エクスポートの既定チャネル維持を追加する
+- [x] `tests/gui/test_delete_remote_dialog.py` にオプションダイアログ（既定ON、OFF時警告、条件と設定上限のみ表示）と、ドライランの scope 表示（あり／なし）を追加する
+  - [x] EML検証・追加スター除外で候補が減った場合も、最終除外数・`result.candidate_count`・手入力確認件数が一致する
+  - [x] 候補1,000件・除外100,000件で表モデルが全行を保持しつつ全セルを事前生成せず、列幅計算も有界であることを確認する。先頭・末尾行の表示とCSV全件保存を検証する
+- [x] `tests/gui/test_main_window.py` に新アクションの導線と状態管理を追加する
+  - [x] 有効・無効条件（PST、ローカルゴミ箱、0件、アカウントノード、ストレージ切断、実行中）と、承認後に既存ドライランへ進む流れ
+  - [x] Gmailラベル解除で行選択なしでも利用でき、選択フォルダのアカウントで判定される
+  - [x] 一覧取得中にフォルダAからBへ切り替え、検索条件を変更しても、開始時のフォルダ・条件・除外設定が使われる。Gmailの複数所属メールでもBの所属を対象にしない
+  - [x] 一覧取得中およびドライラン後に `delete_batch_limit` を増減しても、オプションに表示・承認した上限が選定・実行へ引き継がれる。次の新操作は変更後の上限を使い、手動選択は従来の上限処理を維持する
+  - [x] 削除一覧取得中は手動削除・エクスポート・別の一覧削除を開始できず、エクスポート一覧取得中も新削除を開始できない
+  - [x] キャンセル・失敗・0件・正常引渡しでトークンと不変データが解放され、ステータス・キャンセルボタンが更新される。次の手動選択削除へ除外設定が残らない
+  - [x] 古い `request_id` の結果・失敗・キャンセルが現在の要求に干渉せず、エクスポートのハンドラとも競合しない
+  - [x] 「ワーカーが成功結果を送信済み → GUIでキャンセル → 同じ `request_id` の成功結果を受信」の順を再現し、ドライラン・削除を開始せずトークン・不変データを解放する。後続の重複成功・失敗・キャンセル通知が新要求へ干渉しない
+  - [x] 一覧取得中は `has_active_operations()` が真になり、キャンセル後は処理が停止して削除されない
+- [x] `tests/integration/test_remote_delete.py` に、スター付きメールが実サーバー相当（Dovecot、WSL上で実行）で削除されないことを検証するケースを追加する
+- [x] `pytest -m "not docker and not gui and not pst"` と GUIテストを実行し、既存の手動削除テストが変更なく通ることを確認する
 
 ### **Group E: ドキュメント整合**
 

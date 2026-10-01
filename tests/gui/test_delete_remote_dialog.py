@@ -174,6 +174,41 @@ def test_scope_dry_run_uses_lazy_table_model_and_localizes_exclusion(qtbot: Any)
     assert model.data(model.index(1, 4)) == "サーバーでスター付きのため除外"
 
 
+def test_scope_summary_uses_final_exclusions_and_candidate_count(qtbot: Any) -> None:
+    result = DeleteDryRunResult(
+        candidates=(_candidate(),),
+        exclusions=(
+            DeleteExclusion(message_id=2, reason="remote_state_not_deletable"),
+            DeleteExclusion(message_id=3, reason="flagged"),
+            DeleteExclusion(message_id=4, reason="hash_mismatch"),
+        ),
+        total_size_bytes=128,
+        scope=DeleteScope(
+            message_ids=(1, 5),
+            flagged_message_ids=(3,),
+            non_deletable_message_ids=(2,),
+            matched_count=5,
+            flagged_excluded_count=1,
+            truncated=True,
+            delete_batch_limit=2,
+        ),
+    )
+    dialog = DeleteDryRunDialog(result)
+    qtbot.addWidget(dialog)
+
+    counts = next(
+        label.text()
+        for label in dialog.findChildren(QLabel)
+        if "一致" in label.text() and "検証後" in label.text()
+    )
+    assert "一致 5 件" in counts
+    assert "状態除外 1 件" in counts
+    assert "スター除外 1 件" in counts
+    assert "上限超過 1 件" in counts
+    assert "その他の検証除外 1 件" in counts
+    assert "検証後の対象 1 件" in counts
+
+
 def test_scope_table_retains_large_result_without_prebuilding_cells(qtbot: Any) -> None:
     candidate_count = 1000
     exclusion_count = 100_000

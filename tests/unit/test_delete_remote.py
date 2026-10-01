@@ -298,18 +298,19 @@ def test_select_delete_scope_excludes_states_before_flags_and_applies_stable_lim
             _summary(1, date_sent=same_date),
             _summary(3, imap_flags=r"\Flagged"),
             _summary(4, remote_state="uncertain", imap_flags=r"\Flagged"),
+            _summary(6, internal_date=datetime(2026, 1, 1, tzinfo=UTC)),
         ),
         exclude_flagged=True,
-        limit=2,
+        limit=3,
     )
 
-    assert scope.message_ids == (2, 1)
+    assert scope.message_ids == (2, 6, 1)
     assert scope.flagged_message_ids == (3,)
     assert scope.non_deletable_message_ids == (4,)
-    assert scope.matched_count == 5
+    assert scope.matched_count == 6
     assert scope.flagged_excluded_count == 1
     assert scope.truncated
-    assert scope.delete_batch_limit == 2
+    assert scope.delete_batch_limit == 3
 
 
 def test_select_delete_scope_off_still_excludes_non_present_and_rejects_bad_limit() -> None:
@@ -324,6 +325,106 @@ def test_select_delete_scope_off_still_excludes_non_present_and_rejects_bad_limi
     assert scope.non_deletable_message_ids == (2,)
     with pytest.raises(ValueError, match="limit must be positive"):
         select_delete_scope((), exclude_flagged=False, limit=0)
+
+
+@pytest.mark.parametrize("initial_state", ["deleted", "uncertain", "moved"])
+def test_non_present_messages_do_not_consume_limit_across_delete_batches(
+    initial_state: str,
+) -> None:
+    repository = InMemoryMessageRepository()
+    raw = b"message"
+    paths = [_record(repository, message_id=message_id, raw=raw) for message_id in (1, 2, 3)]
+    repository.messages[1]["remote_state"] = initial_state
+    storage = MemoryStorage(dict.fromkeys(paths, raw))
+    state = StorageStateMachine(StorageState.ATTACHED)
+    fetcher = DeleteFetcher()
+    for message_id in (1, 2, 3):
+        fetcher.add_message("INBOX", message_id, raw)
+
+    def summaries() -> tuple[MessageSummary, ...]:
+        return tuple(
+            _summary(
+                message_id,
+                remote_state=str(repository.messages[message_id]["remote_state"]),
+            )
+            for message_id in (1, 2, 3)
+        )
+
+    completed: list[int] = []
+    for expected_id in (2, 3):
+        scope = select_delete_scope(summaries(), exclude_flagged=False, limit=1)
+        assert scope.message_ids == (expected_id,)
+        plan = dry_run(
+            repository,
+            storage,
+            message_ids=(
+                scope.message_ids
+                + scope.flagged_message_ids
+                + scope.non_deletable_message_ids
+            ),
+            storage_state=state,
+            folder_id=1,
+            scope=scope,
+        )
+        result = execute(
+            fetcher,
+            repository,
+            storage,
+            MemoryManifest(),
+            plan=plan,
+            storage_state=state,
+            delete_batch_limit=1,
+        )
+        completed.extend(result.completed_ids)
+
+    assert completed == [2, 3]
+    assert [uid for _folder, uid, _mode in fetcher.calls] == [2, 3]
+
+
+def test_dry_run_scope_counts_validation_exclusions_without_promoting_messages() -> None:
+    repository = InMemoryMessageRepository()
+    raw = b"message"
+    paths = {
+        message_id: _record(repository, message_id=message_id, raw=raw)
+        for message_id in (1, 2, 3, 4, 5)
+    }
+    repository.messages[4]["file_hash"] = "0" * 64
+    storage = MemoryStorage(dict.fromkeys(paths.values(), raw))
+    state = StorageStateMachine(StorageState.ATTACHED)
+    scope = DeleteScope(
+        message_ids=(1, 4),
+        flagged_message_ids=(2,),
+        non_deletable_message_ids=(3,),
+        matched_count=5,
+        flagged_excluded_count=1,
+        truncated=True,
+        delete_batch_limit=2,
+    )
+
+    result = dry_run(
+        repository,
+        storage,
+        message_ids=(1, 2, 3, 4),
+        storage_state=state,
+        folder_id=1,
+        exclude_flagged=True,
+        scope=scope,
+    )
+
+    assert [candidate.message_id for candidate in result.candidates] == [1]
+    assert {item.message_id: item.reason for item in result.exclusions} == {
+        2: "flagged",
+        3: "remote_state_not_deletable",
+        4: "hash_mismatch",
+    }
+    assert set(candidate.message_id for candidate in result.candidates) <= set(scope.message_ids)
+    truncated = (
+        scope.matched_count
+        - len(scope.non_deletable_message_ids)
+        - len(scope.flagged_message_ids)
+        - len(scope.message_ids)
+    )
+    assert truncated + result.excluded_count + result.candidate_count == scope.matched_count
 
 
 def test_dry_run_keeps_scope_exclusions_fixed_and_skips_eml_checks_for_exclusions() -> None:
@@ -671,7 +772,11 @@ def test_execute_does_not_delete_until_every_folder_flag_check_finishes() -> Non
 
 @pytest.mark.parametrize(
     ("failure", "should_abort"),
-    [(TransientError("offline"), True), (PermanentError("bad FLAGS"), False)],
+    [
+        (TransientError("offline"), True),
+        (StorageDetachedError("detached"), True),
+        (PermanentError("bad FLAGS"), False),
+    ],
 )
 def test_later_folder_flag_failure_never_deletes_before_preflight_finishes(
     failure: FetchError, should_abort: bool
@@ -700,7 +805,7 @@ def test_later_folder_flag_failure_never_deletes_before_preflight_finishes(
     fetcher.flag_errors_by_folder["Archive"] = failure
 
     if should_abort:
-        with pytest.raises(TransientError):
+        with pytest.raises(type(failure)):
             execute(
                 fetcher,
                 repository,

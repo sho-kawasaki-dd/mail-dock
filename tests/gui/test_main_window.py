@@ -562,11 +562,12 @@ def test_cancelled_delete_list_rejects_late_success_and_stale_request_ids(
         "mail_dock.presentation.views.main_window.DeleteByListOptionsDialog",
         _OptionsDialog,
     )
-    token = CancelToken()
+    tokens = [CancelToken(), CancelToken()]
+    request_ids = iter((11, 12))
     cast(Any, window.query_worker).list_all_messages = lambda **_kwargs: SimpleNamespace(
         channel="delete/list",
-        request_id=11,
-        token=token,
+        request_id=next(request_ids),
+        token=tokens[0] if not tokens[0].is_cancelled else tokens[1],
     )
     dry_run_calls: list[bool] = []
     cast(Any, window.sync_worker).dry_run_remote_delete = lambda *_args, **_kwargs: (
@@ -589,6 +590,19 @@ def test_cancelled_delete_list_rejects_late_success_and_stale_request_ids(
         SimpleNamespace(channel="delete/list", request_id=11, value=(_summary(),))
     )
     assert dry_run_calls == []
+
+    window._start_remote_delete_by_list()
+    current_request = window._delete_list_request
+    assert current_request is not None and current_request.handle.request_id == 12
+    for notification in (
+        window._show_delete_list_result,
+        window._show_delete_list_failure,
+        window._show_delete_list_cancelled,
+    ):
+        notification(SimpleNamespace(channel="delete/list", request_id=11, value=()))
+    assert window._delete_list_request is current_request
+    assert dry_run_calls == []
+    window._cancel_current_operation()
     window.stop_workers()
 
 
