@@ -221,11 +221,17 @@ class FlagTrackingFetcher(TrackingFetcher):
         raw_name: str,
         uids: Iterable[int],
         *,
+        expected_uidvalidity: int | None = None,
         cancel: CancelToken | None = None,
     ) -> Iterator[RemoteMessageRef]:
         requested = tuple(uids)
         self.flag_calls.append((raw_name, requested))
-        yield from super().iter_flags(raw_name, requested, cancel=cancel)
+        yield from super().iter_flags(
+            raw_name,
+            requested,
+            expected_uidvalidity=expected_uidvalidity,
+            cancel=cancel,
+        )
 
     def iter_flags_since(
         self,
@@ -255,9 +261,10 @@ class FlagFailureFetcher(FlagTrackingFetcher):
         raw_name: str,
         uids: Iterable[int],
         *,
+        expected_uidvalidity: int | None = None,
         cancel: CancelToken | None = None,
     ) -> Iterator[RemoteMessageRef]:
-        del raw_name, uids, cancel
+        del raw_name, uids, expected_uidvalidity, cancel
         raise PermanentError("flag refresh failed")
 
 
@@ -267,9 +274,10 @@ class FlagAuthenticationFailureFetcher(FlagTrackingFetcher):
         raw_name: str,
         uids: Iterable[int],
         *,
+        expected_uidvalidity: int | None = None,
         cancel: CancelToken | None = None,
     ) -> Iterator[RemoteMessageRef]:
-        del raw_name, uids, cancel
+        del raw_name, uids, expected_uidvalidity, cancel
         raise AuthenticationError("flag credentials rejected")
 
 
@@ -1326,10 +1334,11 @@ def test_flag_refresh_does_not_touch_missing_non_condstore_response() -> None:
             raw_name: str,
             uids: Iterable[int],
             *,
+            expected_uidvalidity: int | None = None,
             cancel: CancelToken | None = None,
         ) -> Iterator[RemoteMessageRef]:
             self.flag_calls.append((raw_name, tuple(uids)))
-            del cancel
+            del expected_uidvalidity, cancel
             yield from ()
 
     fetcher = MissingFlagFetcher(

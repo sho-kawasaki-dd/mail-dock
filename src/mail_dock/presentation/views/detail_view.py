@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from mail_dock.domain.imap_flags import has_imap_flag
 from mail_dock.domain.messages import RenderedMessage
 from mail_dock.domain.search import MessageDetail, MessageFilter, MessageSummary
 from mail_dock.presentation import strings
@@ -347,9 +348,9 @@ class DetailView(QWidget):
         self._header_values["account"].setText(message.account_id)
         self._header_values["folder"].setText(message.folder_display_name)
         statuses: list[str] = []
-        if not _has_imap_flag(message.imap_flags, "\\Seen"):
+        if not has_imap_flag(message.imap_flags, "\\Seen"):
             statuses.append(strings.STATUS_UNREAD)
-        if _has_imap_flag(message.imap_flags, "\\Flagged"):
+        if has_imap_flag(message.imap_flags, "\\Flagged"):
             statuses.append(strings.STATUS_FLAGGED)
         self._status_label.setText(" / ".join(statuses))
         if statuses:
@@ -509,7 +510,3 @@ def _format_size(size_bytes: int) -> str:
     if size_bytes < 1024 * 1024:
         return f"{size_bytes / 1024:.1f} KB"
     return f"{size_bytes / (1024 * 1024):.1f} MB"
-
-
-def _has_imap_flag(flags: str | None, expected: str) -> bool:
-    return expected in (flags or "").split()

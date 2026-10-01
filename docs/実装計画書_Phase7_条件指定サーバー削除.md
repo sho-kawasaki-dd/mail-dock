@@ -83,34 +83,34 @@
 
 ### **Group A: ドメイン・フェッチャー・ユースケース**
 
-- [ ] `domain` に `has_imap_flag(flags, flag)` を追加する（`imap_flags` は同期時に `" ".join(ref.flags)` で保存される空白区切り文字列。大文字小文字無視）
-- [ ] `message_table_model.py` / `detail_view.py` の `_has_imap_flag` を `domain` の `has_imap_flag` 呼び出しに差し替える（F-1。既存GUIテストが変更なく通ることを確認）
-- [ ] `BaseMailFetcher.iter_flags` / `move_remote_message_to_trash` / `expunge_remote_message` / `remove_remote_membership` と `GenericImapFetcher` に `expected_uidvalidity: int | None = None` を追加する（D-7b）
-  - [ ] `iter_flags` 内部のSELECTと削除用SELECTのUIDVALIDITYを照合し、不一致なら同じ選択状態でのFETCH・MOVE・COPY・STORE・EXPUNGEより前に `UidValidityChanged` を送出する
-  - [ ] `expected_uidvalidity=None` の呼出し・互換ラッパーは従来の経路を維持する。既存フェイク・API利用箇所とのシグネチャ互換性を確認する
-- [ ] `GenericImapFetcher.iter_flags` のFLAGS-only応答でFLAGS項目の存在・構文を検証する（D-7c）
-  - [ ] 要求外UIDを先に無視し、要求UIDについて `FLAGS ()` とFLAGS欠落・不正形式を区別する。後者は `PermanentError` に変換し、汎用 `parse_fetch_response` の他用途の解析挙動は変えない
-- [ ] `select_delete_scope()` と不変の `DeleteScope` を追加する（F-5）
-  - [ ] 選択フォルダの `remote_state != "present"` を `non_deletable_message_ids` へ先に振り分け、残りから設定ON時のスターを `flagged_message_ids` へ振り分ける（3集合は重複させない）
-  - [ ] 残りを `COALESCE(date_sent, internal_date)` 昇順・両方 `None` は最古・同値は `id` 昇順で上限まで選ぶ。除外集合は上限を消費しない
-  - [ ] `matched_count`・`flagged_excluded_count`・`truncated` と上限対象外数を2.3節の定義で集計する
-  - [ ] 表示・承認した正の `limit` を `DeleteScope.delete_batch_limit` へ保存し、`limit <= 0` を拒否する
-- [ ] `DeleteDryRunResult` に `exclude_flagged: bool = False` と `scope: DeleteScope | None = None` を既定値付きで追加する
-- [ ] `delete_remote.dry_run()` に `exclude_flagged` / `scope` を追加し、除外確定と追加除外を実装する
-  - [ ] `scope` のスター・状態除外集合をそれぞれ `flagged` / `remote_state_not_deletable` の除外行にする。DBの後続変更で候補へ戻さず、EML検証を呼ばない
-  - [ ] 候補側はメンバーシップマージ直後・`storage.read_verified()` の前で、`scope` ありなら状態、除外設定ONならスターを判定する。手動選択の状態判定は変更しない
-  - [ ] 候補を `scope.message_ids` の部分集合に限定し、追加除外による空き枠を補充しない
-  - [ ] 引数の `exclude_flagged` / `scope` を結果へ焼き込む
-- [ ] `delete_remote.execute()` に `exclude_flagged` を追加し、全フォルダ再確認と既存削除ループの二段階に分ける
-  - [ ] 当該呼出しの全対象フォルダの再確認が完了するまで削除コマンド・`intent` を発行しない。フォルダごとに確認・削除を交互に行わない
-  - [ ] 候補をフォルダ（`folder_raw_name`）でグループ化し、候補の世代が単一であることと `fetcher.select_folder(raw_name)` の戻り値を照合する。不一致フォルダは全候補を `uidvalidity_mismatch` でスキップし `iter_flags` を呼ばない
-  - [ ] `fetcher.iter_flags(raw_name, uids, expected_uidvalidity=期待値)` の検証済み応答からUIDごとの最新フラグを得る（要求集合にないUIDは無視）。内部SELECTの `UidValidityChanged` は一般の `FetchError` より先に扱い、全候補を `uidvalidity_mismatch` にする
-  - [ ] `\Flagged` は `flagged_on_server`、応答欠落は `flag_unverified` としてスキップする
-  - [ ] FLAGS欠落・不正形式による `PermanentError` は当該フォルダの全候補を `flag_unverified` にし、欠落応答を空フラグとしてDB保存しない
-  - [ ] `TransientError` / `StorageDetachedError` は捕まえずに再送出する（削除コマンド発行前なのでサーバー状態は不変。`remote_delete_uncertain` は書かない）。それ以外の `FetchError` はそのフォルダの全候補を `flag_unverified` にして続行する。`except` の順序に注意（`TransientError` は `FetchError` のサブクラス）
-  - [ ] 再確認したフラグを `update_flags` でDBへ反映する（`begin_batch` / `commit_batch` を使い、IMAP通信中はトランザクションを保持しない。`folder_id is None` の候補はスキップ。`gmail_labels` は更新しない）
-  - [ ] 保護ON時の削除APIへ `expected_uidvalidity=candidate.uidvalidity` を渡す。削除用SELECTでの `UidValidityChanged` を `uidvalidity_mismatch` としてスキップし、後続の同フォルダ候補も除外する。永続化済み `intent` は残すが、削除コマンド・`completed`・`uncertain`・成功監査ログは追加しない
-- [ ] `execute` の既存上限チェックを維持する。ドライランに渡す `message_ids + flagged_message_ids + non_deletable_message_ids` は上限を超え得るが、候補は `scope.message_ids` の部分集合なので選定時の上限内に収まることを確認する
+- [x] `domain` に `has_imap_flag(flags, flag)` を追加する（`imap_flags` は同期時に `" ".join(ref.flags)` で保存される空白区切り文字列。大文字小文字無視）
+- [x] `message_table_model.py` / `detail_view.py` の `_has_imap_flag` を `domain` の `has_imap_flag` 呼び出しに差し替える（F-1。既存GUIテストが変更なく通ることを確認）
+- [x] `BaseMailFetcher.iter_flags` / `move_remote_message_to_trash` / `expunge_remote_message` / `remove_remote_membership` と `GenericImapFetcher` に `expected_uidvalidity: int | None = None` を追加する（D-7b）
+  - [x] `iter_flags` 内部のSELECTと削除用SELECTのUIDVALIDITYを照合し、不一致なら同じ選択状態でのFETCH・MOVE・COPY・STORE・EXPUNGEより前に `UidValidityChanged` を送出する
+  - [x] `expected_uidvalidity=None` の呼出し・互換ラッパーは従来の経路を維持する。既存フェイク・API利用箇所とのシグネチャ互換性を確認する
+- [x] `GenericImapFetcher.iter_flags` のFLAGS-only応答でFLAGS項目の存在・構文を検証する（D-7c）
+  - [x] 要求外UIDを先に無視し、要求UIDについて `FLAGS ()` とFLAGS欠落・不正形式を区別する。後者は `PermanentError` に変換し、汎用 `parse_fetch_response` の他用途の解析挙動は変えない
+- [x] `select_delete_scope()` と不変の `DeleteScope` を追加する（F-5）
+  - [x] 選択フォルダの `remote_state != "present"` を `non_deletable_message_ids` へ先に振り分け、残りから設定ON時のスターを `flagged_message_ids` へ振り分ける（3集合は重複させない）
+  - [x] 残りを `COALESCE(date_sent, internal_date)` 昇順・両方 `None` は最古・同値は `id` 昇順で上限まで選ぶ。除外集合は上限を消費しない
+  - [x] `matched_count`・`flagged_excluded_count`・`truncated` と上限対象外数を2.3節の定義で集計する
+  - [x] 表示・承認した正の `limit` を `DeleteScope.delete_batch_limit` へ保存し、`limit <= 0` を拒否する
+- [x] `DeleteDryRunResult` に `exclude_flagged: bool = False` と `scope: DeleteScope | None = None` を既定値付きで追加する
+- [x] `delete_remote.dry_run()` に `exclude_flagged` / `scope` を追加し、除外確定と追加除外を実装する
+  - [x] `scope` のスター・状態除外集合をそれぞれ `flagged` / `remote_state_not_deletable` の除外行にする。DBの後続変更で候補へ戻さず、EML検証を呼ばない
+  - [x] 候補側はメンバーシップマージ直後・`storage.read_verified()` の前で、`scope` ありなら状態、除外設定ONならスターを判定する。手動選択の状態判定は変更しない
+  - [x] 候補を `scope.message_ids` の部分集合に限定し、追加除外による空き枠を補充しない
+  - [x] 引数の `exclude_flagged` / `scope` を結果へ焼き込む
+- [x] `delete_remote.execute()` に `exclude_flagged` を追加し、全フォルダ再確認と既存削除ループの二段階に分ける
+  - [x] 当該呼出しの全対象フォルダの再確認が完了するまで削除コマンド・`intent` を発行しない。フォルダごとに確認・削除を交互に行わない
+  - [x] 候補をフォルダ（`folder_raw_name`）でグループ化し、候補の世代が単一であることと `fetcher.select_folder(raw_name)` の戻り値を照合する。不一致フォルダは全候補を `uidvalidity_mismatch` でスキップし `iter_flags` を呼ばない
+  - [x] `fetcher.iter_flags(raw_name, uids, expected_uidvalidity=期待値)` の検証済み応答からUIDごとの最新フラグを得る（要求集合にないUIDは無視）。内部SELECTの `UidValidityChanged` は一般の `FetchError` より先に扱い、全候補を `uidvalidity_mismatch` にする
+  - [x] `\Flagged` は `flagged_on_server`、応答欠落は `flag_unverified` としてスキップする
+  - [x] FLAGS欠落・不正形式による `PermanentError` は当該フォルダの全候補を `flag_unverified` にし、欠落応答を空フラグとしてDB保存しない
+  - [x] `TransientError` / `StorageDetachedError` は捕まえずに再送出する（削除コマンド発行前なのでサーバー状態は不変。`remote_delete_uncertain` は書かない）。それ以外の `FetchError` はそのフォルダの全候補を `flag_unverified` にして続行する。`except` の順序に注意（`TransientError` は `FetchError` のサブクラス）
+  - [x] 再確認したフラグを `update_flags` でDBへ反映する（`begin_batch` / `commit_batch` を使い、IMAP通信中はトランザクションを保持しない。`folder_id is None` の候補はスキップ。`gmail_labels` は更新しない）
+  - [x] 保護ON時の削除APIへ `expected_uidvalidity=candidate.uidvalidity` を渡す。削除用SELECTでの `UidValidityChanged` を `uidvalidity_mismatch` としてスキップし、後続の同フォルダ候補も除外する。永続化済み `intent` は残すが、削除コマンド・`completed`・`uncertain`・成功監査ログは追加しない
+- [x] `execute` の既存上限チェックを維持する。ドライランに渡す `message_ids + flagged_message_ids + non_deletable_message_ids` は上限を超え得るが、候補は `scope.message_ids` の部分集合なので選定時の上限内に収まることを確認する
 
 ### **Group B: ワーカー**
 

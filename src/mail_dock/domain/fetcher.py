@@ -129,6 +129,7 @@ class BaseMailFetcher(ABC):
         raw_name: str,
         uids: Iterable[int],
         *,
+        expected_uidvalidity: int | None = None,
         cancel: CancelToken | None = None,
     ) -> Iterator[RemoteMessageRef]:
         """Yield FLAGS-only metadata for the requested UIDs."""
@@ -164,11 +165,15 @@ class BaseMailFetcher(ABC):
         """Download only the headers for an oversized message."""
 
     @abstractmethod
-    def remove_remote_membership(self, raw_name: str, uid: int) -> None:
+    def remove_remote_membership(
+        self, raw_name: str, uid: int, *, expected_uidvalidity: int | None = None
+    ) -> None:
         """Remove one message from the selected folder or Gmail label."""
 
     @abstractmethod
-    def move_remote_message_to_trash(self, raw_name: str, uid: int) -> RemoteMoveResult | None:
+    def move_remote_message_to_trash(
+        self, raw_name: str, uid: int, *, expected_uidvalidity: int | None = None
+    ) -> RemoteMoveResult | None:
         """Move one message to the provider's remote trash folder.
 
         Returns the destination UID confirmed via COPYUID when the server
@@ -178,7 +183,9 @@ class BaseMailFetcher(ABC):
         """
 
     @abstractmethod
-    def expunge_remote_message(self, raw_name: str, uid: int) -> None:
+    def expunge_remote_message(
+        self, raw_name: str, uid: int, *, expected_uidvalidity: int | None = None
+    ) -> None:
         """Permanently remove one message using a targeted provider operation."""
 
     def delete_remote_message(self, raw_name: str, uid: int, *, mode: str = "trash") -> None:

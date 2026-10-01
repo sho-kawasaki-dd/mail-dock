@@ -14,6 +14,7 @@ from mail_dock.domain.errors import (
     OperationCancelledError,
     PermanentError,
     RateLimitedError,
+    UidValidityChanged,
 )
 from mail_dock.domain.fetcher import CancelToken, RemoteFolder, RemoteMoveResult
 from mail_dock.domain.ports import AccessToken, BaseAccessTokenProvider, OAuthTokenResponse
@@ -46,6 +47,8 @@ class FakeImap:
         [b"AUTHENTICATE completed"],
     )
     auth_challenges: ClassVar[list[bytes]] = [b"+"]
+    flag_fetch_responses: ClassVar[list[object] | None] = None
+    select_uidvalidities: ClassVar[list[int]] = []
 
     def __init__(
         self,
@@ -99,6 +102,8 @@ class FakeImap:
 
     def select(self, mailbox: str, *, readonly: bool = False) -> tuple[str, builtins.list[bytes]]:
         self.commands.append(("SELECT", (mailbox, readonly)))
+        if self.select_uidvalidities:
+            self.uidvalidity = self.select_uidvalidities.pop(0)
         return "OK", [b"1"]
 
     def response(self, code: str) -> tuple[str, builtins.list[bytes]]:
@@ -124,6 +129,9 @@ class FakeImap:
         if command == "FETCH":
             uid_set = args[0]
             request = args[1]
+            if "UID FLAGS" in request and self.flag_fetch_responses is not None:
+                responses = list(self.flag_fetch_responses)
+                return "OK", responses
             items: list[object] = []
             requested_uids = (
                 self.search_uids
@@ -167,6 +175,8 @@ def fake_imap(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     FakeImap.highest_modseq = None
     FakeImap.nomodseq = False
     FakeImap.copyuid_response = None
+    FakeImap.flag_fetch_responses = None
+    FakeImap.select_uidvalidities.clear()
     FakeImap.login_result = ("OK", [b"LOGIN completed"])
     FakeImap.authenticate_result = ("OK", [b"AUTHENTICATE completed"])
     FakeImap.auth_challenges = [b"+"]
@@ -257,6 +267,49 @@ def test_iter_flags_uses_flags_only_and_500_uid_chunks(fake_imap: None) -> None:
     assert len(cast(str, fetch_commands[0][1][0]).split(",")) == 500
 
 
+def test_iter_flags_accepts_valid_empty_flags_and_ignores_unrequested_uid(fake_imap: None) -> None:
+    FakeImap.flag_fetch_responses = [
+        b"* 99 FETCH (UID 99)",
+        b"* 1 FETCH (UID 1 FLAGS ())",
+    ]
+    fetcher = GenericImapFetcher("imap.example.test", "user", "password")
+    fetcher.connect()
+
+    refs = list(fetcher.iter_flags("INBOX", [1]))
+
+    assert [(ref.uid, ref.flags) for ref in refs] == [(1, ())]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        b"* 1 FETCH (UID 1)",
+        b"* 1 FETCH (UID 1 FLAGS (\\Seen",
+        b'* 1 FETCH (UID 1 FLAGS ("quoted"))',
+    ],
+)
+def test_iter_flags_rejects_missing_or_malformed_requested_flags(
+    fake_imap: None, response: bytes
+) -> None:
+    FakeImap.flag_fetch_responses = [response]
+    fetcher = GenericImapFetcher("imap.example.test", "user", "password")
+    fetcher.connect()
+
+    with pytest.raises(PermanentError, match="FLAGS"):
+        list(fetcher.iter_flags("INBOX", [1]))
+
+
+def test_iter_flags_checks_uidvalidity_before_fetch(fake_imap: None) -> None:
+    FakeImap.select_uidvalidities = [124]
+    fetcher = GenericImapFetcher("imap.example.test", "user", "password")
+    fetcher.connect()
+
+    with pytest.raises(UidValidityChanged):
+        list(fetcher.iter_flags("INBOX", [1], expected_uidvalidity=123))
+
+    assert not any(command[0] == "FETCH" for command in FakeImap.instances[0].commands)
+
+
 def test_iter_flags_since_uses_condstore_and_reads_highest_modseq(fake_imap: None) -> None:
     FakeImap.capability_response = b"CAPABILITY IMAP4rev1 CONDSTORE"
     FakeImap.highest_modseq = 42
@@ -315,6 +368,32 @@ def test_move_to_trash_returns_copyuid_confirmed_destination(fake_imap: None) ->
     result = fetcher.move_remote_message_to_trash("INBOX", 7)
 
     assert result == RemoteMoveResult(uidvalidity=5, uid=42)
+
+
+@pytest.mark.parametrize("operation", ["move", "expunge", "membership"])
+def test_delete_select_checks_uidvalidity_before_mutation(
+    fake_imap: None, operation: str
+) -> None:
+    fetcher = GenericImapFetcher(
+        "imap.example.test",
+        "user",
+        "password",
+        oauth_provider="google" if operation == "membership" else None,
+    )
+    fetcher.connect()
+
+    with pytest.raises(UidValidityChanged):
+        if operation == "move":
+            fetcher.move_remote_message_to_trash("INBOX", 7, expected_uidvalidity=122)
+        elif operation == "expunge":
+            fetcher.expunge_remote_message("INBOX", 7, expected_uidvalidity=122)
+        else:
+            fetcher.remove_remote_membership("INBOX", 7, expected_uidvalidity=122)
+
+    commands = FakeImap.instances[0].commands
+    assert [command[0] for command in commands if command[0] not in {"CAPABILITY", "LOGIN"}] == [
+        "SELECT"
+    ]
 
 
 def test_move_to_trash_returns_none_when_server_has_no_copyuid(fake_imap: None) -> None:

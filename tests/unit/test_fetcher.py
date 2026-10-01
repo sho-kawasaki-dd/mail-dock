@@ -48,6 +48,7 @@ class MinimalFetcher(BaseMailFetcher):
         raw_name: str,
         uids: Iterable[int],
         *,
+        expected_uidvalidity: int | None = None,
         cancel: CancelToken | None = None,
     ) -> Iterator[RemoteMessageRef]:
         return iter(())
@@ -76,13 +77,19 @@ class MinimalFetcher(BaseMailFetcher):
     def download_eml_headers(self, raw_name: str, uid: int) -> bytes:
         return b""
 
-    def remove_remote_membership(self, raw_name: str, uid: int) -> None:
+    def remove_remote_membership(
+        self, raw_name: str, uid: int, *, expected_uidvalidity: int | None = None
+    ) -> None:
         pass
 
-    def move_remote_message_to_trash(self, raw_name: str, uid: int) -> None:
+    def move_remote_message_to_trash(
+        self, raw_name: str, uid: int, *, expected_uidvalidity: int | None = None
+    ) -> None:
         pass
 
-    def expunge_remote_message(self, raw_name: str, uid: int) -> None:
+    def expunge_remote_message(
+        self, raw_name: str, uid: int, *, expected_uidvalidity: int | None = None
+    ) -> None:
         pass
 
 

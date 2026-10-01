@@ -20,6 +20,7 @@ from mail_dock.domain.errors import (
     PermanentError,
     RateLimitedError,
     TransientError,
+    UidValidityChanged,
 )
 from mail_dock.domain.fetcher import (
     BaseMailFetcher,
@@ -32,6 +33,7 @@ from mail_dock.domain.ports import BaseAccessTokenProvider
 from mail_dock.infrastructure.fetchers.imap_common import (
     is_gmail_rate_limit_response,
     parse_fetch_response,
+    parse_flags_fetch_response,
     parse_list_responses,
     wrap_imap_errors,
 )
@@ -366,6 +368,7 @@ class GenericImapFetcher(BaseMailFetcher):
         raw_name: str,
         uids: Iterable[int],
         *,
+        expected_uidvalidity: int | None = None,
         cancel: CancelToken | None = None,
     ) -> Iterator[RemoteMessageRef]:
         """Yield FLAGS-only metadata for the supplied UIDs in chunks."""
@@ -374,7 +377,13 @@ class GenericImapFetcher(BaseMailFetcher):
         if any(uid < 1 for uid in requested_uids):
             raise ValueError("uids must contain only positive integers")
         token = cancel if cancel is not None else CancelToken()
-        self.select_folder(raw_name)
+        selected_uidvalidity = self.select_folder(raw_name)
+        if (
+            expected_uidvalidity is not None
+            and selected_uidvalidity != expected_uidvalidity
+        ):
+            raise UidValidityChanged(f"UIDVALIDITY changed for folder {raw_name}")
+        requested_uid_set = set(requested_uids)
         for offset in range(0, len(requested_uids), _FETCH_CHUNK_SIZE):
             token.raise_if_cancelled()
             chunk = requested_uids[offset : offset + _FETCH_CHUNK_SIZE]
@@ -391,7 +400,9 @@ class GenericImapFetcher(BaseMailFetcher):
             for item in data:
                 if not isinstance(item, (bytes, tuple, list)):
                     continue
-                yield parse_fetch_response(item)
+                ref = parse_flags_fetch_response(item, requested_uid_set)
+                if ref is not None:
+                    yield ref
             token.raise_if_cancelled()
 
     def iter_flags_since(
@@ -451,24 +462,41 @@ class GenericImapFetcher(BaseMailFetcher):
         data = self._uid_command("FETCH", str(uid), "(BODY.PEEK[HEADER])")
         return self._literal_from_fetch(data, "message headers")
 
-    def _select_folder_for_delete(self, raw_name: str) -> None:
+    def _select_folder_for_delete(
+        self, raw_name: str, *, expected_uidvalidity: int | None = None
+    ) -> None:
         connection = self._require_connection()
         with wrap_imap_errors(f"SELECT {raw_name} for deletion"):
             status, data = connection.select(raw_name)
             self._ensure_ok(status, data, "SELECT")
+            if expected_uidvalidity is not None:
+                response_type, response_data = connection.response("UIDVALIDITY")
+                if str(response_type).upper() != "UIDVALIDITY":
+                    raise PermanentError("SELECT response has no UIDVALIDITY")
+                selected_uidvalidity = self._first_number(response_data)
+                if selected_uidvalidity is None:
+                    selected_uidvalidity = self._first_number(data)
+                if selected_uidvalidity is None:
+                    raise PermanentError("SELECT response has no UIDVALIDITY")
+                if selected_uidvalidity != expected_uidvalidity:
+                    raise UidValidityChanged(f"UIDVALIDITY changed for folder {raw_name}")
 
-    def remove_remote_membership(self, raw_name: str, uid: int) -> None:
+    def remove_remote_membership(
+        self, raw_name: str, uid: int, *, expected_uidvalidity: int | None = None
+    ) -> None:
         """Remove only the selected folder membership, preserving other labels."""
 
         if self._oauth_provider != "google":
             raise PermanentError("remote membership removal is only supported for Gmail labels")
-        self._select_folder_for_delete(raw_name)
+        self._select_folder_for_delete(raw_name, expected_uidvalidity=expected_uidvalidity)
         self._uid_command("STORE", str(uid), "-X-GM-LABELS.SILENT", f'("{raw_name}")')
 
-    def move_remote_message_to_trash(self, raw_name: str, uid: int) -> RemoteMoveResult | None:
+    def move_remote_message_to_trash(
+        self, raw_name: str, uid: int, *, expected_uidvalidity: int | None = None
+    ) -> RemoteMoveResult | None:
         """Move one message to trash without using a folder-wide EXPUNGE."""
 
-        self._select_folder_for_delete(raw_name)
+        self._select_folder_for_delete(raw_name, expected_uidvalidity=expected_uidvalidity)
         trash_folder = self.find_trash_folder()
         if trash_folder is None:
             raise PermanentError("could not identify the remote trash folder")
@@ -485,12 +513,14 @@ class GenericImapFetcher(BaseMailFetcher):
         self._expunge_selected_uid(uid)
         return move_result
 
-    def expunge_remote_message(self, raw_name: str, uid: int) -> None:
+    def expunge_remote_message(
+        self, raw_name: str, uid: int, *, expected_uidvalidity: int | None = None
+    ) -> None:
         """Permanently remove one message through UID EXPUNGE."""
 
         if self._oauth_provider == "google":
             raise PermanentError("Gmail accounts do not support remote expunge")
-        self._select_folder_for_delete(raw_name)
+        self._select_folder_for_delete(raw_name, expected_uidvalidity=expected_uidvalidity)
         self._expunge_selected_uid(uid)
 
     def _expunge_selected_uid(self, uid: int) -> None:

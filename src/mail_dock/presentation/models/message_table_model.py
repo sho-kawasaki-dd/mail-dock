@@ -17,6 +17,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QBrush, QColor, QIcon
 from PySide6.QtWidgets import QApplication, QStyle
 
+from mail_dock.domain.imap_flags import has_imap_flag
 from mail_dock.domain.search import (
     MessageFilter,
     MessageSummary,
@@ -112,16 +113,12 @@ def _standard_icon(theme_name: str, fallback: QStyle.StandardPixmap) -> QIcon:
     return QApplication.style().standardIcon(fallback)
 
 
-def _has_imap_flag(flags: str | None, expected: str) -> bool:
-    return expected in (flags or "").split()
-
-
 def _status_icon(summary: MessageSummary) -> QIcon | None:
     if summary.remote_state == "deleted":
         return _standard_icon("edit-delete", QStyle.StandardPixmap.SP_TrashIcon)
-    if not _has_imap_flag(summary.imap_flags, "\\Seen"):
+    if not has_imap_flag(summary.imap_flags, "\\Seen"):
         return _standard_icon("mail-unread", QStyle.StandardPixmap.SP_MessageBoxInformation)
-    if _has_imap_flag(summary.imap_flags, "\\Flagged"):
+    if has_imap_flag(summary.imap_flags, "\\Flagged"):
         return _standard_icon("starred", QStyle.StandardPixmap.SP_DialogApplyButton)
     return None
 
@@ -451,13 +448,13 @@ class MessageTableModel(QAbstractTableModel):
             return strings.STATUS_REMOTE_MOVED.format(folder=summary.moved_to_folder_display_name)
         if summary.failure_class == "oversize":
             return strings.STATUS_OVERSIZE
-        if not _has_imap_flag(summary.imap_flags, "\\Seen"):
+        if not has_imap_flag(summary.imap_flags, "\\Seen"):
             if summary.flags_seen_at is None:
                 return strings.TOOLTIP_UNREAD_UNKNOWN
             return strings.TOOLTIP_UNREAD.format(
                 seen_at=format_local_datetime(summary.flags_seen_at)
             )
-        if _has_imap_flag(summary.imap_flags, "\\Flagged"):
+        if has_imap_flag(summary.imap_flags, "\\Flagged"):
             if summary.flags_seen_at is None:
                 return strings.TOOLTIP_IMAP_FLAGS_UNKNOWN
             return strings.TOOLTIP_IMAP_FLAGS.format(

@@ -6,7 +6,7 @@ from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
 
-from mail_dock.domain.errors import PermanentError, TransientError
+from mail_dock.domain.errors import PermanentError, TransientError, UidValidityChanged
 from mail_dock.domain.fetcher import (
     BaseMailFetcher,
     CancelToken,
@@ -146,9 +146,15 @@ class FakeFetcher(BaseMailFetcher):
         raw_name: str,
         uids: Iterable[int],
         *,
+        expected_uidvalidity: int | None = None,
         cancel: CancelToken | None = None,
     ) -> Iterator[RemoteMessageRef]:
         token = cancel or CancelToken()
+        if (
+            expected_uidvalidity is not None
+            and self.select_folder(raw_name) != expected_uidvalidity
+        ):
+            raise UidValidityChanged(f"UIDVALIDITY changed for folder {raw_name}")
         for uid in uids:
             token.raise_if_cancelled()
             message = self._messages.get((raw_name, uid))
@@ -209,13 +215,19 @@ class FakeFetcher(BaseMailFetcher):
         head, _, _ = raw.partition(separator)
         return head + separator
 
-    def remove_remote_membership(self, raw_name: str, uid: int) -> None:
+    def remove_remote_membership(
+        self, raw_name: str, uid: int, *, expected_uidvalidity: int | None = None
+    ) -> None:
+        self._check_expected_uidvalidity(raw_name, expected_uidvalidity)
         try:
             del self._messages[(raw_name, uid)]
         except KeyError as exc:
             raise PermanentError(f"unknown message: {raw_name}:{uid}") from exc
 
-    def move_remote_message_to_trash(self, raw_name: str, uid: int) -> RemoteMoveResult | None:
+    def move_remote_message_to_trash(
+        self, raw_name: str, uid: int, *, expected_uidvalidity: int | None = None
+    ) -> RemoteMoveResult | None:
+        self._check_expected_uidvalidity(raw_name, expected_uidvalidity)
         if not self._copyuid_moves:
             self._remove_message(raw_name, uid)
             return None
@@ -235,8 +247,20 @@ class FakeFetcher(BaseMailFetcher):
         )
         return RemoteMoveResult(uidvalidity=dest_uidvalidity, uid=dest_uid)
 
-    def expunge_remote_message(self, raw_name: str, uid: int) -> None:
+    def expunge_remote_message(
+        self, raw_name: str, uid: int, *, expected_uidvalidity: int | None = None
+    ) -> None:
+        self._check_expected_uidvalidity(raw_name, expected_uidvalidity)
         self._remove_message(raw_name, uid)
+
+    def _check_expected_uidvalidity(
+        self, raw_name: str, expected_uidvalidity: int | None
+    ) -> None:
+        if (
+            expected_uidvalidity is not None
+            and self.select_folder(raw_name) != expected_uidvalidity
+        ):
+            raise UidValidityChanged(f"UIDVALIDITY changed for folder {raw_name}")
 
     def _remove_message(self, raw_name: str, uid: int) -> None:
         try:

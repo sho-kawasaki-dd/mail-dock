@@ -34,6 +34,8 @@ _UID_PATTERN = re.compile(r"\bUID\s+(\d+)", re.IGNORECASE)
 _SIZE_PATTERN = re.compile(r"\bRFC822\.SIZE\s+(\d+)", re.IGNORECASE)
 _DATE_PATTERN = re.compile(r'\bINTERNALDATE\s+["\']([^"\']+)["\']', re.IGNORECASE)
 _FLAGS_PATTERN = re.compile(r"\bFLAGS\s*\(([^)]*)\)", re.IGNORECASE)
+_FLAGS_ONLY_PATTERN = re.compile(r"\bFLAGS\s*\(([^()]*)\)", re.IGNORECASE)
+_IMAP_FLAG_ATOM_PATTERN = re.compile(r'^[^\x00-\x20(){%*"\\\]]+$')
 _GMAIL_MSGID_PATTERN = re.compile(r"\bX-GM-MSGID\s+(\d+)", re.IGNORECASE)
 _GMAIL_THRID_PATTERN = re.compile(r"\bX-GM-THRID\s+(\d+)", re.IGNORECASE)
 _GMAIL_LABELS_PATTERN = re.compile(r"\bX-GM-LABELS\s*\(([^)]*)\)", re.IGNORECASE)
@@ -197,6 +199,29 @@ def parse_fetch_response(response: FetchResponse) -> RemoteMessageRef:
         gmail_thrid=(str(int(gmail_thrid_match.group(1))) if gmail_thrid_match else None),
         gmail_labels=gmail_labels,
     )
+
+
+def parse_flags_fetch_response(
+    response: FetchResponse, requested_uids: set[int]
+) -> RemoteMessageRef | None:
+    """Parse a FLAGS-only response, rejecting missing or malformed FLAGS."""
+
+    metadata, _literal = _fetch_parts(response)
+    metadata_text = metadata.decode("ascii", errors="replace")
+    uid_match = _UID_PATTERN.search(metadata_text)
+    if uid_match is None:
+        raise PermanentError("IMAP FLAGS FETCH response has no UID")
+    uid = int(uid_match.group(1))
+    if uid not in requested_uids:
+        return None
+    flags_match = _FLAGS_ONLY_PATTERN.search(metadata_text)
+    if flags_match is None:
+        raise PermanentError("IMAP FLAGS FETCH response has no valid FLAGS item")
+    for token in flags_match.group(1).split():
+        atom = token[1:] if token.startswith("\\") else token
+        if _IMAP_FLAG_ATOM_PATTERN.fullmatch(atom) is None:
+            raise PermanentError("IMAP FLAGS FETCH response has an invalid flag token")
+    return parse_fetch_response(response)
 
 
 @contextmanager

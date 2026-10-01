@@ -15,11 +15,14 @@ from mail_dock.domain.errors import (
     StorageDetachedError,
     StorageError,
     TransientError,
+    UidValidityChanged,
 )
 from mail_dock.domain.fetcher import BaseMailFetcher, RemoteMoveResult
+from mail_dock.domain.imap_flags import has_imap_flag
 from mail_dock.domain.message_identity import imap_source_item_key
 from mail_dock.domain.ports import BaseEmlStorage, BaseManifestReader, BaseManifestWriter, JSONValue
 from mail_dock.domain.repository import BaseMessageRepository, MessageRecord
+from mail_dock.domain.search import MessageSummary
 from mail_dock.usecases.account_guards import ensure_imap_account, ensure_imap_message
 
 _LOGGER = logging.getLogger(__name__)
@@ -66,12 +69,27 @@ class DeleteExclusion:
 
 
 @dataclass(frozen=True)
+class DeleteScope:
+    """Immutable list-wide selection and exclusions for remote deletion."""
+
+    message_ids: tuple[int, ...]
+    flagged_message_ids: tuple[int, ...]
+    non_deletable_message_ids: tuple[int, ...]
+    matched_count: int
+    flagged_excluded_count: int
+    truncated: bool
+    delete_batch_limit: int
+
+
+@dataclass(frozen=True)
 class DeleteDryRunResult:
     """Reviewable remote-delete plan produced without changing the server."""
 
     candidates: tuple[DeleteCandidate, ...] = ()
     exclusions: tuple[DeleteExclusion, ...] = ()
     total_size_bytes: int = 0
+    exclude_flagged: bool = False
+    scope: DeleteScope | None = None
 
     @property
     def items(self) -> tuple[DeleteCandidate, ...]:
@@ -149,6 +167,8 @@ def _candidate_from_record(
     record: MessageRecord,
     *,
     folder_id: Any | None = None,
+    exclude_flagged: bool = False,
+    require_present: bool = False,
 ) -> tuple[DeleteCandidate | None, str | None]:
     source_item_key = record.get("source_item_key")
     account_id_value = record.get("account_id")
@@ -171,8 +191,16 @@ def _candidate_from_record(
     size_bytes = record.get("size_bytes")
     if message_id is None:
         return None, "message_id_missing"
-    if record.get("remote_state") in {"deleted", "uncertain"}:
+    remote_state = record.get("remote_state")
+    if require_present and remote_state != "present":
         return None, "remote_state_not_deletable"
+    if remote_state in {"deleted", "uncertain"}:
+        return None, "remote_state_not_deletable"
+    imap_flags = record.get("imap_flags")
+    if exclude_flagged and has_imap_flag(
+        imap_flags if isinstance(imap_flags, str) else None, r"\Flagged"
+    ):
+        return None, "flagged"
 
     account_id = record.get("account_id")
     relative_path = record.get("relative_path")
@@ -249,6 +277,8 @@ def dry_run(
     message_ids: Iterable[Any],
     storage_state: RemoteDeleteGate,
     folder_id: Any | None = None,
+    exclude_flagged: bool = False,
+    scope: DeleteScope | None = None,
 ) -> DeleteDryRunResult:
     """Build a deletion plan after verifying every local prerequisite."""
 
@@ -262,11 +292,47 @@ def dry_run(
 
     candidates: list[DeleteCandidate] = []
     exclusions: list[DeleteExclusion] = []
+    fixed_exclusions = (
+        {
+            **dict.fromkeys(scope.flagged_message_ids, "flagged"),
+            **dict.fromkeys(scope.non_deletable_message_ids, "remote_state_not_deletable"),
+        }
+        if scope is not None
+        else {}
+    )
+    eligible_ids = set(scope.message_ids) if scope is not None else None
     for message_id, record in zip(selected_message_ids, selected_records, strict=True):
+        fixed_reason = fixed_exclusions.get(message_id)
+        if fixed_reason is not None:
+            exclusions.append(
+                DeleteExclusion(
+                    message_id=message_id,
+                    reason=fixed_reason,
+                    subject=str(record.get("subject") or "") if record is not None else "",
+                    size_bytes=(
+                        int(record["size_bytes"])
+                        if record is not None
+                        and isinstance(record.get("size_bytes"), int)
+                        and not isinstance(record.get("size_bytes"), bool)
+                        else 0
+                    ),
+                )
+            )
+            continue
+        if eligible_ids is not None and message_id not in eligible_ids:
+            exclusions.append(DeleteExclusion(message_id, "outside_delete_scope"))
+            continue
         if record is None:
             exclusions.append(DeleteExclusion(message_id, "message_not_found"))
             continue
-        candidate, reason = _candidate_from_record(repo, storage, record, folder_id=folder_id)
+        candidate, reason = _candidate_from_record(
+            repo,
+            storage,
+            record,
+            folder_id=folder_id,
+            exclude_flagged=exclude_flagged,
+            require_present=scope is not None,
+        )
         if candidate is None:
             exclusions.append(
                 DeleteExclusion(
@@ -287,7 +353,52 @@ def dry_run(
         candidates=tuple(candidates),
         exclusions=tuple(exclusions),
         total_size_bytes=sum(candidate.size_bytes for candidate in candidates),
+        exclude_flagged=exclude_flagged,
+        scope=scope,
     )
+
+
+def select_delete_scope(
+    summaries: Iterable[MessageSummary], *, exclude_flagged: bool, limit: int
+) -> DeleteScope:
+    """Select the oldest deletable rows up to the confirmed operation limit."""
+
+    if limit <= 0:
+        raise ValueError("limit must be positive")
+    items = tuple(summaries)
+    non_deletable = tuple(item.id for item in items if item.remote_state != "present")
+    non_deletable_set = set(non_deletable)
+    flagged = tuple(
+        item.id
+        for item in items
+        if item.id not in non_deletable_set
+        and exclude_flagged
+        and has_imap_flag(item.imap_flags, r"\Flagged")
+    )
+    excluded_ids = non_deletable_set | set(flagged)
+    eligible = sorted(
+        (item for item in items if item.id not in excluded_ids),
+        key=_delete_scope_sort_key,
+    )
+    message_ids = tuple(item.id for item in eligible[:limit])
+    truncated = len(items) - len(non_deletable) - len(flagged) - len(message_ids) > 0
+    return DeleteScope(
+        message_ids=message_ids,
+        flagged_message_ids=flagged,
+        non_deletable_message_ids=non_deletable,
+        matched_count=len(items),
+        flagged_excluded_count=len(flagged),
+        truncated=truncated,
+        delete_batch_limit=limit,
+    )
+
+
+def _delete_scope_sort_key(item: MessageSummary) -> tuple[int, datetime, int]:
+    value = item.date_sent if item.date_sent is not None else item.internal_date
+    if value is None:
+        return 0, datetime.min.replace(tzinfo=UTC), item.id
+    normalized = value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+    return 1, normalized, item.id
 
 
 def _event(
@@ -563,6 +674,7 @@ def execute(
     mode: str = "trash",
     storage_state: RemoteDeleteGate,
     delete_batch_limit: int = DEFAULT_DELETE_BATCH_LIMIT,
+    exclude_flagged: bool = False,
 ) -> DeleteResult:
     """Execute a reviewed plan while recording recoverable operation states."""
 
@@ -603,29 +715,115 @@ def execute(
     errors: list[tuple[Any, str]] = []
     total_size_bytes = 0
 
-    for planned in items:
+    items_to_delete = items
+    invalidated_folders: set[str] = set()
+    if exclude_flagged and items:
+        grouped_items: dict[str, list[DeleteCandidate]] = {}
+        for candidate in items:
+            grouped_items.setdefault(candidate.folder_raw_name, []).append(candidate)
+        verified_flags: dict[tuple[str, int], tuple[str, ...]] = {}
+        pending_flag_updates: list[tuple[DeleteCandidate, str]] = []
+        preflight_skips: dict[Any, str] = {}
+        for raw_name, folder_items in grouped_items.items():
+            uidvalidities = {candidate.uidvalidity for candidate in folder_items}
+            if len(uidvalidities) != 1:
+                preflight_skips.update(
+                    (candidate.message_id, "uidvalidity_mismatch") for candidate in folder_items
+                )
+                continue
+            expected_uidvalidity = next(iter(uidvalidities))
+            try:
+                if fetcher.select_folder(raw_name) != expected_uidvalidity:
+                    preflight_skips.update(
+                        (candidate.message_id, "uidvalidity_mismatch")
+                        for candidate in folder_items
+                    )
+                    continue
+                refs = tuple(
+                    fetcher.iter_flags(
+                        raw_name,
+                        (candidate.uid for candidate in folder_items),
+                        expected_uidvalidity=expected_uidvalidity,
+                    )
+                )
+            except UidValidityChanged:
+                preflight_skips.update(
+                    (candidate.message_id, "uidvalidity_mismatch") for candidate in folder_items
+                )
+                continue
+            except (TransientError, StorageDetachedError):
+                raise
+            except FetchError:
+                preflight_skips.update(
+                    (candidate.message_id, "flag_unverified") for candidate in folder_items
+                )
+                continue
+            requested_uids = {candidate.uid for candidate in folder_items}
+            for ref in refs:
+                if ref.uid in requested_uids:
+                    verified_flags[(raw_name, ref.uid)] = ref.flags
+
+        items_to_delete_list: list[DeleteCandidate] = []
+        for candidate in items:
+            reason = preflight_skips.get(candidate.message_id)
+            flags = verified_flags.get((candidate.folder_raw_name, candidate.uid))
+            if reason is None and flags is None:
+                reason = "flag_unverified"
+            if reason is not None:
+                skipped_ids.append(candidate.message_id)
+                errors.append((candidate.message_id, reason))
+                continue
+            assert flags is not None
+            pending_flag_updates.append((candidate, " ".join(flags)))
+            if has_imap_flag(" ".join(flags), r"\Flagged"):
+                skipped_ids.append(candidate.message_id)
+                errors.append((candidate.message_id, "flagged_on_server"))
+            else:
+                items_to_delete_list.append(candidate)
+        if pending_flag_updates:
+            flags_seen_at = _timestamp()
+            repo.begin_batch()
+            for candidate, flags_text in pending_flag_updates:
+                if candidate.folder_id is not None:
+                    repo.update_flags(
+                        candidate.account_id,
+                        candidate.folder_id,
+                        candidate.uidvalidity,
+                        candidate.uid,
+                        flags_text,
+                        flags_seen_at,
+                    )
+            repo.commit_batch()
+        items_to_delete = tuple(items_to_delete_list)
+
+    for planned in items_to_delete:
+        if planned.folder_raw_name in invalidated_folders:
+            skipped_ids.append(planned.message_id)
+            errors.append((planned.message_id, "uidvalidity_mismatch"))
+            continue
         record = repo.get_message(planned.message_id)
         if record is None:
             skipped_ids.append(planned.message_id)
             errors.append((planned.message_id, "message_not_found"))
             continue
-        candidate, reason = _candidate_from_record(
+        verified_candidate, reason = _candidate_from_record(
             repo, storage, record, folder_id=planned.folder_id
         )
-        if candidate is None:
+        if verified_candidate is None:
             skipped_ids.append(planned.message_id)
             errors.append((planned.message_id, reason or "not_deletable"))
             continue
         if (
-            candidate.file_hash != planned.file_hash
-            or candidate.relative_path != planned.relative_path
-            or candidate.uid != planned.uid
-            or candidate.uidvalidity != planned.uidvalidity
-            or candidate.folder_raw_name != planned.folder_raw_name
+            verified_candidate.file_hash != planned.file_hash
+            or verified_candidate.relative_path != planned.relative_path
+            or verified_candidate.uid != planned.uid
+            or verified_candidate.uidvalidity != planned.uidvalidity
+            or verified_candidate.folder_raw_name != planned.folder_raw_name
         ):
             skipped_ids.append(planned.message_id)
             errors.append((planned.message_id, "plan_stale"))
             continue
+        candidate = verified_candidate
 
         timestamp = _timestamp()
         manifest.append(_event("remote_delete_intent", candidate, mode, timestamp))
@@ -633,13 +831,43 @@ def execute(
         move_result: RemoteMoveResult | None = None
         try:
             if mode == "trash":
-                move_result = fetcher.move_remote_message_to_trash(
-                    candidate.folder_raw_name, candidate.uid
-                )
+                if exclude_flagged:
+                    move_result = fetcher.move_remote_message_to_trash(
+                        candidate.folder_raw_name,
+                        candidate.uid,
+                        expected_uidvalidity=candidate.uidvalidity,
+                    )
+                else:
+                    move_result = fetcher.move_remote_message_to_trash(
+                        candidate.folder_raw_name, candidate.uid
+                    )
             elif mode == "expunge":
-                fetcher.expunge_remote_message(candidate.folder_raw_name, candidate.uid)
+                if exclude_flagged:
+                    fetcher.expunge_remote_message(
+                        candidate.folder_raw_name,
+                        candidate.uid,
+                        expected_uidvalidity=candidate.uidvalidity,
+                    )
+                else:
+                    fetcher.expunge_remote_message(candidate.folder_raw_name, candidate.uid)
             else:
-                fetcher.remove_remote_membership(candidate.folder_raw_name, candidate.uid)
+                if exclude_flagged:
+                    fetcher.remove_remote_membership(
+                        candidate.folder_raw_name,
+                        candidate.uid,
+                        expected_uidvalidity=candidate.uidvalidity,
+                    )
+                else:
+                    fetcher.remove_remote_membership(candidate.folder_raw_name, candidate.uid)
+        except UidValidityChanged:
+            invalidated_folders.add(candidate.folder_raw_name)
+            skipped_ids.append(candidate.message_id)
+            errors.append((candidate.message_id, "uidvalidity_mismatch"))
+            _LOGGER.info(
+                "Skipping remaining remote deletes in changed folder %s",
+                candidate.folder_raw_name,
+            )
+            continue
         except (TransientError, StorageDetachedError) as error:
             manifest.append(_event("remote_delete_uncertain", candidate, mode, _timestamp()))
             manifest.flush_and_sync()
