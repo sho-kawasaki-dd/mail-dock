@@ -136,6 +136,7 @@ def test_exclude_flagged_preserves_starred_message_on_real_server(tmp_path: Path
                 "uid": uid,
                 "uidvalidity": uidvalidity,
                 "source_item_key": f"{uidvalidity}:{uid}",
+                "content_key": f"reconcile:{account_id}:{uidvalidity}:{uid}",
                 "remote_state": "present",
                 "imap_flags": None,
                 "local_state": "active",

@@ -189,7 +189,7 @@
   - [x] 「ワーカーが成功結果を送信済み → GUIでキャンセル → 同じ `request_id` の成功結果を受信」の順を再現し、ドライラン・削除を開始せずトークン・不変データを解放する。後続の重複成功・失敗・キャンセル通知が新要求へ干渉しない
   - [x] 一覧取得中は `has_active_operations()` が真になり、キャンセル後は処理が停止して削除されない
 - [x] `tests/integration/test_remote_delete.py` に、スター付きメールが実サーバー相当（Dovecot、WSL上で実行）で削除されないことを検証するケースを追加する
-- [ ] WSL上でDockerテスト環境を起動し、追加したDovecot統合テストを実行して、スター付きメールが削除されず `remote_delete_intent` も記録されないことを確認する
+- [x] WSL上でDockerテスト環境を起動し、追加したDovecot統合テストを実行して、スター付きメールが削除されず `remote_delete_intent` も記録されないことを確認する
 - [x] `pytest -m "not docker and not gui and not pst"` と GUIテストを実行し、既存の手動削除テストが変更なく通ることを確認する
 
 ### **Group E: ドキュメント整合**
