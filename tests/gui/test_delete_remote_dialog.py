@@ -6,7 +6,7 @@ import tracemalloc
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from PySide6.QtWidgets import QApplication, QCheckBox, QLabel, QTableView, QTableWidget
@@ -63,16 +63,17 @@ def test_dry_run_dialog_shows_candidates_exclusions_and_total(qtbot: Any) -> Non
     dialog = DeleteDryRunDialog(_result())
     qtbot.addWidget(dialog)
 
-    assert dialog.table.rowCount() == 2
-    candidate_subject = dialog.table.item(0, 1)
-    exclusion_subject = dialog.table.item(1, 1)
-    exclusion_reason = dialog.table.item(1, 4)
+    model = cast(Any, dialog.table.model())
+    assert model.rowCount() == 2
+    candidate_subject = model.index(0, 1).data()
+    exclusion_subject = model.index(1, 1).data()
+    exclusion_reason = model.index(1, 4).data()
     assert candidate_subject is not None
     assert exclusion_subject is not None
     assert exclusion_reason is not None
-    assert candidate_subject.text() == "Subject"
-    assert exclusion_subject.text() == "Excluded subject"
-    assert exclusion_reason.text() == "hash_mismatch"
+    assert candidate_subject == "Subject"
+    assert exclusion_subject == "Excluded subject"
+    assert exclusion_reason == "hash_mismatch"
     assert any("128" in label.text() for label in dialog.findChildren(QLabel))
 
 

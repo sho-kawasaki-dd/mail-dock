@@ -24,7 +24,7 @@ from mail_dock.domain.storage_state import StorageState
 from mail_dock.presentation import strings
 from mail_dock.presentation.threads.sync_worker import FolderTreeSnapshot
 from mail_dock.presentation.views.main_window import MainWindow
-from mail_dock.usecases.delete_remote import DeleteResult
+from mail_dock.usecases.delete_remote import DeleteResult, DeleteScope
 from mail_dock.usecases.export_mbox import ExportMboxProgress
 
 pytestmark = pytest.mark.gui
@@ -383,7 +383,7 @@ def test_delete_by_list_action_is_file_menu_only_and_requires_active_folder_list
     assert window.delete_remote_by_list_action.toolTip() == strings.REMOTE_DELETE_DISABLED_NO_FOLDER
     file_menu_action = next(
         action
-        for action in window.menuBar().actions()
+        for action in cast(Any, window.menuBar().actions())
         if action.text() == strings.MAIN_MENU_FILE
     )
     file_menu = file_menu_action.menu()
@@ -517,7 +517,8 @@ def test_delete_by_list_freezes_scope_options_and_uses_fixed_batch_limit(
     assert list_calls[0]["channel"] == "delete/list"
     assert list_calls[0]["query"] == "請求書"
     assert list_calls[0]["mode"] == "or"
-    assert list_calls[0]["filters"].folder_ids == (10,)
+    filters = cast(MessageFilter, list_calls[0]["filters"])
+    assert filters.folder_ids == (10,)
     assert dialog_arguments[0]["delete_batch_limit"] == 1
 
     window.message_list_viewmodel.set_search_query("changed")
@@ -534,7 +535,8 @@ def test_delete_by_list_freezes_scope_options_and_uses_fixed_batch_limit(
     assert dry_run_calls[0]["message_ids"] == (3,)
     assert dry_run_calls[0]["folder_id"] == 10
     assert dry_run_calls[0]["exclude_flagged"] is True
-    assert dry_run_calls[0]["scope"].delete_batch_limit == 1
+    scope = cast(DeleteScope, dry_run_calls[0]["scope"])
+    assert scope.delete_batch_limit == 1
     assert window.has_active_operations()
     window.stop_workers()
 
@@ -570,9 +572,11 @@ def test_cancelled_delete_list_rejects_late_success_and_stale_request_ids(
         token=tokens[0] if not tokens[0].is_cancelled else tokens[1],
     )
     dry_run_calls: list[bool] = []
-    cast(Any, window.sync_worker).dry_run_remote_delete = lambda *_args, **_kwargs: (
-        dry_run_calls.append(True) or CancelToken()
-    )
+    def dry_run_remote_delete(*_args: object, **_kwargs: object) -> CancelToken:
+        dry_run_calls.append(True)
+        return CancelToken()
+
+    cast(Any, window.sync_worker).dry_run_remote_delete = dry_run_remote_delete
 
     window._start_remote_delete_by_list()
     window._show_delete_list_result(
@@ -643,15 +647,18 @@ def test_delete_and_export_list_requests_are_mutually_exclusive(
         lambda *_args, **_kwargs: ("messages.mbox", ""),
     )
     export_choice_calls: list[bool] = []
-    monkeypatch.setattr(
-        window,
-        "_choose_export_message_ids",
-        lambda: export_choice_calls.append(True) or (),
-    )
+    def choose_export_message_ids() -> tuple[int, ...]:
+        export_choice_calls.append(True)
+        return ()
+
+    monkeypatch.setattr(window, "_choose_export_message_ids", choose_export_message_ids)
     dry_run_calls: list[bool] = []
-    cast(Any, window.sync_worker).dry_run_remote_delete = lambda *_args, **_kwargs: (
-        dry_run_calls.append(True) or CancelToken()
-    )
+
+    def dry_run_remote_delete(*_args: object, **_kwargs: object) -> CancelToken:
+        dry_run_calls.append(True)
+        return CancelToken()
+
+    cast(Any, window.sync_worker).dry_run_remote_delete = dry_run_remote_delete
 
     window._start_remote_delete_by_list()
     window._begin_export("mbox")
