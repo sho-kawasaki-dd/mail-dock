@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
@@ -48,7 +48,7 @@ from mail_dock import config
 from mail_dock.domain.fetcher import CancelToken
 from mail_dock.domain.messages import AttachmentSavePlan, SavedFile
 from mail_dock.domain.ports import BaseIntegrityStorage
-from mail_dock.domain.search import MessageDetail
+from mail_dock.domain.search import MessageDetail, MessageFilter, MessageSummary
 from mail_dock.domain.storage_state import StorageState
 from mail_dock.infrastructure.app_paths import bundle_root
 from mail_dock.presentation import strings
@@ -61,6 +61,7 @@ from mail_dock.presentation.models.folder_tree_model import (
 )
 from mail_dock.presentation.models.message_table_model import MessageTableModel
 from mail_dock.presentation.threads.query_worker import QueryWorker
+from mail_dock.presentation.threads.request_state import RequestHandle
 from mail_dock.presentation.threads.sync_worker import (
     FolderTreeSnapshot,
     SyncErrorNotification,
@@ -77,6 +78,7 @@ from mail_dock.presentation.views.dialogs.confirmation_dialog import (
     confirm_save_executable,
 )
 from mail_dock.presentation.views.dialogs.delete_remote_dialog import (
+    DeleteByListOptionsDialog,
     DeleteConfirmationDialog,
     DeleteDryRunDialog,
 )
@@ -85,7 +87,7 @@ from mail_dock.presentation.views.dialogs.integrity_dialog import IntegrityDialo
 from mail_dock.presentation.views.dialogs.settings_dialog import SettingsDialog
 from mail_dock.presentation.views.message_list import MessageListSearchBar, MessageListView
 from mail_dock.usecases.account_guards import is_pst_account
-from mail_dock.usecases.delete_remote import DeleteDryRunResult, DeleteResult
+from mail_dock.usecases.delete_remote import DeleteDryRunResult, DeleteResult, select_delete_scope
 from mail_dock.usecases.export_attachments import ExportAttachmentsProgress, ExportAttachmentsResult
 from mail_dock.usecases.export_mbox import ExportMboxProgress
 from mail_dock.usecases.reindex import ReindexResult
@@ -103,6 +105,21 @@ class _StorageWriteGate:
 
     def is_remote_delete_allowed(self) -> bool:
         return self.is_write_allowed()
+
+
+@dataclass(frozen=True)
+class _DeleteByListRequest:
+    """Conditions and worker generation fixed for one list-wide delete."""
+
+    handle: RequestHandle
+    folder_id: int
+    folder_name: str
+    account_id: str
+    query: str
+    mode: str
+    filters: MessageFilter
+    delete_batch_limit: int
+    exclude_flagged: bool
 
 
 class MainWindow(QMainWindow):
@@ -135,6 +152,8 @@ class MainWindow(QMainWindow):
         self._folder_refresh_token: CancelToken | None = None
         self._file_token: CancelToken | None = None
         self._export_list_token: CancelToken | None = None
+        self._export_list_handle: RequestHandle | None = None
+        self._delete_list_request: _DeleteByListRequest | None = None
         self._pending_export_kind: str | None = None
         self._pending_export_destination: Path | None = None
         self._active_export_kind: str | None = None
@@ -341,6 +360,8 @@ class MainWindow(QMainWindow):
         self.export_attachments_action = QAction(strings.MAIN_MENU_EXPORT_ATTACHMENTS, self)
         self.delete_remote_action = QAction(strings.MAIN_MENU_DELETE_REMOTE, self)
         self.delete_remote_action.setEnabled(False)
+        self.delete_remote_by_list_action = QAction(strings.MAIN_MENU_DELETE_REMOTE_BY_LIST, self)
+        self.delete_remote_by_list_action.setEnabled(False)
         self.import_pst_action = QAction(strings.MAIN_MENU_IMPORT_PST, self)
         self.restore_trash_action = QAction(strings.MAIN_MENU_RESTORE_TRASH, self)
         self.purge_trash_action = QAction(strings.MAIN_MENU_PURGE_TRASH, self)
@@ -379,6 +400,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.export_mbox_action)
         file_menu.addAction(self.export_attachments_action)
         file_menu.addAction(self.delete_remote_action)
+        file_menu.addAction(self.delete_remote_by_list_action)
         file_menu.addAction(self.restore_trash_action)
         file_menu.addAction(self.purge_trash_action)
         file_menu.addSeparator()
@@ -412,6 +434,7 @@ class MainWindow(QMainWindow):
         self.export_mbox_action.triggered.connect(self._export_mbox)
         self.export_attachments_action.triggered.connect(self._export_attachments)
         self.delete_remote_action.triggered.connect(self._start_remote_delete)
+        self.delete_remote_by_list_action.triggered.connect(self._start_remote_delete_by_list)
         self.import_pst_action.triggered.connect(self._show_import_pst_wizard)
         self.restore_trash_action.triggered.connect(self._restore_selected_from_trash)
         self.purge_trash_action.triggered.connect(self._purge_selected_from_trash)
@@ -481,6 +504,7 @@ class MainWindow(QMainWindow):
                 self._folder_refresh_token is not None,
                 self._file_token is not None,
                 self._export_list_token is not None,
+                self._delete_list_request is not None,
                 self._query_busy,
                 bool(self.verify_worker.active_tokens),
             )
@@ -685,6 +709,9 @@ class MainWindow(QMainWindow):
         self.query_worker.result.connect(self._show_export_list_result)
         self.query_worker.request_failed.connect(self._show_export_list_failure)
         self.query_worker.request_cancelled.connect(self._show_export_list_cancelled)
+        self.query_worker.result.connect(self._show_delete_list_result)
+        self.query_worker.request_failed.connect(self._show_delete_list_failure)
+        self.query_worker.request_cancelled.connect(self._show_delete_list_cancelled)
         self.sync_worker.trash_result.connect(self._show_trash_result)
         self.sync_worker.purge_result.connect(self._show_purge_result)
         self.sync_worker.delete_dry_run_result.connect(self._show_delete_dry_run_result)
@@ -765,6 +792,7 @@ class MainWindow(QMainWindow):
         self._count_label.setText(
             strings.STATUS_MESSAGE_COUNT.format(count=self.message_table_model.rowCount())
         )
+        self._update_message_actions()
 
     def _refresh_after_integrity_result(self, result: object) -> None:
         if not isinstance(result, ReindexResult):
@@ -836,6 +864,7 @@ class MainWindow(QMainWindow):
         pst_selected = self._is_pst_selection()
         self.sync_action.setVisible(not pst_selected)
         self.delete_remote_action.setVisible(not pst_selected)
+        self.delete_remote_by_list_action.setVisible(not pst_selected)
         sync_enabled = not pst_selected and self._sync_token is None
         refresh_enabled = not pst_selected and self._folder_refresh_token is None
         self.sync_action.setEnabled(sync_enabled)
@@ -877,6 +906,9 @@ class MainWindow(QMainWindow):
         }
         if len(selected_accounts) != 1:
             return False
+        return self._gmail_label_removal_is_available_for_account(next(iter(selected_accounts)))
+
+    def _gmail_label_removal_is_available_for_account(self, account_id: str) -> bool:
         create_repository = getattr(self.context, "create_message_repository", None)
         if not callable(create_repository):
             return False
@@ -885,7 +917,7 @@ class MainWindow(QMainWindow):
         except Exception:
             return False
         return any(
-            account.get("id") in selected_accounts and account.get("oauth_provider") == "google"
+            account.get("id") == account_id and account.get("oauth_provider") == "google"
             for account in accounts
         )
 
@@ -898,6 +930,7 @@ class MainWindow(QMainWindow):
         )
 
     def _update_remote_delete_action(self) -> None:
+        list_busy = self._delete_list_request is not None or self._export_list_handle is not None
         selected = bool(self._selected_message_ids())
         if self._is_pst_selection():
             enabled = False
@@ -905,7 +938,7 @@ class MainWindow(QMainWindow):
         elif self._storage_write_gate.state is not StorageState.ATTACHED:
             enabled = False
             reason = strings.REMOTE_DELETE_DISABLED_STORAGE
-        elif self._file_token is not None:
+        elif self._file_token is not None or list_busy:
             enabled = False
             reason = strings.REMOTE_DELETE_DISABLED_BUSY
         elif not selected:
@@ -925,6 +958,42 @@ class MainWindow(QMainWindow):
             reason = ""
         self.delete_remote_action.setEnabled(enabled)
         self.delete_remote_action.setToolTip(reason)
+        self._update_delete_by_list_action(list_busy)
+
+    def _update_delete_by_list_action(self, list_busy: bool) -> None:
+        node = self._selected_tree_node()
+        if self._is_pst_selection():
+            enabled = False
+            reason = strings.REMOTE_DELETE_DISABLED_PST
+        elif node is None or getattr(node, "kind", None) != "folder":
+            enabled = False
+            reason = strings.REMOTE_DELETE_DISABLED_NO_FOLDER
+        elif self._storage_write_gate.state is not StorageState.ATTACHED:
+            enabled = False
+            reason = strings.REMOTE_DELETE_DISABLED_STORAGE
+        elif self._file_token is not None or list_busy:
+            enabled = False
+            reason = strings.REMOTE_DELETE_DISABLED_BUSY
+        elif self.message_list_viewmodel.filters.local_states != frozenset({"active"}):
+            enabled = False
+            reason = strings.REMOTE_DELETE_DISABLED_LOCAL_TRASH
+        elif self.message_table_model.rowCount() == 0:
+            enabled = False
+            reason = strings.REMOTE_DELETE_DISABLED_EMPTY_LIST
+        elif (
+            self._remote_delete_mode() == "remove_membership"
+            and not self._gmail_label_removal_is_available_for_account(node.account_id)
+        ):
+            enabled = False
+            reason = strings.REMOTE_DELETE_DISABLED_GMAIL_LABEL
+        elif self._remote_delete_mode() == "trash" and not self._remote_trash_folder_is_known():
+            enabled = False
+            reason = strings.REMOTE_DELETE_DISABLED_NO_TRASH
+        else:
+            enabled = True
+            reason = ""
+        self.delete_remote_by_list_action.setEnabled(enabled)
+        self.delete_remote_by_list_action.setToolTip(reason)
 
     def _show_message_list_context_menu(self, position: object) -> None:
         if not isinstance(position, QPoint):
@@ -947,7 +1016,13 @@ class MainWindow(QMainWindow):
 
     def _start_remote_delete(self) -> None:
         message_ids = self._selected_message_ids()
-        if not message_ids or not self.delete_remote_action.isEnabled():
+        if (
+            not message_ids
+            or not self.delete_remote_action.isEnabled()
+            or self._file_token is not None
+            or self._delete_list_request is not None
+            or self._export_list_handle is not None
+        ):
             return
         selected_node = self._selected_tree_node()
         folder_id = (
@@ -962,6 +1037,143 @@ class MainWindow(QMainWindow):
         )
         self._status_label.setText(strings.STATUS_REMOTE_DELETE_DRY_RUN)
         self._update_remote_delete_action()
+
+    def _start_remote_delete_by_list(self) -> None:
+        if (
+            not self.delete_remote_by_list_action.isEnabled()
+            or self._file_token is not None
+            or self._delete_list_request is not None
+            or self._export_list_handle is not None
+        ):
+            return
+        node = self._selected_tree_node()
+        if (
+            node is None
+            or getattr(node, "kind", None) != "folder"
+            or not isinstance(getattr(node, "folder_id", None), int)
+            or not isinstance(getattr(node, "account_id", None), str)
+        ):
+            return
+        current_filters = self.message_list_viewmodel.filters
+        filters = replace(
+            current_filters,
+            account_ids=(node.account_id,),
+            folder_ids=(node.folder_id,),
+        )
+        query = self.message_list_viewmodel.query
+        mode = self.message_list_viewmodel.mode
+        settings = getattr(self.context, "settings", None)
+        batch_limit = getattr(settings, "delete_batch_limit", 1000)
+        dialog = DeleteByListOptionsDialog(
+            folder_name=node.display_name,
+            query=query,
+            mode=mode,
+            filters=filters,
+            delete_batch_limit=batch_limit,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        handle = self.query_worker.list_all_messages(
+            channel="delete/list",
+            query=query,
+            mode=mode,
+            filters=filters,
+        )
+        self._delete_list_request = _DeleteByListRequest(
+            handle=handle,
+            folder_id=node.folder_id,
+            folder_name=node.display_name,
+            account_id=node.account_id,
+            query=query,
+            mode=mode,
+            filters=filters,
+            delete_batch_limit=batch_limit,
+            exclude_flagged=dialog.exclude_flagged,
+        )
+        self._cancel_button.setEnabled(True)
+        self._status_label.setText(strings.STATUS_REMOTE_DELETE_LIST_LOADING)
+        self._update_message_actions()
+
+    def _finish_delete_list_request(self, status: str | None = None) -> None:
+        if self._delete_list_request is None:
+            return
+        self._delete_list_request = None
+        if status is not None:
+            self._status_label.setText(status)
+        self._refresh_cancel_button()
+        self._update_message_actions()
+
+    def _show_delete_list_result(self, result: object) -> None:
+        request = self._delete_list_request
+        if (
+            request is None
+            or getattr(result, "channel", None) != "delete/list"
+            or getattr(result, "request_id", None) != request.handle.request_id
+        ):
+            return
+        if request.handle.token.is_cancelled:
+            self._finish_delete_list_request(strings.STATUS_REMOTE_DELETE_LIST_CANCELLED)
+            return
+        summaries = tuple(
+            summary
+            for summary in getattr(result, "value", ())
+            if isinstance(summary, MessageSummary)
+        )
+        if not summaries:
+            self._finish_delete_list_request(strings.STATUS_REMOTE_DELETE_LIST_EMPTY)
+            return
+        try:
+            scope = select_delete_scope(
+                summaries,
+                exclude_flagged=request.exclude_flagged,
+                limit=request.delete_batch_limit,
+            )
+        except Exception as error:
+            self._finish_delete_list_request(user_message(error))
+            return
+        message_ids = (
+            scope.message_ids
+            + scope.flagged_message_ids
+            + scope.non_deletable_message_ids
+        )
+        folder_id = request.folder_id
+        exclude_flagged = request.exclude_flagged
+        self._finish_delete_list_request()
+        self._file_token = self.sync_worker.dry_run_remote_delete(
+            message_ids,
+            self._storage_write_gate,
+            folder_id=folder_id,
+            exclude_flagged=exclude_flagged,
+            scope=scope,
+        )
+        self._status_label.setText(strings.STATUS_REMOTE_DELETE_DRY_RUN)
+        self._cancel_button.setEnabled(True)
+        self._update_remote_delete_action()
+
+    def _show_delete_list_failure(self, failure: object) -> None:
+        request = self._delete_list_request
+        if (
+            request is None
+            or getattr(failure, "channel", None) != "delete/list"
+            or getattr(failure, "request_id", None) != request.handle.request_id
+        ):
+            return
+        if request.handle.token.is_cancelled:
+            self._finish_delete_list_request(strings.STATUS_REMOTE_DELETE_LIST_CANCELLED)
+        else:
+            error = cast(BaseException, getattr(failure, "error", failure))
+            self._finish_delete_list_request(user_message(error))
+
+    def _show_delete_list_cancelled(self, cancelled: object) -> None:
+        request = self._delete_list_request
+        if (
+            request is None
+            or getattr(cancelled, "channel", None) != "delete/list"
+            or getattr(cancelled, "request_id", None) != request.handle.request_id
+        ):
+            return
+        self._finish_delete_list_request(strings.STATUS_REMOTE_DELETE_LIST_CANCELLED)
 
     def _restore_selected_from_trash(self) -> None:
         selected_id = self.message_list_viewmodel.selected_message_id
@@ -1349,6 +1561,8 @@ class MainWindow(QMainWindow):
             self._pending_attachment_request = None
             self._pending_attachment_plan = None
             self._status_label.setText(strings.SAVE_SUCCESS.format(filename=result.path.name))
+            self._refresh_cancel_button()
+            self._update_message_actions()
         elif isinstance(result, Path):
             export_kind = self._active_export_kind
             export_count = self._active_export_count
@@ -1360,7 +1574,8 @@ class MainWindow(QMainWindow):
             )
             self._active_export_kind = None
             self._active_export_count = 0
-            self._cancel_button.setEnabled(False)
+            self._refresh_cancel_button()
+            self._update_message_actions()
         elif isinstance(result, ExportAttachmentsResult):
             self._file_token = None
             self._active_export_kind = None
@@ -1371,6 +1586,8 @@ class MainWindow(QMainWindow):
                     skipped=result.skipped_count,
                 )
             )
+            self._refresh_cancel_button()
+            self._update_message_actions()
 
     def _show_trash_result(self, result: object) -> None:
         from mail_dock.usecases.trash import TrashResult
@@ -1400,6 +1617,7 @@ class MainWindow(QMainWindow):
         if not isinstance(result, DeleteDryRunResult):
             return
         self._file_token = None
+        self._refresh_cancel_button()
         self._update_remote_delete_action()
         if not result.candidates:
             self._status_label.setText(strings.STATUS_REMOTE_DELETE_NO_CANDIDATES)
@@ -1417,7 +1635,11 @@ class MainWindow(QMainWindow):
         if DeleteConfirmationDialog(result, self).exec() != QDialog.DialogCode.Accepted:
             return
         settings = getattr(self.context, "settings", None)
-        batch_limit = getattr(settings, "delete_batch_limit", 1000)
+        batch_limit = (
+            result.scope.delete_batch_limit
+            if result.scope is not None
+            else getattr(settings, "delete_batch_limit", 1000)
+        )
         self._file_token = self.sync_worker.execute_remote_delete(
             result,
             self._storage_write_gate,
@@ -1440,6 +1662,7 @@ class MainWindow(QMainWindow):
                 skipped=result.skipped_count,
             )
         )
+        self._refresh_cancel_button()
         self._update_message_actions()
 
     def _handle_attachment_plan(self, plan: AttachmentSavePlan) -> None:
@@ -1502,7 +1725,11 @@ class MainWindow(QMainWindow):
         self._begin_export("attachments")
 
     def _begin_export(self, kind: str) -> None:
-        if self._file_token is not None or self._export_list_token is not None:
+        if (
+            self._file_token is not None
+            or self._export_list_token is not None
+            or self._delete_list_request is not None
+        ):
             return
         message_ids = self._choose_export_message_ids()
         if message_ids is None:
@@ -1533,9 +1760,11 @@ class MainWindow(QMainWindow):
             mode=self.message_list_viewmodel.mode,
             filters=self.message_list_viewmodel.filters,
         )
+        self._export_list_handle = handle
         self._export_list_token = handle.token
         self._cancel_button.setEnabled(True)
         self._status_label.setText(strings.EXPORT_STATUS_LOADING_LIST)
+        self._update_message_actions()
 
     def _choose_export_message_ids(self) -> tuple[int, ...] | None:
         selected = self._selected_message_ids()
@@ -1564,6 +1793,8 @@ class MainWindow(QMainWindow):
         if not message_ids:
             self._clear_pending_export()
             self._status_label.setText(strings.EXPORT_STATUS_NO_MESSAGES)
+            self._refresh_cancel_button()
+            self._update_message_actions()
             return
         self._active_export_kind = kind
         self._active_export_count = 0
@@ -1579,13 +1810,16 @@ class MainWindow(QMainWindow):
             )
         self._cancel_button.setEnabled(True)
         self._status_label.setText(strings.EXPORT_STATUS_RUNNING)
+        self._update_message_actions()
 
     def _show_export_list_result(self, result: object) -> None:
         if getattr(result, "channel", None) != "export/list":
             return
-        if self._export_list_token is None:
+        handle = self._export_list_handle
+        if handle is None or getattr(result, "request_id", None) != handle.request_id:
             return
         self._export_list_token = None
+        self._export_list_handle = None
         value = getattr(result, "value", ())
         message_ids = tuple(
             item.id for item in value if hasattr(item, "id") and type(item.id) is int
@@ -1595,23 +1829,38 @@ class MainWindow(QMainWindow):
         self._clear_pending_export()
         if kind is not None and destination is not None:
             self._start_export(kind, destination, message_ids)
+        else:
+            self._refresh_cancel_button()
+            self._update_message_actions()
 
     def _show_export_list_failure(self, failure: object) -> None:
         if getattr(failure, "channel", None) != "export/list":
             return
+        handle = self._export_list_handle
+        if handle is None or getattr(failure, "request_id", None) != handle.request_id:
+            return
         self._export_list_token = None
+        self._export_list_handle = None
         self._clear_pending_export()
         self._cancel_button.setEnabled(False)
         self._status_label.setText(
             user_message(cast(BaseException, getattr(failure, "error", failure)))
         )
+        self._refresh_cancel_button()
+        self._update_message_actions()
 
     def _show_export_list_cancelled(self, cancelled: object) -> None:
         if getattr(cancelled, "channel", None) != "export/list":
             return
+        handle = self._export_list_handle
+        if handle is None or getattr(cancelled, "request_id", None) != handle.request_id:
+            return
         self._export_list_token = None
+        self._export_list_handle = None
         self._clear_pending_export()
         self._cancel_button.setEnabled(False)
+        self._refresh_cancel_button()
+        self._update_message_actions()
 
     def _clear_pending_export(self) -> None:
         self._pending_export_kind = None
@@ -1640,6 +1889,9 @@ class MainWindow(QMainWindow):
         delete_remote_action = getattr(self, "delete_remote_action", None)
         if delete_remote_action is not None:
             delete_remote_action.setEnabled(False)
+        delete_by_list_action = getattr(self, "delete_remote_by_list_action", None)
+        if delete_by_list_action is not None:
+            delete_by_list_action.setEnabled(False)
         if not getattr(self, "_recovery_dialog_active", False) and callable(
             getattr(self, "_on_storage_reconnect", None)
         ):
@@ -1782,6 +2034,16 @@ class MainWindow(QMainWindow):
             self._file_token.cancel()
         if self._export_list_token is not None:
             self._export_list_token.cancel()
+        if self._delete_list_request is not None:
+            self._delete_list_request.handle.token.cancel()
+
+    def _refresh_cancel_button(self) -> None:
+        self._cancel_button.setEnabled(
+            self._sync_token is not None
+            or self._file_token is not None
+            or self._export_list_token is not None
+            or self._delete_list_request is not None
+        )
 
     def _restore_ui_state(self) -> None:
         geometry = self._ui_settings.value("geometry")

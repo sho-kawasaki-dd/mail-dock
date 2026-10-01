@@ -121,29 +121,29 @@
 
 ### **Group C: GUI**
 
-- [ ] `strings.py` に新アクション名・条件と設定上限・2.3節の件数表示・無効化理由（「フォルダを選択してください」を含む）・上限超過と継続的な失敗への注意・除外理由ラベル（`remote_state_not_deletable` / `flagged` / `flagged_on_server` / `flag_unverified` / `uidvalidity_mismatch`）を追加・整備する
-- [ ] `delete_remote_dialog.py` に `DeleteByListOptionsDialog` を追加する
-  - [ ] 現在の一覧条件の要約（フォルダ名・期間・検索語・検索モード・添付有無）と設定上限を読み取り専用で表示する。取得前の件数は表示しない
-  - [ ] 「スター付きを除外」チェックボックス（既定ON）。OFFにした場合は警告文を表示する
-  - [ ] 承認時に `exclude_flagged` を返す
-- [ ] `main_window.py` に `delete_remote_by_list_action` を追加し、ファイルメニューへ登録する（右クリックメニュー・ツールバーには置かない。D-2）
-- [ ] 有効化条件（D-9・F-9）を `_update_remote_delete_action` と同じ更新タイミングで反映し、無効時の理由をツールチップに出す
-  - [ ] Gmailラベル解除の可否は選択フォルダのアカウントから判定し、行選択を要求しない。既存の手動選択経路は変更しない
-- [ ] 押下ハンドラを実装する
-  - [ ] オプション承認時に、表示したフォルダID・検索語・検索モード・フィルタ・`delete_batch_limit` と承認した除外設定をpresentation層の `frozen=True` のデータクラスへ固定する
-  - [ ] 確定条件で `query_worker.list_all_messages(channel="delete/list", query=..., mode=..., filters=...)` を発行し、不変データと `RequestHandle` を対応付ける
-  - [ ] 結果・失敗・キャンセルを専用トークン（例: `_delete_list_token`）とチャネル・`request_id` の一致で受信し、エクスポートや新しい要求へ干渉させない（F-11）
-  - [ ] 一致した成功結果でもトークンの `is_cancelled` を確認し、取消済みならドライランへ渡さずキャンセル終了処理する。取消済みの同要求の失敗もキャンセル終了を優先し、遅延通知・重複通知で現在の状態を再変更しない
-  - [ ] 確定条件で `select_delete_scope(..., limit=固定上限)` → `sync_worker.dry_run_remote_delete(scope.message_ids + scope.flagged_message_ids + scope.non_deletable_message_ids, ..., folder_id=開始時のフォルダID, exclude_flagged=確定設定, scope=scope)` へ渡す。結果受信時のGUI選択・現在設定は参照しない
-  - [ ] ドライランへの引渡し・失敗・キャンセル・0件終了の各経路で一覧取得用トークンと不変データを解放し、ステータスとキャンセルボタンを更新する。手動選択削除と一時状態を共有しない
-  - [ ] 既存の `_show_delete_dry_run_result` へ合流させる。結果生成後の除外設定・集計・固定上限は `result` とその `scope` だけから取得し、そのまま `execute_remote_delete` へ渡す。`scope` ありなら現在設定の上限を読み直さず、手動選択の上限処理は変更しない（D-12）
-- [ ] `_update_remote_delete_action`・新アクションの起動ガード・`_begin_export` に相互排他を追加する。削除一覧取得中の手動削除・エクスポート・別の一覧削除と、エクスポート一覧取得中の新削除を拒否する（F-12）
-- [ ] `_cancel_current_operation` と `has_active_operations()` に新トークンを追加し、キャンセル・ストレージ解放前判定へ含める。状態遷移時にアクションを再評価する
-- [ ] 一覧取得中のキャンセル（既存のキャンセルボタン）で処理が止まり、何も削除されないことを確認する
-- [ ] `DeleteDryRunDialog` 上部に2.3節の件数と上限超過注意を表示する。取得時集計は `result.scope`、最終除外数は `result.exclusions`、検証後の対象数は `result.candidate_count` を使う（`scope is None` なら従来表示）
-- [ ] `scope` ありのドライラン表を `QTableView` と `QAbstractTableModel` にし、候補・除外のタプルを参照して要求されたセルだけ値を生成する（F-13）。既存ダイアログ内または適切な既存モデル配置を使い、不必要にファイルを増やさない
-  - [ ] 全行セルの事前生成・全行列幅走査を避ける。固定幅・伸長または限定サンプルで列幅を決め、CSV保存は表示範囲にかかわらず全候補・全除外を対象とする
-  - [ ] 候補1,000件・除外100,000件で結果受信・集計・初期表示時間とメモリを計測し、スクロール・閉じる操作への応答とともに記録する。手動選択の従来表示・操作は維持する
+- [x] `strings.py` に新アクション名・条件と設定上限・2.3節の件数表示・無効化理由（「フォルダを選択してください」を含む）・上限超過と継続的な失敗への注意・除外理由ラベル（`remote_state_not_deletable` / `flagged` / `flagged_on_server` / `flag_unverified` / `uidvalidity_mismatch`）を追加・整備する
+- [x] `delete_remote_dialog.py` に `DeleteByListOptionsDialog` を追加する
+  - [x] 現在の一覧条件の要約（フォルダ名・期間・検索語・検索モード・添付有無）と設定上限を読み取り専用で表示する。取得前の件数は表示しない
+  - [x] 「スター付きを除外」チェックボックス（既定ON）。OFFにした場合は警告文を表示する
+  - [x] 承認時に `exclude_flagged` を返す
+- [x] `main_window.py` に `delete_remote_by_list_action` を追加し、ファイルメニューへ登録する（右クリックメニュー・ツールバーには置かない。D-2）
+- [x] 有効化条件（D-9・F-9）を `_update_remote_delete_action` と同じ更新タイミングで反映し、無効時の理由をツールチップに出す
+  - [x] Gmailラベル解除の可否は選択フォルダのアカウントから判定し、行選択を要求しない。既存の手動選択経路は変更しない
+- [x] 押下ハンドラを実装する
+  - [x] オプション承認時に、表示したフォルダID・検索語・検索モード・フィルタ・`delete_batch_limit` と承認した除外設定をpresentation層の `frozen=True` のデータクラスへ固定する
+  - [x] 確定条件で `query_worker.list_all_messages(channel="delete/list", query=..., mode=..., filters=...)` を発行し、不変データと `RequestHandle` を対応付ける
+  - [x] 結果・失敗・キャンセルを専用トークン（例: `_delete_list_token`）とチャネル・`request_id` の一致で受信し、エクスポートや新しい要求へ干渉させない（F-11）
+  - [x] 一致した成功結果でもトークンの `is_cancelled` を確認し、取消済みならドライランへ渡さずキャンセル終了処理する。取消済みの同要求の失敗もキャンセル終了を優先し、遅延通知・重複通知で現在の状態を再変更しない
+  - [x] 確定条件で `select_delete_scope(..., limit=固定上限)` → `sync_worker.dry_run_remote_delete(scope.message_ids + scope.flagged_message_ids + scope.non_deletable_message_ids, ..., folder_id=開始時のフォルダID, exclude_flagged=確定設定, scope=scope)` へ渡す。結果受信時のGUI選択・現在設定は参照しない
+  - [x] ドライランへの引渡し・失敗・キャンセル・0件終了の各経路で一覧取得用トークンと不変データを解放し、ステータスとキャンセルボタンを更新する。手動選択削除と一時状態を共有しない
+  - [x] 既存の `_show_delete_dry_run_result` へ合流させる。結果生成後の除外設定・集計・固定上限は `result` とその `scope` だけから取得し、そのまま `execute_remote_delete` へ渡す。`scope` ありなら現在設定の上限を読み直さず、手動選択の上限処理は変更しない（D-12）
+- [x] `_update_remote_delete_action`・新アクションの起動ガード・`_begin_export` に相互排他を追加する。削除一覧取得中の手動削除・エクスポート・別の一覧削除と、エクスポート一覧取得中の新削除を拒否する（F-12）
+- [x] `_cancel_current_operation` と `has_active_operations()` に新トークンを追加し、キャンセル・ストレージ解放前判定へ含める。状態遷移時にアクションを再評価する
+- [x] 一覧取得中のキャンセル（既存のキャンセルボタン）で処理が止まり、何も削除されないことを確認する
+- [x] `DeleteDryRunDialog` 上部に2.3節の件数と上限超過注意を表示する。取得時集計は `result.scope`、最終除外数は `result.exclusions`、検証後の対象数は `result.candidate_count` を使う（`scope is None` なら従来表示）
+- [x] `scope` ありのドライラン表を `QTableView` と `QAbstractTableModel` にし、候補・除外のタプルを参照して要求されたセルだけ値を生成する（F-13）。既存ダイアログ内または適切な既存モデル配置を使い、不必要にファイルを増やさない
+  - [x] 全行セルの事前生成・全行列幅走査を避ける。固定幅・伸長または限定サンプルで列幅を決め、CSV保存は表示範囲にかかわらず全候補・全除外を対象とする
+  - [x] 候補1,000件・除外100,000件で結果受信・集計・初期表示時間とメモリを計測し、スクロール・閉じる操作への応答とともに記録する。手動選択の従来表示・操作は維持する。表示初期化・集計は0.132秒、Pythonヒープピーク0.01 MiB（tracemalloc、Qtネイティブメモリ除外）。スクロールと閉じる操作を確認
 
 ### **Group D: テスト**
 

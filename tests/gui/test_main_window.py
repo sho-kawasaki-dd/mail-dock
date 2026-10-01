@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,7 +8,7 @@ from typing import Any, cast
 
 import pytest
 from PySide6.QtCore import QItemSelectionModel
-from PySide6.QtWidgets import QSplitter
+from PySide6.QtWidgets import QDialog, QSplitter, QToolBar
 
 from mail_dock import config
 from mail_dock.domain.fetcher import CancelToken
@@ -187,6 +188,23 @@ def _summary(message_id: int = 1) -> MessageSummary:
     )
 
 
+def _select_mail_folder_with_messages(window: MainWindow) -> None:
+    repository = _Repository()
+    window._update_folder_tree(
+        FolderTreeSnapshot(
+            accounts=tuple(repository.list_accounts()),
+            folders=tuple(repository.list_folders("account-1")),
+            pst_imports=(),
+        )
+    )
+    index = window.folder_tree_model.index_for_key("folder:10")
+    selection_model = window.folder_tree_view.selectionModel()
+    assert selection_model is not None
+    selection_model.setCurrentIndex(index, QItemSelectionModel.SelectionFlag.ClearAndSelect)
+    window.message_table_model.show_thread((_summary(),))
+    window._update_message_actions()
+
+
 def test_main_window_builds_three_panes_and_prevents_sync_reentry(qtbot: Any) -> None:
     context = _Context()
     window = MainWindow(cast(Any, context))
@@ -270,6 +288,7 @@ def test_pst_selection_hides_remote_actions_and_mail_selection_restores_them(
     )
     assert not window.sync_action.isVisible()
     assert not window.delete_remote_action.isVisible()
+    assert not window.delete_remote_by_list_action.isVisible()
 
     selection_model.setCurrentIndex(
         mail_index,
@@ -352,6 +371,302 @@ def test_remote_delete_is_disabled_until_trash_folder_is_known(qtbot: Any) -> No
     window.stop_workers()
 
 
+def test_delete_by_list_action_is_file_menu_only_and_requires_active_folder_list(
+    qtbot: Any,
+) -> None:
+    context = _Context(profile={"encryption": "unknown", "capability_level": "ok"})
+    context.remote_trash_folder = "Trash"
+    window = MainWindow(cast(Any, context))
+    qtbot.addWidget(window)
+
+    assert not window.delete_remote_by_list_action.isEnabled()
+    assert window.delete_remote_by_list_action.toolTip() == strings.REMOTE_DELETE_DISABLED_NO_FOLDER
+    file_menu_action = next(
+        action
+        for action in window.menuBar().actions()
+        if action.text() == strings.MAIN_MENU_FILE
+    )
+    file_menu = file_menu_action.menu()
+    assert file_menu is not None
+    assert window.delete_remote_by_list_action in file_menu.actions()
+    toolbar = window.findChild(QToolBar, "mainToolBar")
+    assert toolbar is not None
+    assert window.delete_remote_by_list_action not in toolbar.actions()
+
+    _select_mail_folder_with_messages(window)
+    assert window.delete_remote_by_list_action.isEnabled()
+
+    account_index = window.folder_tree_model.index_for_key("account:account-1")
+    selection_model = window.folder_tree_view.selectionModel()
+    assert selection_model is not None
+    selection_model.setCurrentIndex(account_index, QItemSelectionModel.SelectionFlag.ClearAndSelect)
+    assert not window.delete_remote_by_list_action.isEnabled()
+    assert window.delete_remote_by_list_action.toolTip() == strings.REMOTE_DELETE_DISABLED_NO_FOLDER
+
+    _select_mail_folder_with_messages(window)
+    window.message_table_model.show_thread(())
+    window._update_message_actions()
+    assert not window.delete_remote_by_list_action.isEnabled()
+    assert (
+        window.delete_remote_by_list_action.toolTip()
+        == strings.REMOTE_DELETE_DISABLED_EMPTY_LIST
+    )
+
+    window.message_table_model.show_thread((_summary(),))
+    window._storage_write_gate.state = StorageState.DETACHED
+    window._update_message_actions()
+    assert not window.delete_remote_by_list_action.isEnabled()
+    assert window.delete_remote_by_list_action.toolTip() == strings.REMOTE_DELETE_DISABLED_STORAGE
+
+    window._storage_write_gate.state = StorageState.ATTACHED
+    window.message_list_viewmodel._filters = replace(
+        window.message_list_viewmodel.filters,
+        local_states=frozenset({"trashed"}),
+    )
+    window._update_message_actions()
+    assert not window.delete_remote_by_list_action.isEnabled()
+    assert (
+        window.delete_remote_by_list_action.toolTip()
+        == strings.REMOTE_DELETE_DISABLED_LOCAL_TRASH
+    )
+    window.stop_workers()
+
+
+def test_gmail_list_delete_uses_selected_folder_account_without_row_selection(qtbot: Any) -> None:
+    class _GoogleRepository(_Repository):
+        def list_accounts(self) -> list[dict[str, object]]:
+            return [{"id": "account-1", "display_name": "仕事", "oauth_provider": "google"}]
+
+    class _GoogleContext(_Context):
+        @staticmethod
+        def create_message_repository() -> BaseMessageRepository:
+            return cast(BaseMessageRepository, _GoogleRepository())
+
+    context = _GoogleContext(profile={"encryption": "unknown", "capability_level": "ok"})
+    context.settings = replace(context.settings, remote_delete_mode="remove_membership")
+    window = MainWindow(cast(Any, context))
+    qtbot.addWidget(window)
+    _select_mail_folder_with_messages(window)
+
+    assert not window._selected_message_ids()
+    assert window.delete_remote_by_list_action.isEnabled()
+    window.stop_workers()
+
+
+def test_delete_by_list_freezes_scope_options_and_uses_fixed_batch_limit(
+    qtbot: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _Context(profile={"encryption": "unknown", "capability_level": "ok"})
+    context.remote_trash_folder = "Trash"
+    context.settings = replace(context.settings, delete_batch_limit=1)
+    window = MainWindow(cast(Any, context))
+    qtbot.addWidget(window)
+    _select_mail_folder_with_messages(window)
+    window.message_list_viewmodel.set_search_query("請求書")
+    window.message_list_viewmodel.set_search_mode("or")
+    window.message_list_viewmodel._filters = replace(
+        window.message_list_viewmodel.filters,
+        date_from=datetime(2026, 1, 1, tzinfo=UTC),
+        has_attachment=True,
+    )
+    window.message_table_model.show_thread((_summary(),))
+    window._update_message_actions()
+
+    dialog_arguments: list[dict[str, object]] = []
+
+    class _OptionsDialog:
+        exclude_flagged = True
+
+        def __init__(self, **kwargs: object) -> None:
+            dialog_arguments.append(kwargs)
+
+        def exec(self) -> QDialog.DialogCode:
+            return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(
+        "mail_dock.presentation.views.main_window.DeleteByListOptionsDialog",
+        _OptionsDialog,
+    )
+    token = CancelToken()
+    list_calls: list[dict[str, object]] = []
+
+    def list_all_messages(**kwargs: object) -> SimpleNamespace:
+        list_calls.append(kwargs)
+        return SimpleNamespace(channel="delete/list", request_id=7, token=token)
+
+    dry_run_calls: list[dict[str, object]] = []
+
+    def dry_run_remote_delete(
+        message_ids: tuple[int, ...],
+        _storage: object,
+        **kwargs: object,
+    ) -> CancelToken:
+        dry_run_calls.append({"message_ids": message_ids, **kwargs})
+        return CancelToken()
+
+    cast(Any, window.query_worker).list_all_messages = list_all_messages
+    cast(Any, window.sync_worker).dry_run_remote_delete = dry_run_remote_delete
+
+    assert window.delete_remote_by_list_action.isEnabled(), (
+        window.delete_remote_by_list_action.toolTip()
+    )
+    window._start_remote_delete_by_list()
+    assert window.has_active_operations()
+    assert not window.delete_remote_by_list_action.isEnabled()
+    assert list_calls[0]["channel"] == "delete/list"
+    assert list_calls[0]["query"] == "請求書"
+    assert list_calls[0]["mode"] == "or"
+    assert list_calls[0]["filters"].folder_ids == (10,)
+    assert dialog_arguments[0]["delete_batch_limit"] == 1
+
+    window.message_list_viewmodel.set_search_query("changed")
+    window.message_list_viewmodel.set_search_mode("and")
+    window._show_delete_list_result(
+        SimpleNamespace(
+            channel="delete/list",
+            request_id=7,
+            value=(_summary(3), _summary(4)),
+        )
+    )
+
+    assert len(dry_run_calls) == 1
+    assert dry_run_calls[0]["message_ids"] == (3,)
+    assert dry_run_calls[0]["folder_id"] == 10
+    assert dry_run_calls[0]["exclude_flagged"] is True
+    assert dry_run_calls[0]["scope"].delete_batch_limit == 1
+    assert window.has_active_operations()
+    window.stop_workers()
+
+
+def test_cancelled_delete_list_rejects_late_success_and_stale_request_ids(
+    qtbot: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _Context(profile={"encryption": "unknown", "capability_level": "ok"})
+    context.remote_trash_folder = "Trash"
+    window = MainWindow(cast(Any, context))
+    qtbot.addWidget(window)
+    _select_mail_folder_with_messages(window)
+
+    class _OptionsDialog:
+        exclude_flagged = True
+
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def exec(self) -> QDialog.DialogCode:
+            return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(
+        "mail_dock.presentation.views.main_window.DeleteByListOptionsDialog",
+        _OptionsDialog,
+    )
+    token = CancelToken()
+    cast(Any, window.query_worker).list_all_messages = lambda **_kwargs: SimpleNamespace(
+        channel="delete/list",
+        request_id=11,
+        token=token,
+    )
+    dry_run_calls: list[bool] = []
+    cast(Any, window.sync_worker).dry_run_remote_delete = lambda *_args, **_kwargs: (
+        dry_run_calls.append(True) or CancelToken()
+    )
+
+    window._start_remote_delete_by_list()
+    window._show_delete_list_result(
+        SimpleNamespace(channel="delete/list", request_id=10, value=(_summary(),))
+    )
+    assert window._delete_list_request is not None
+    window._cancel_current_operation()
+    window._show_delete_list_result(
+        SimpleNamespace(channel="delete/list", request_id=11, value=(_summary(),))
+    )
+    assert dry_run_calls == []
+    assert window._delete_list_request is None
+    assert window._status_label.text() == strings.STATUS_REMOTE_DELETE_LIST_CANCELLED
+    window._show_delete_list_result(
+        SimpleNamespace(channel="delete/list", request_id=11, value=(_summary(),))
+    )
+    assert dry_run_calls == []
+    window.stop_workers()
+
+
+def test_delete_and_export_list_requests_are_mutually_exclusive(
+    qtbot: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _Context(profile={"encryption": "unknown", "capability_level": "ok"})
+    context.remote_trash_folder = "Trash"
+    window = MainWindow(cast(Any, context))
+    qtbot.addWidget(window)
+    _select_mail_folder_with_messages(window)
+
+    options_calls: list[bool] = []
+
+    class _OptionsDialog:
+        exclude_flagged = True
+
+        def __init__(self, **_kwargs: object) -> None:
+            options_calls.append(True)
+
+        def exec(self) -> QDialog.DialogCode:
+            return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(
+        "mail_dock.presentation.views.main_window.DeleteByListOptionsDialog",
+        _OptionsDialog,
+    )
+    tokens = [CancelToken(), CancelToken()]
+    request_ids = iter((21, 22))
+    cast(Any, window.query_worker).list_all_messages = lambda **kwargs: SimpleNamespace(
+        channel=kwargs.get("channel", "export/list"),
+        request_id=next(request_ids),
+        token=tokens[0] if kwargs.get("channel") == "delete/list" else tokens[1],
+    )
+    monkeypatch.setattr(
+        "mail_dock.presentation.views.main_window.QFileDialog.getSaveFileName",
+        lambda *_args, **_kwargs: ("messages.mbox", ""),
+    )
+    export_choice_calls: list[bool] = []
+    monkeypatch.setattr(
+        window,
+        "_choose_export_message_ids",
+        lambda: export_choice_calls.append(True) or (),
+    )
+    dry_run_calls: list[bool] = []
+    cast(Any, window.sync_worker).dry_run_remote_delete = lambda *_args, **_kwargs: (
+        dry_run_calls.append(True) or CancelToken()
+    )
+
+    window._start_remote_delete_by_list()
+    window._begin_export("mbox")
+    window.message_list_view.selectionModel().select(
+        window.message_table_model.index(0, 0),
+        QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
+    )
+    window.delete_remote_action.setEnabled(True)
+    window._start_remote_delete()
+    assert export_choice_calls == []
+    assert dry_run_calls == []
+
+    window._cancel_current_operation()
+    window._show_delete_list_cancelled(
+        SimpleNamespace(channel="delete/list", request_id=21)
+    )
+    window._begin_export("mbox")
+    assert export_choice_calls == [True]
+    window._start_remote_delete_by_list()
+    assert len(options_calls) == 1
+    assert not window.delete_remote_by_list_action.isEnabled()
+
+    window._cancel_current_operation()
+    window._show_export_list_cancelled(
+        SimpleNamespace(channel="export/list", request_id=22)
+    )
+    window.stop_workers()
+
+
 def test_remote_delete_result_reloads_message_list(
     qtbot: Any,
     monkeypatch: pytest.MonkeyPatch,
@@ -416,7 +731,11 @@ def test_export_current_list_loads_all_messages_before_dispatch(
 
     def list_all_messages(**kwargs: object) -> SimpleNamespace:
         list_calls.append(kwargs)
-        return SimpleNamespace(token=CancelToken())
+        return SimpleNamespace(
+            channel="export/list",
+            request_id=1,
+            token=CancelToken(),
+        )
 
     def export_mbox(*, message_ids: tuple[int, ...], dest_path: Path) -> CancelToken:
         del dest_path
@@ -428,7 +747,11 @@ def test_export_current_list_loads_all_messages_before_dispatch(
 
     window._begin_export("mbox")
     window._show_export_list_result(
-        SimpleNamespace(channel="export/list", value=(_summary(3), _summary(4)))
+        SimpleNamespace(
+            channel="export/list",
+            request_id=1,
+            value=(_summary(3), _summary(4)),
+        )
     )
 
     assert list_calls == [
