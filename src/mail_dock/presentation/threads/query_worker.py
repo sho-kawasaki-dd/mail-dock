@@ -217,11 +217,12 @@ class QueryWorker(Worker):
         query: str = "",
         mode: SearchMode = "and",
         filters: MessageFilter | None = None,
+        channel: Literal["export/list", "delete/list"] = "export/list",
     ) -> RequestHandle:
-        """Queue a cancellable full result-set read for an export operation."""
+        """Queue a cancellable full result-set read for export or deletion."""
 
         return self._queue(
-            "export/list",
+            channel,
             lambda repository, token: list_all_messages(
                 repository,
                 query=query,

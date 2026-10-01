@@ -27,3 +27,14 @@ def test_cancel_and_finish_preserve_channel_generations() -> None:
     state.finish(request)
     assert state.current("count/thread") is None
     assert not state.is_current("count/thread", request.request_id)
+
+
+def test_delete_list_channel_is_registered_and_independent_from_export() -> None:
+    state = RequestState()
+
+    export = state.issue("export/list")
+    deletion = state.issue("delete/list")
+
+    assert not export.token.is_cancelled
+    assert state.current("export/list") == export
+    assert state.current("delete/list") == deletion

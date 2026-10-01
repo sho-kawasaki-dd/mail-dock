@@ -114,10 +114,10 @@
 
 ### **Group B: ワーカー**
 
-- [ ] `SyncWorker.dry_run_remote_delete()` に `exclude_flagged` / `scope` を追加し、開始時に固定した `folder_id` とともに `dry_run` へ渡す
-- [ ] `SyncWorker.execute_remote_delete()` が `plan.exclude_flagged` と、`scope` ありなら `plan.scope.delete_batch_limit` を読んでアカウント別の `execute` へ渡す（新しいGUI引数は追加しない。手動選択は既存の上限引数を使う）
-- [ ] `RequestChannel` と `RequestState.CHANNELS` に `"delete/list"` を追加し、`QueryWorker.list_all_messages(channel=...)` で指定可能にする。既定値は `"export/list"` を維持する（F-11）
-- [ ] `select_delete_scope` は一覧取得結果を受けた後にGUIスレッドから呼べる軽量処理か、候補1,000件・除外100,000件を含む合成データで確認する。重い場合は既存ワーカー経由にする。表の表示性能はGroup Cでも別途確認する
+- [x] `SyncWorker.dry_run_remote_delete()` に `exclude_flagged` / `scope` を追加し、開始時に固定した `folder_id` とともに `dry_run` へ渡す
+- [x] `SyncWorker.execute_remote_delete()` が `plan.exclude_flagged` と、`scope` ありなら `plan.scope.delete_batch_limit` を読んでアカウント別の `execute` へ渡す（新しいGUI引数は追加しない。手動選択は既存の上限引数を使う）
+- [x] `RequestChannel` と `RequestState.CHANNELS` に `"delete/list"` を追加し、`QueryWorker.list_all_messages(channel=...)` で指定可能にする。既定値は `"export/list"` を維持する（F-11）
+- [x] `select_delete_scope` は一覧取得結果を受けた後にGUIスレッドから呼べる軽量処理か、候補1,000件・除外100,000件を含む合成データで確認する。重い場合は既存ワーカー経由にする。表の表示性能はGroup Cでも別途確認する（101,000件で約0.031秒）
 
 ### **Group C: GUI**
 

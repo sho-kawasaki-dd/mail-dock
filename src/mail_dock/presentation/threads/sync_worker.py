@@ -42,6 +42,7 @@ from mail_dock.usecases.account_guards import is_pst_account
 from mail_dock.usecases.delete_remote import (
     DeleteDryRunResult,
     DeleteResult,
+    DeleteScope,
     dry_run,
     execute,
 )
@@ -853,6 +854,8 @@ class SyncWorker(Worker):
         storage_state: object,
         *,
         folder_id: int | None = None,
+        exclude_flagged: bool = False,
+        scope: DeleteScope | None = None,
     ) -> CancelToken:
         """Build a remote-delete plan without contacting the IMAP server."""
 
@@ -865,6 +868,8 @@ class SyncWorker(Worker):
                     message_ids=message_ids,
                     storage_state=cast(Any, storage_state),
                     folder_id=folder_id,
+                    exclude_flagged=exclude_flagged,
+                    scope=scope,
                 ),
             )
 
@@ -882,6 +887,11 @@ class SyncWorker(Worker):
 
         def operation(_token: CancelToken) -> _SyncTaskResult:
             repository = self._repository_factory()
+            effective_delete_batch_limit = (
+                plan.scope.delete_batch_limit
+                if plan.scope is not None
+                else delete_batch_limit
+            )
             candidates_by_account: dict[str, list[Any]] = {}
             for candidate in plan.candidates:
                 candidates_by_account.setdefault(candidate.account_id, []).append(candidate)
@@ -905,7 +915,8 @@ class SyncWorker(Worker):
                             plan=tuple(candidates),
                             mode=mode,
                             storage_state=cast(Any, storage_state),
-                            delete_batch_limit=delete_batch_limit,
+                            delete_batch_limit=effective_delete_batch_limit,
+                            exclude_flagged=plan.exclude_flagged,
                         )
                 finally:
                     _close_manifest(manifest)

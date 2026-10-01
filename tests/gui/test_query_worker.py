@@ -8,7 +8,12 @@ import pytest
 
 from mail_dock.domain.errors import OperationCancelledError
 from mail_dock.domain.search import BaseSearchRepository, MessageFilter, SearchPage
-from mail_dock.presentation.threads.query_worker import QueryCancelled, QueryFailure, QueryWorker
+from mail_dock.presentation.threads.query_worker import (
+    QueryCancelled,
+    QueryFailure,
+    QueryResult,
+    QueryWorker,
+)
 
 pytestmark = pytest.mark.gui
 
@@ -103,3 +108,52 @@ def test_replacing_one_channel_does_not_cancel_another(qtbot: object) -> None:
     repository.release.set()
     assert _wait_until(lambda: not worker.active_tokens)
     worker.stop()
+
+
+def test_full_list_supports_an_independent_delete_channel(
+    qtbot: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del qtbot
+    export_started = Event()
+    release_export = Event()
+    result_channels: list[str] = []
+    queries: list[str] = []
+
+    def record_result(result: object) -> None:
+        result_channels.append(cast(QueryResult, result).channel)
+
+    def list_everything(_repository: object, **kwargs: object) -> tuple[()]:
+        query = str(kwargs["query"])
+        queries.append(query)
+        if query == "export":
+            export_started.set()
+            assert release_export.wait(2)
+        return ()
+
+    monkeypatch.setattr(
+        "mail_dock.presentation.threads.query_worker.list_all_messages", list_everything
+    )
+    worker = QueryWorker(cast(BaseSearchRepository, object()))
+    worker.result.connect(record_result)
+    worker.start()
+
+    try:
+        export_handle = worker.list_all_messages(query="export")
+        assert _wait_until(export_started.is_set)
+        delete_handle = worker.list_all_messages(query="delete", channel="delete/list")
+
+        assert export_handle.channel == "export/list"
+        assert delete_handle.channel == "delete/list"
+        assert not export_handle.token.is_cancelled
+        assert worker.request_state.current("export/list") == export_handle
+        assert worker.request_state.current("delete/list") == delete_handle
+
+        release_export.set()
+        assert _wait_until(lambda: len(result_channels) == 2)
+    finally:
+        release_export.set()
+        worker.stop()
+
+    assert result_channels == ["export/list", "delete/list"]
+    assert queries == ["export", "delete"]
