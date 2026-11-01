@@ -371,9 +371,7 @@ def test_move_to_trash_returns_copyuid_confirmed_destination(fake_imap: None) ->
 
 
 @pytest.mark.parametrize("operation", ["move", "expunge", "membership"])
-def test_delete_select_checks_uidvalidity_before_mutation(
-    fake_imap: None, operation: str
-) -> None:
+def test_delete_select_checks_uidvalidity_before_mutation(fake_imap: None, operation: str) -> None:
     fetcher = GenericImapFetcher(
         "imap.example.test",
         "user",

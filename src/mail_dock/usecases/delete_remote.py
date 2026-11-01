@@ -735,8 +735,7 @@ def execute(
             try:
                 if fetcher.select_folder(raw_name) != expected_uidvalidity:
                     preflight_skips.update(
-                        (candidate.message_id, "uidvalidity_mismatch")
-                        for candidate in folder_items
+                        (candidate.message_id, "uidvalidity_mismatch") for candidate in folder_items
                     )
                     continue
                 refs = tuple(
