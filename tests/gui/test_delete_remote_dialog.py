@@ -151,9 +151,7 @@ def test_list_options_default_to_flagged_exclusion_and_warn_when_disabled(qtbot:
 def test_scope_dry_run_uses_lazy_table_model_and_localizes_exclusion(qtbot: Any) -> None:
     result = replace(
         _result(),
-        exclusions=(
-            DeleteExclusion(message_id=2, reason="flagged_on_server", subject="Flagged"),
-        ),
+        exclusions=(DeleteExclusion(message_id=2, reason="flagged_on_server", subject="Flagged"),),
         scope=DeleteScope(
             message_ids=(1,),
             flagged_message_ids=(2,),

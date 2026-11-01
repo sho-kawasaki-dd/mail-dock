@@ -888,9 +888,7 @@ class SyncWorker(Worker):
         def operation(_token: CancelToken) -> _SyncTaskResult:
             repository = self._repository_factory()
             effective_delete_batch_limit = (
-                plan.scope.delete_batch_limit
-                if plan.scope is not None
-                else delete_batch_limit
+                plan.scope.delete_batch_limit if plan.scope is not None else delete_batch_limit
             )
             candidates_by_account: dict[str, list[Any]] = {}
             for candidate in plan.candidates:

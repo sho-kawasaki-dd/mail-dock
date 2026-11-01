@@ -1133,9 +1133,7 @@ class MainWindow(QMainWindow):
             self._finish_delete_list_request(user_message(error))
             return
         message_ids = (
-            scope.message_ids
-            + scope.flagged_message_ids
-            + scope.non_deletable_message_ids
+            scope.message_ids + scope.flagged_message_ids + scope.non_deletable_message_ids
         )
         folder_id = request.folder_id
         exclude_flagged = request.exclude_flagged

@@ -345,7 +345,8 @@ DIALOG_REMOTE_DELETE_DRY_RUN_COUNTS = (
     "検証後の対象 {candidates} 件"
 )
 DIALOG_REMOTE_DELETE_DRY_RUN_TRUNCATED_WARNING = (
-    "設定上限を超えたメールは今回の対象外です。失敗が続く場合は原因を解消するか、条件を変更してください。"
+    "設定上限を超えたメールは今回の対象外です。"
+    "失敗が続く場合は原因を解消するか、条件を変更してください。"
 )
 DIALOG_REMOTE_DELETE_REASON_REMOTE_STATE = "削除可能なサーバー状態ではありません"
 DIALOG_REMOTE_DELETE_REASON_FLAGGED = "スター付きのため除外"

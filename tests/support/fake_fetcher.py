@@ -253,9 +253,7 @@ class FakeFetcher(BaseMailFetcher):
         self._check_expected_uidvalidity(raw_name, expected_uidvalidity)
         self._remove_message(raw_name, uid)
 
-    def _check_expected_uidvalidity(
-        self, raw_name: str, expected_uidvalidity: int | None
-    ) -> None:
+    def _check_expected_uidvalidity(self, raw_name: str, expected_uidvalidity: int | None) -> None:
         if (
             expected_uidvalidity is not None
             and self.select_folder(raw_name) != expected_uidvalidity

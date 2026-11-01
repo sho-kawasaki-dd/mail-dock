@@ -219,9 +219,7 @@ class DeleteFetcher(FakeFetcher):
         self.calls.append((raw_name, uid, "remove_membership"))
         if self.transient:
             raise TransientError("connection dropped after command was sent")
-        super().remove_remote_membership(
-            raw_name, uid, expected_uidvalidity=expected_uidvalidity
-        )
+        super().remove_remote_membership(raw_name, uid, expected_uidvalidity=expected_uidvalidity)
 
 
 def _record(
@@ -358,9 +356,7 @@ def test_non_present_messages_do_not_consume_limit_across_delete_batches(
             repository,
             storage,
             message_ids=(
-                scope.message_ids
-                + scope.flagged_message_ids
-                + scope.non_deletable_message_ids
+                scope.message_ids + scope.flagged_message_ids + scope.non_deletable_message_ids
             ),
             storage_state=state,
             folder_id=1,

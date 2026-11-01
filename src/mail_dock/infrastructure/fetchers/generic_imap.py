@@ -378,10 +378,7 @@ class GenericImapFetcher(BaseMailFetcher):
             raise ValueError("uids must contain only positive integers")
         token = cancel if cancel is not None else CancelToken()
         selected_uidvalidity = self.select_folder(raw_name)
-        if (
-            expected_uidvalidity is not None
-            and selected_uidvalidity != expected_uidvalidity
-        ):
+        if expected_uidvalidity is not None and selected_uidvalidity != expected_uidvalidity:
             raise UidValidityChanged(f"UIDVALIDITY changed for folder {raw_name}")
         requested_uid_set = set(requested_uids)
         for offset in range(0, len(requested_uids), _FETCH_CHUNK_SIZE):

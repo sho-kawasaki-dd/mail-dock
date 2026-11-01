@@ -408,8 +408,7 @@ def test_delete_by_list_action_is_file_menu_only_and_requires_active_folder_list
     window._update_message_actions()
     assert not window.delete_remote_by_list_action.isEnabled()
     assert (
-        window.delete_remote_by_list_action.toolTip()
-        == strings.REMOTE_DELETE_DISABLED_EMPTY_LIST
+        window.delete_remote_by_list_action.toolTip() == strings.REMOTE_DELETE_DISABLED_EMPTY_LIST
     )
 
     window.message_table_model.show_thread((_summary(),))
@@ -426,8 +425,7 @@ def test_delete_by_list_action_is_file_menu_only_and_requires_active_folder_list
     window._update_message_actions()
     assert not window.delete_remote_by_list_action.isEnabled()
     assert (
-        window.delete_remote_by_list_action.toolTip()
-        == strings.REMOTE_DELETE_DISABLED_LOCAL_TRASH
+        window.delete_remote_by_list_action.toolTip() == strings.REMOTE_DELETE_DISABLED_LOCAL_TRASH
     )
     window.stop_workers()
 
@@ -572,6 +570,7 @@ def test_cancelled_delete_list_rejects_late_success_and_stale_request_ids(
         token=tokens[0] if not tokens[0].is_cancelled else tokens[1],
     )
     dry_run_calls: list[bool] = []
+
     def dry_run_remote_delete(*_args: object, **_kwargs: object) -> CancelToken:
         dry_run_calls.append(True)
         return CancelToken()
@@ -647,6 +646,7 @@ def test_delete_and_export_list_requests_are_mutually_exclusive(
         lambda *_args, **_kwargs: ("messages.mbox", ""),
     )
     export_choice_calls: list[bool] = []
+
     def choose_export_message_ids() -> tuple[int, ...]:
         export_choice_calls.append(True)
         return ()
@@ -672,9 +672,7 @@ def test_delete_and_export_list_requests_are_mutually_exclusive(
     assert dry_run_calls == []
 
     window._cancel_current_operation()
-    window._show_delete_list_cancelled(
-        SimpleNamespace(channel="delete/list", request_id=21)
-    )
+    window._show_delete_list_cancelled(SimpleNamespace(channel="delete/list", request_id=21))
     window._begin_export("mbox")
     assert export_choice_calls == [True]
     window._start_remote_delete_by_list()
@@ -682,9 +680,7 @@ def test_delete_and_export_list_requests_are_mutually_exclusive(
     assert not window.delete_remote_by_list_action.isEnabled()
 
     window._cancel_current_operation()
-    window._show_export_list_cancelled(
-        SimpleNamespace(channel="export/list", request_id=22)
-    )
+    window._show_export_list_cancelled(SimpleNamespace(channel="export/list", request_id=22))
     window.stop_workers()
 
 
